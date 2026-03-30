@@ -1,0 +1,20 @@
+# Swift / SPM
+.build/
+*.o
+*.d
+
+# Xcode
+*.xcodeproj/
+xcuserdata/
+.swiftpm/
+
+# Build artifacts (local)
+build/
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Editor
+.idea/
+*.swp
