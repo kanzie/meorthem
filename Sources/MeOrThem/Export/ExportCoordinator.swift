@@ -12,6 +12,7 @@ final class ExportCoordinator {
     }
 
     func exportCSV() {
+        NSApp.activate(ignoringOtherApps: true)
         let panel = makeSavePanel(name: "Me-Or-Them-Report.csv", types: ["public.comma-separated-values-text", "csv"])
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let csv = CSVExporter.export(store: store, targets: settings.pingTargets)
@@ -19,9 +20,10 @@ final class ExportCoordinator {
     }
 
     func exportPDF() {
+        NSApp.activate(ignoringOtherApps: true)
         let panel = makeSavePanel(name: "Me-Or-Them-Report.pdf", types: ["com.adobe.pdf"])
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        let doc = PDFExporter.export(store: store, targets: settings.pingTargets)
+        let doc = PDFExporter.export(store: store, targets: settings.pingTargets, thresholds: settings.thresholds)
         doc.write(to: url)
     }
 

@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Generates AppIcon.icns using a Swift one-liner + sips + iconutil
+# Generates AppIcon.icns using Swift (preferred) or Python3 fallback + sips + iconutil
 set -euo pipefail
 
 DEST="${1:-.}"
+mkdir -p "$DEST"
 ICONSET_DIR="/tmp/MeOrThem.iconset"
 SWIFT_ICON_SCRIPT="/tmp/gen_icon.swift"
+PYTHON_ICON_SCRIPT="/tmp/gen_icon.py"
+SOURCE_PNG="$ICONSET_DIR/icon_source_1024.png"
 
 mkdir -p "$ICONSET_DIR"
 
-# Write a Swift script that draws the icon
+# ── Attempt 1: Swift (rich icon) ─────────────────────────────────────────────
+generate_with_swift() {
 cat > "$SWIFT_ICON_SCRIPT" << 'SWIFT_EOF'
 import AppKit
 import CoreGraphics
@@ -68,49 +72,112 @@ func drawIcon(size: Int) -> NSImage {
     return image
 }
 
-let sizes = [16, 32, 64, 128, 256, 512, 1024]
 let iconsetDir = CommandLine.arguments[1]
-
-for sz in sizes {
-    let img = drawIcon(size: sz)
-    let scale1x = sz
-    // Convert via tiffRepresentation to get a proper NSBitmapImageRep
-    if let tiff = img.tiffRepresentation,
-       let bitmap = NSBitmapImageRep(data: tiff),
-       let data = bitmap.representation(using: .png, properties: [:]) {
-        let url = URL(fileURLWithPath: "\(iconsetDir)/icon_\(scale1x)x\(scale1x).png")
-        try! data.write(to: url)
-    }
+let img = drawIcon(size: 1024)
+if let tiff = img.tiffRepresentation,
+   let bitmap = NSBitmapImageRep(data: tiff),
+   let data = bitmap.representation(using: .png, properties: [:]) {
+    let url = URL(fileURLWithPath: "\(iconsetDir)/icon_source_1024.png")
+    try! data.write(to: url)
+    print("Swift icon generated")
 }
-print("Icons generated in \(iconsetDir)")
 SWIFT_EOF
 
-# Run the Swift script to generate PNGs
-swift "$SWIFT_ICON_SCRIPT" "$ICONSET_DIR" 2>/dev/null || {
-    echo "  ⚠️  Icon generation failed (non-fatal), using default icon."
-    exit 0
+    swift "$SWIFT_ICON_SCRIPT" "$ICONSET_DIR" 2>/dev/null
+    return $?
 }
 
-# Use sips to generate all required sizes from the 1024 source
-SOURCE="$ICONSET_DIR/icon_1024x1024.png"
-if [ ! -f "$SOURCE" ]; then
+# ── Attempt 2: Python3 (simple gradient icon) ─────────────────────────────────
+generate_with_python() {
+cat > "$PYTHON_ICON_SCRIPT" << 'PYTHON_EOF'
+import struct, zlib, sys, math
+
+def make_png(size):
+    w, h = size, size
+    rows = []
+    for y in range(h):
+        row = [0]  # filter type
+        for x in range(w):
+            # Dark background circle with green ring
+            cx, cy = w / 2, h / 2
+            r = math.sqrt((x - cx) ** 2 + (y - cy) ** 2)
+            maxR = w * 0.48
+            ringW = w * 0.04
+            if r < maxR - ringW:
+                # Interior: dark navy
+                t = r / (maxR - ringW)
+                rv = int(18 + t * 8)
+                gv = int(18 + t * 8)
+                bv = int(28 + t * 10)
+                av = 255 if r < maxR - ringW * 0.5 else 200
+            elif r < maxR:
+                # Ring: green
+                rv, gv, bv, av = 46, 243, 108, 255
+            else:
+                rv, gv, bv, av = 0, 0, 0, 0
+            row.extend([rv, gv, bv, av])
+        rows.append(bytes(row))
+
+    raw = b''.join(rows)
+    compressed = zlib.compress(raw, 9)
+
+    def chunk(tag, data):
+        c = struct.pack('>I', len(data)) + tag + data
+        crc = zlib.crc32(tag + data) & 0xffffffff
+        return c + struct.pack('>I', crc)
+
+    png = b'\x89PNG\r\n\x1a\n'
+    png += chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0))
+    png += chunk(b'IDAT', compressed)
+    png += chunk(b'IEND', b'')
+    return png
+
+dest = sys.argv[1]
+size = 1024
+data = make_png(size)
+with open(f"{dest}/icon_source_1024.png", "wb") as f:
+    f.write(data)
+print("Python icon generated")
+PYTHON_EOF
+
+    python3 "$PYTHON_ICON_SCRIPT" "$ICONSET_DIR" 2>/dev/null
+    return $?
+}
+
+# ── Generate source PNG ───────────────────────────────────────────────────────
+echo "  Generating source icon..."
+if generate_with_swift; then
+    echo "  ✅  Icon generated via Swift"
+elif generate_with_python; then
+    echo "  ✅  Icon generated via Python3"
+else
+    echo "  ⚠️  Icon generation failed (non-fatal), app will use default icon."
+    rm -rf "$ICONSET_DIR" "$SWIFT_ICON_SCRIPT" "$PYTHON_ICON_SCRIPT" 2>/dev/null
+    exit 0
+fi
+
+# Verify source exists
+if [ ! -f "$SOURCE_PNG" ]; then
     echo "  ⚠️  Source icon not found, skipping icns generation."
     exit 0
 fi
 
-# Generate all required icon sizes
+# ── Resize to all required iconset sizes using sips ──────────────────────────
 for SIZE in 16 32 128 256 512; do
-    sips -z $SIZE $SIZE "$SOURCE" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}.png" 2>/dev/null
     DOUBLE=$((SIZE * 2))
-    sips -z $DOUBLE $DOUBLE "$SOURCE" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}@2x.png" 2>/dev/null
+    sips -z "$SIZE" "$SIZE"     "$SOURCE_PNG" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}.png"     2>/dev/null
+    sips -z "$DOUBLE" "$DOUBLE" "$SOURCE_PNG" --out "$ICONSET_DIR/icon_${SIZE}x${SIZE}@2x.png" 2>/dev/null
 done
-# 512@2x = 1024
-cp "$SOURCE" "$ICONSET_DIR/icon_512x512@2x.png"
+# 512@2x = 1024 (copy source)
+cp "$SOURCE_PNG" "$ICONSET_DIR/icon_512x512@2x.png"
 
-# Convert to .icns
+# Remove source PNG from iconset (iconutil rejects non-standard filenames)
+rm -f "$SOURCE_PNG"
+
+# ── Convert iconset to icns ───────────────────────────────────────────────────
 iconutil --convert icns "$ICONSET_DIR" --output "$DEST/AppIcon.icns" 2>/dev/null && \
-    echo "  ✅  AppIcon.icns generated" || \
-    echo "  ⚠️  iconutil failed, app will use default icon"
+    echo "  ✅  AppIcon.icns written to $DEST" || \
+    echo "  ⚠️  iconutil failed — app will use default icon"
 
 # Cleanup
-rm -rf "$ICONSET_DIR" "$SWIFT_ICON_SCRIPT"
+rm -rf "$ICONSET_DIR" "$SWIFT_ICON_SCRIPT" "$PYTHON_ICON_SCRIPT" 2>/dev/null

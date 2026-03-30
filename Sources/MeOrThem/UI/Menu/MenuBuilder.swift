@@ -13,11 +13,12 @@ enum MenuBuilder {
     }
 
     // Tags for items updated during live refresh
-    static let tagLatency    = 1
-    static let tagPacketLoss = 2
-    static let tagJitter     = 3
-    static let tagCountdown  = 4
-    static let tagTargetBase = 100   // tagTargetBase + index per target
+    static let tagLatency        = 1
+    static let tagPacketLoss     = 2
+    static let tagJitter         = 3
+    static let tagCountdown      = 4
+    static let tagNetworkDetails = 5
+    static let tagTargetBase     = 100   // tagTargetBase + index per target
 
     @MainActor
     static func rebuild(_ menu: NSMenu, environment env: AppEnvironment, actions: Actions) {
@@ -66,7 +67,9 @@ enum MenuBuilder {
         menu.addItem(.separator())
 
         // MARK: - Network Details submenu
-        menu.addItem(networkDetailsSubmenu(store: store))
+        let netItem = networkDetailsSubmenu(store: store)
+        netItem.tag = tagNetworkDetails
+        menu.addItem(netItem)
         menu.addItem(.separator())
 
         // MARK: - Actions
@@ -136,6 +139,13 @@ enum MenuBuilder {
     }
 
     @MainActor
+    static func refreshNetworkDetails(_ menu: NSMenu, environment env: AppEnvironment) {
+        guard let item = menu.item(withTag: tagNetworkDetails) else { return }
+        let updated = networkDetailsSubmenu(store: env.metricStore)
+        item.submenu = updated.submenu
+    }
+
+    @MainActor
     static func refreshCountdown(_ menu: NSMenu, environment env: AppEnvironment) {
         guard let item = menu.item(withTag: tagLatency) else { return }
         let settings  = env.settings
@@ -158,34 +168,44 @@ enum MenuBuilder {
 
         if let w = store.latestWifi ?? WiFiMonitor.snapshot() {
             // WiFi connection
-            sub.addItem(staticItem("WiFi — \(w.ssid)"))
+            sub.addItem(infoItem("WiFi — \(w.ssid)", bold: true))
             sub.addItem(.separator())
-            if let ip = w.ipAddress   { sub.addItem(staticItem("IP Address:  \(ip)")) }
-            if let gw = w.routerIP    { sub.addItem(staticItem("Router:      \(gw)")) }
-            sub.addItem(staticItem("MAC Address: \(w.macAddress)"))
-            sub.addItem(staticItem("Channel:     \(w.channelDescription)"))
-            sub.addItem(staticItem("RSSI:        \(w.rssi) dBm (\(w.rssiQuality))"))
-            sub.addItem(staticItem("Noise:       \(w.noise) dBm"))
-            sub.addItem(staticItem(String(format: "Tx Rate:     %.3f Mbps", w.txRateMbps)))
-            sub.addItem(staticItem("PHY Mode:    \(w.phyMode)"))
+            if let ip = w.ipAddress   { sub.addItem(infoItem("IP Address:  \(ip)")) }
+            if let gw = w.routerIP    { sub.addItem(infoItem("Router:      \(gw)")) }
+            sub.addItem(infoItem("MAC Address: \(w.macAddress)"))
+            sub.addItem(infoItem("Channel:     \(w.channelDescription)"))
+            sub.addItem(infoItem("RSSI:        \(w.rssi) dBm (\(w.rssiQuality))"))
+            sub.addItem(infoItem("Noise:       \(w.noise) dBm"))
+            sub.addItem(infoItem(String(format: "Tx Rate:     %.3f Mbps", w.txRateMbps)))
+            sub.addItem(infoItem("PHY Mode:    \(w.phyMode)"))
         } else {
             // Ethernet or no network
             let wifiIfaceName = WiFiMonitor.interfaceName()
             if let eth = NetworkInfo.ethernetInfo(excluding: wifiIfaceName) {
-                sub.addItem(staticItem("Ethernet — \(eth.interface)"))
+                sub.addItem(infoItem("Ethernet — \(eth.interface)", bold: true))
                 sub.addItem(.separator())
-                sub.addItem(staticItem("IP Address:  \(eth.ip)"))
+                sub.addItem(infoItem("IP Address:  \(eth.ip)"))
                 if let gw = NetworkInfo.defaultGateway() {
-                    sub.addItem(staticItem("Router:      \(gw)"))
+                    sub.addItem(infoItem("Router:      \(gw)"))
                 }
-                sub.addItem(staticItem("MAC Address: \(eth.mac)"))
+                sub.addItem(infoItem("MAC Address: \(eth.mac)"))
             } else {
-                sub.addItem(staticItem("No network connection"))
+                sub.addItem(infoItem("No network connection"))
             }
         }
 
         parent.submenu = sub
         return parent
+    }
+
+    /// Creates a view-based menu item displaying text in labelColor with no hover highlight.
+    @MainActor
+    private static func infoItem(_ text: String, bold: Bool = false) -> NSMenuItem {
+        let item = NSMenuItem()
+        item.isEnabled = false
+        let view = InfoMenuItemView(text: text, bold: bold)
+        item.view = view
+        return item
     }
 
     // MARK: - Helpers
@@ -248,6 +268,39 @@ enum MenuBuilder {
         if case .running = runner.state { return true }
         return false
     }
+}
+
+// MARK: - InfoMenuItemView: non-hoverable info row with labelColor text
+
+/// A plain NSView-based menu item that shows readable (non-grey) text without hover highlight.
+final class InfoMenuItemView: NSView {
+    private static let font12 = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    private static let font12b = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+
+    init(text: String, bold: Bool = false) {
+        let label = NSTextField(labelWithString: text)
+        label.font = bold ? InfoMenuItemView.font12b : InfoMenuItemView.font12
+        label.textColor = .labelColor
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        let width: CGFloat = 280
+        let size = (text as NSString).boundingRect(
+            with: NSSize(width: width - 28, height: 100),
+            options: .usesLineFragmentOrigin,
+            attributes: [.font: label.font!]
+        )
+        let height = max(20, size.height + 6)
+
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        label.frame = NSRect(x: 14, y: 3, width: width - 20, height: height - 6)
+        addSubview(label)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    // No background drawing → no hover highlight
+    override var isOpaque: Bool { false }
 }
 
 // MARK: - ActionTarget: bridges closures to @objc targets

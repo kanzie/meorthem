@@ -50,12 +50,13 @@ extension MetricStatus {
 }
 
 struct Thresholds: Codable {
-    var latencyYellowMs: Double = 100
-    var latencyRedMs:    Double = 300
-    var lossYellowPct:   Double = 1
-    var lossRedPct:      Double = 5
-    var jitterYellowMs:  Double = 20
-    var jitterRedMs:     Double = 50
+    // Tuned for video conferencing: values where call quality starts to degrade
+    var latencyYellowMs: Double = 100   // noticeable lag on calls
+    var latencyRedMs:    Double = 200   // severe call degradation
+    var lossYellowPct:   Double = 1     // video artifacts begin
+    var lossRedPct:      Double = 3     // calls frequently drop/freeze
+    var jitterYellowMs:  Double = 30    // audio glitches begin
+    var jitterRedMs:     Double = 80    // severe audio/video disruption
 
     static let `default` = Thresholds()
 }

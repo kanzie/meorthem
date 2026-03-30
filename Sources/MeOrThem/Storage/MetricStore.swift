@@ -15,6 +15,7 @@ final class MetricStore: ObservableObject {
     // MARK: - History (read by export + sparklines)
     private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]
     private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kHistoryCapacity)
+    private var statusHistory: CircularBuffer<MetricStatus> = CircularBuffer(capacity: 5)
 
     // MARK: - Settings reference for threshold evaluation
     private let settings: AppSettings
@@ -55,6 +56,11 @@ final class MetricStore: ObservableObject {
         pingHistory[targetID]?.last(n).map(\.lossPercent) ?? []
     }
 
+    /// Returns the last N overall status values in chronological order (oldest first).
+    func recentOverallStatuses(last n: Int = 5) -> [MetricStatus] {
+        statusHistory.last(n)
+    }
+
     // MARK: - Private
 
     private func recomputeOverallStatus() {
@@ -64,6 +70,7 @@ final class MetricStore: ObservableObject {
             if s > worst { worst = s }
         }
         overallStatus = worst
+        statusHistory.append(worst)
     }
 
     // MARK: - Summary for clipboard report
@@ -74,10 +81,16 @@ final class MetricStore: ObservableObject {
         lines.append("")
         lines.append("PING TARGETS")
         for target in targets {
-            if let r = latestPing[target.id] {
-                let rttStr  = r.rtt.map { String(format: "%.1f ms", $0) } ?? "timeout"
-                let jitStr  = r.jitter.map { String(format: "±%.1f ms", $0) } ?? "n/a"
-                lines.append("  \(target.label) (\(target.host)):  \(rttStr)  loss \(String(format: "%.1f%%", r.lossPercent))  jitter \(jitStr)")
+            lines.append("  \(target.label) (\(target.host)):  ")
+            let recent = pingHistory[target.id]?.last(5) ?? []
+            if recent.isEmpty {
+                lines.append("    —")
+            } else {
+                for r in recent {
+                    let rttStr = r.rtt.map { String(format: "%.1f ms", $0) } ?? "timeout"
+                    let jitStr = r.jitter.map { String(format: "±%.1f ms", $0) } ?? "n/a"
+                    lines.append("    \(rttStr)  loss \(String(format: "%.1f%%", r.lossPercent))  jitter \(jitStr)")
+                }
             }
         }
         lines.append("")

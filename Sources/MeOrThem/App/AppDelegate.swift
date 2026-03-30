@@ -11,8 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pingReportController: PingReportWindowController?
     private var cancellables = Set<AnyCancellable>()
     private var menuLiveUpdate: AnyCancellable?
+    private var menuWifiUpdate: AnyCancellable?
     private var countdownTimer: Timer?
     private var isPulsing = false
+    private var hasInitialData = false
 
     // MARK: - Lifecycle
 
@@ -33,7 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        updateIcon(status: .green)
+        updateIcon(status: .green)  // shows grey loading circle until data arrives
 
         let menu = NSMenu()
         menu.delegate = self
@@ -45,7 +47,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .removeDuplicates()                     // skip redundant icon redraws
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
-                self?.updateIcon(status: status)
+                guard let self else { return }
+                // Mark initial data as received once all targets have results
+                if !self.hasInitialData {
+                    let targets = self.environment.settings.pingTargets
+                    let store   = self.environment.metricStore
+                    if targets.allSatisfy({ store.latestPing[$0.id] != nil }) {
+                        self.hasInitialData = true
+                    }
+                }
+                self.updateIcon(status: status)
             }
             .store(in: &cancellables)
 
@@ -84,15 +95,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateIcon(status: MetricStatus) {
-        let targetStatuses = environment.settings.pingTargets.map {
-            environment.metricStore.status(for: $0.id)
-        }
         let showBar = environment.settings.alwaysShowBarChart
+        let recentStatuses = environment.metricStore.recentOverallStatuses(last: 5)
         let image = StatusBarIconRenderer.render(
             status: status,
-            targetStatuses: targetStatuses,
+            targetStatuses: recentStatuses,
             showBarChart: showBar,
-            pulse: isPulsing
+            pulse: isPulsing,
+            isLoading: !hasInitialData
         )
         statusItem.button?.image = image
         statusItem.button?.toolTip = "Me Or Them — \(status.label)"
@@ -121,6 +131,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 MenuBuilder.refreshLiveItems(menu, environment: self.environment)
             }
 
+        // Refresh Network Details when WiFi state changes while menu is open
+        menuWifiUpdate = environment.metricStore.$latestWifi
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak menu] _ in
+                guard let self, let menu else { return }
+                MenuBuilder.refreshNetworkDetails(menu, environment: self.environment)
+            }
+
         // 1-second countdown ticker
         let ct = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
@@ -135,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuDidClose(_ menu: NSMenu) {
         menuLiveUpdate = nil
+        menuWifiUpdate = nil
         countdownTimer?.invalidate()
         countdownTimer = nil
     }

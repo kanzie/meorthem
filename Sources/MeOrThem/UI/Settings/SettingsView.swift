@@ -5,14 +5,14 @@ struct SettingsView: View {
 
     var body: some View {
         TabView {
+            GeneralTab()
+                .tabItem { Label("General",    systemImage: "gear") }
+
             TargetsTab()
                 .tabItem { Label("Targets",    systemImage: "server.rack") }
 
             ThresholdsTab()
                 .tabItem { Label("Thresholds", systemImage: "dial.medium") }
-
-            GeneralTab()
-                .tabItem { Label("General",    systemImage: "gear") }
         }
         .frame(width: 520, height: 440)
         .preferredColorScheme(colorScheme(for: settings.colorTheme))

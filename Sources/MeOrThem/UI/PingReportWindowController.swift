@@ -13,7 +13,7 @@ final class PingReportWindowController: NSWindowController {
         self.exporter = exporter
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 440),
+            contentRect: NSRect(x: 0, y: 0, width: 780, height: 480),
             styleMask: [.titled, .closable, .resizable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -72,6 +72,6 @@ private struct PingReportView: View {
             }
         }
         .padding(16)
-        .frame(minWidth: 400, minHeight: 300)
+        .frame(minWidth: 700, minHeight: 350)
     }
 }

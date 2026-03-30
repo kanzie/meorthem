@@ -3,10 +3,10 @@ import PDFKit
 
 @MainActor
 enum PDFExporter {
-    static func export(store: MetricStore, targets: [PingTarget]) -> PDFDocument {
+    static func export(store: MetricStore, targets: [PingTarget], thresholds: Thresholds = .default) -> PDFDocument {
         let pageSize = CGRect(x: 0, y: 0, width: 595, height: 842)  // A4
         let document = PDFDocument()
-        let data = renderPage(store: store, targets: targets, pageSize: pageSize)
+        let data = renderPage(store: store, targets: targets, thresholds: thresholds, pageSize: pageSize)
 
         if let page = PDFPage(image: NSImage(data: data) ?? NSImage()) {
             document.insert(page, at: 0)
@@ -16,7 +16,7 @@ enum PDFExporter {
 
     // MARK: - Render to bitmap
 
-    private static func renderPage(store: MetricStore, targets: [PingTarget], pageSize: CGRect) -> Data {
+    private static func renderPage(store: MetricStore, targets: [PingTarget], thresholds: Thresholds, pageSize: CGRect) -> Data {
         let scale: CGFloat = 2  // Retina
         let bitmapSize = NSSize(width: pageSize.width * scale, height: pageSize.height * scale)
 
@@ -38,13 +38,13 @@ enum PDFExporter {
         ctx.cgContext.scaleBy(x: scale, y: scale)
         NSGraphicsContext.current = ctx
 
-        drawContent(store: store, targets: targets, in: pageSize)
+        drawContent(store: store, targets: targets, thresholds: thresholds, in: pageSize)
 
         NSGraphicsContext.restoreGraphicsState()
         return rep.representation(using: .png, properties: [:]) ?? Data()
     }
 
-    private static func drawContent(store: MetricStore, targets: [PingTarget], in rect: CGRect) {
+    private static func drawContent(store: MetricStore, targets: [PingTarget], thresholds: Thresholds, in rect: CGRect) {
         // Background
         NSColor.white.setFill()
         NSBezierPath.fill(rect)
@@ -82,7 +82,7 @@ enum PDFExporter {
             let jitStr  = r.jitter.map { String(format: "±%.1f ms", $0) } ?? ""
 
             let dot = NSBezierPath(ovalIn: NSRect(x: margin, y: y - 10, width: 10, height: 10))
-            let status = MetricStatus.forPingResult(r, thresholds: .default)
+            let status = MetricStatus.forPingResult(r, thresholds: thresholds)
             status.color.setFill()
             dot.fill()
 

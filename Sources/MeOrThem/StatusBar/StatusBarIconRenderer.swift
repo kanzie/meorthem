@@ -9,12 +9,17 @@ enum StatusBarIconRenderer {
     ///   - targetStatuses: per-target statuses for bar chart rendering
     ///   - showBarChart: if true, always render bar chart; if false, use circle/square
     ///   - pulse: if true, draws a small heartbeat dot in the centre of the circle icon
+    ///   - isLoading: if true, renders a grey hollow circle (no data yet)
     static func render(
         status: MetricStatus,
         targetStatuses: [MetricStatus],
         showBarChart: Bool,
-        pulse: Bool = false
+        pulse: Bool = false,
+        isLoading: Bool = false
     ) -> NSImage {
+        if isLoading {
+            return hollowCircleIcon(color: .secondaryLabelColor, pulse: false)
+        }
         if showBarChart {
             return barChartIcon(statuses: targetStatuses.isEmpty ? [status] : targetStatuses)
         }
