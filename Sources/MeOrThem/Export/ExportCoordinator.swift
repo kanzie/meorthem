@@ -12,14 +12,14 @@ final class ExportCoordinator {
     }
 
     func exportCSV() {
-        let panel = makeSavePanel(name: "MeOrThem-Report.csv", types: ["public.comma-separated-values-text", "csv"])
+        let panel = makeSavePanel(name: "Me-Or-Them-Report.csv", types: ["public.comma-separated-values-text", "csv"])
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let csv = CSVExporter.export(store: store, targets: settings.pingTargets)
         try? csv.write(to: url, atomically: true, encoding: .utf8)
     }
 
     func exportPDF() {
-        let panel = makeSavePanel(name: "MeOrThem-Report.pdf", types: ["com.adobe.pdf"])
+        let panel = makeSavePanel(name: "Me-Or-Them-Report.pdf", types: ["com.adobe.pdf"])
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let doc = PDFExporter.export(store: store, targets: settings.pingTargets)
         doc.write(to: url)

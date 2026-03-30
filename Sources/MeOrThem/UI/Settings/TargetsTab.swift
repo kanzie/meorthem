@@ -52,13 +52,20 @@ struct TargetsTab: View {
                         .onSubmit(commit)
 
                     if isEditing {
-                        Button("Cancel") { cancelEditing() }
-                            .buttonStyle(.borderless)
+                        Button(role: .destructive) { deleteEditing() } label: {
+                            Text("Delete").foregroundColor(.red)
+                        }
+                        .buttonStyle(.borderless)
                     }
 
                     Button(isEditing ? "Update" : "Add", action: commit)
                         .disabled(newLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                                   newHost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if isEditing {
+                        Button("Cancel") { cancelEditing() }
+                            .buttonStyle(.borderless)
+                    }
                 }
 
                 if let err = errorMsg {
@@ -79,6 +86,11 @@ struct TargetsTab: View {
         newHost      = target.host
         editingIndex = index
         errorMsg     = nil
+    }
+
+    private func deleteEditing() {
+        guard let idx = editingIndex else { return }
+        delete(at: IndexSet(integer: idx))
     }
 
     private func cancelEditing() {

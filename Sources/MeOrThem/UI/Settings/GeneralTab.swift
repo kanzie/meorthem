@@ -35,7 +35,42 @@ struct GeneralTab: View {
             }
 
             Section("Appearance") {
-                Toggle("Always show bar chart", isOn: $settings.alwaysShowBarChart)
+                Picker("Icon style", selection: $settings.alwaysShowBarChart) {
+                    Label {
+                        Text("Circle")
+                    } icon: {
+                        Canvas { ctx, size in
+                            let margin: CGFloat = 1.5
+                            let rect = CGRect(x: margin, y: margin,
+                                              width: size.width - margin * 2,
+                                              height: size.height - margin * 2)
+                            ctx.stroke(Path(ellipseIn: rect),
+                                       with: .color(.green),
+                                       lineWidth: 1.5)
+                        }
+                        .frame(width: 14, height: 14)
+                    }
+                    .tag(false)
+
+                    Label {
+                        Text("Bar chart")
+                    } icon: {
+                        Canvas { ctx, size in
+                            let barW: CGFloat = (size.width - 4) / 3 - 0.5
+                            let colors: [Color] = [.green, .orange, .red]
+                            let heights: [CGFloat] = [size.height - 2, (size.height - 2) * 0.6, (size.height - 2) * 0.3]
+                            for i in 0..<3 {
+                                let x = 1 + CGFloat(i) * (barW + 1)
+                                let h = heights[i]
+                                let rect = CGRect(x: x, y: size.height - h - 1, width: barW, height: h)
+                                ctx.fill(Path(roundedRect: rect, cornerRadius: 1), with: .color(colors[i]))
+                            }
+                        }
+                        .frame(width: 14, height: 14)
+                    }
+                    .tag(true)
+                }
+                .pickerStyle(.radioGroup)
                 Picker("Color theme", selection: $settings.colorTheme) {
                     ForEach(ColorTheme.allCases, id: \.self) { theme in
                         Text(theme.rawValue).tag(theme)

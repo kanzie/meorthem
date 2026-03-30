@@ -8,7 +8,7 @@ enum CSVExporter {
         var lines = [String]()
 
         // Ping section
-        lines.append("# MeOrThem Ping Report — \(isoFormatter.string(from: Date()))")
+        lines.append("# Me Or Them Ping Report — \(isoFormatter.string(from: Date()))")
         lines.append("Timestamp,Host,Label,RTT_ms,Loss_pct,Jitter_ms")
 
         for target in targets {

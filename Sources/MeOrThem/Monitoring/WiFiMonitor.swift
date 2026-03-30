@@ -8,7 +8,7 @@ enum WiFiMonitor {
         // CWWiFiClient is not thread-safe — must be called on main thread.
         // MonitoringEngine dispatches this to @MainActor, so we are safe.
         let client = CWWiFiClient.shared()
-        guard let iface = client.interface(), iface.ssid() != nil else {
+        guard let iface = client.interface(), iface.wlanChannel() != nil else {
             return nil
         }
 
@@ -44,6 +44,10 @@ enum WiFiMonitor {
             ipAddress:      NetworkInfo.ipAddress(for: ifaceName),
             routerIP:       NetworkInfo.defaultGateway()
         )
+    }
+
+    static func interfaceName() -> String? {
+        CWWiFiClient.shared().interface()?.interfaceName
     }
 
     private static func phyModeString(_ mode: CWPHYMode) -> String {

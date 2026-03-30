@@ -26,7 +26,7 @@ final class AlertManager {
 
     private func fire(status: MetricStatus) {
         let content = UNMutableNotificationContent()
-        content.title = "MeOrThem — Connection \(status.label)"
+        content.title = "Me Or Them — Connection \(status.label)"
         content.body  = status == .red
             ? "Your connection is poor. Video calls may be affected."
             : "Your connection quality has degraded."

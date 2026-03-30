@@ -37,6 +37,7 @@ let package = Package(
             ],
             resources: [
                 .copy("Resources/speedtest"),
+                .copy("Resources/author.jpg"),
             ],
             swiftSettings: sharedSwiftSettings,
             linkerSettings: sharedLinkerSettings

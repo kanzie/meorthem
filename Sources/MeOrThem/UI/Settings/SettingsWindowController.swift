@@ -11,7 +11,7 @@ final class SettingsWindowController: NSWindowController {
         vc.sizingOptions = .preferredContentSize
 
         let window = NSWindow(contentViewController: vc)
-        window.title = "MeOrThem Settings"
+        window.title = "Me Or Them Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.setContentSize(NSSize(width: 520, height: 440))
         window.isReleasedWhenClosed = false

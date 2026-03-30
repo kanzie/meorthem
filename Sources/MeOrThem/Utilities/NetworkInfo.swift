@@ -42,7 +42,7 @@ enum NetworkInfo {
 
     /// Returns info for the primary active ethernet interface, if any.
     /// Single getifaddrs pass — collects both IP (AF_INET) and MAC (AF_LINK).
-    static func ethernetInfo() -> (interface: String, ip: String, mac: String)? {
+    static func ethernetInfo(excluding wifiInterface: String? = nil) -> (interface: String, ip: String, mac: String)? {
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
         guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return nil }
         defer { freeifaddrs(ifaddr) }
@@ -56,6 +56,7 @@ enum NetworkInfo {
             let family = iface.pointee.ifa_addr.pointee.sa_family
 
             if name.hasPrefix("en") {
+                if name == wifiInterface { ptr = iface.pointee.ifa_next; continue }
                 if family == UInt8(AF_INET), candidate == nil {
                     var addr = iface.pointee.ifa_addr.withMemoryRebound(
                         to: sockaddr_in.self, capacity: 1) { $0.pointee }

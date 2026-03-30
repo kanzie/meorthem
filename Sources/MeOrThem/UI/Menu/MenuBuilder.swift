@@ -9,19 +9,20 @@ enum MenuBuilder {
         let openSettings:  () -> Void
         let copyReport:    () -> Void
         let runSpeedtest:  () -> Void
-        let exportCSV:     () -> Void
-        let exportPDF:     () -> Void
         let quit:          () -> Void
     }
+
+    // Tags for items updated during live refresh
+    static let tagLatency    = 1
+    static let tagPacketLoss = 2
+    static let tagJitter     = 3
+    static let tagCountdown  = 4
+    static let tagTargetBase = 100   // tagTargetBase + index per target
 
     @MainActor
     static func rebuild(_ menu: NSMenu, environment env: AppEnvironment, actions: Actions) {
         menu.removeAllItems()
         menu.autoenablesItems = false
-
-        // MARK: - About
-        menu.addItem(actionItem("About MeOrThem", action: actions.showAbout))
-        menu.addItem(.separator())
 
         let settings  = env.settings
         let store     = env.metricStore
@@ -29,33 +30,38 @@ enum MenuBuilder {
         let threshold = settings.thresholds
 
         // MARK: - Overall summary
-        let avgRTT: Double? = {
-            let rtts = targets.compactMap { store.latestPing[$0.id]?.rtt }
-            guard !rtts.isEmpty else { return nil }
-            return rtts.reduce(0, +) / Double(rtts.count)
-        }()
-
-        let latencyStr: String
-        if let rtt = avgRTT {
-            let quality = rtt < threshold.latencyYellowMs ? "Excellent" :
-                          rtt < threshold.latencyRedMs    ? "Fair" : "Poor"
-            latencyStr = String(format: "Latency: %.1fms (%@)", rtt, quality)
-        } else {
-            latencyStr = "Latency: —"
-        }
-
         let avgLoss = targets.compactMap { store.latestPing[$0.id]?.lossPercent }
                              .reduce(0, +) / Double(max(targets.count, 1))
 
-        menu.addItem(staticItem(latencyStr))
-        menu.addItem(staticItem(String(format: "Packet Loss: %.1f%%", avgLoss)))
+        let remaining = max(0, Int(env.monitoringEngine.nextTickAt.timeIntervalSinceNow))
+        let latencyItem = staticItem(latencyString(targets: targets, store: store,
+                                                   threshold: threshold,
+                                                   pollSecs: settings.pollIntervalSecs,
+                                                   countdown: remaining))
+        latencyItem.tag = tagLatency
+        menu.addItem(latencyItem)
+
+        let lossItem = staticItem(String(format: "Packet Loss: %.1f%%", avgLoss))
+        lossItem.tag = tagPacketLoss
+        menu.addItem(lossItem)
+
+        let jitterValues = targets.compactMap { store.latestPing[$0.id]?.jitter }
+        let avgJitter = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
+        let jitterItem = staticItem(jitterValues.isEmpty
+            ? "Jitter: —"
+            : String(format: "Jitter: %.1fms avg", avgJitter))
+        jitterItem.tag = tagJitter
+        menu.addItem(jitterItem)
+
         menu.addItem(.separator())
 
         // MARK: - Per-target rows
-        for target in targets {
+        for (i, target) in targets.enumerated() {
             let result = store.latestPing[target.id]
             let status = MetricStatus.forPingResult(result, thresholds: threshold)
-            menu.addItem(TargetMenuItemView.menuItem(target: target, result: result, status: status))
+            let item = TargetMenuItemView.menuItem(target: target, result: result, status: status)
+            item.tag = tagTargetBase + i
+            menu.addItem(item)
         }
         menu.addItem(.separator())
 
@@ -64,7 +70,7 @@ enum MenuBuilder {
         menu.addItem(.separator())
 
         // MARK: - Actions
-        menu.addItem(actionItem("Ping Copy Report", action: actions.copyReport))
+        menu.addItem(actionItem("Ping Stats Report", action: actions.copyReport))
 
         let speedItem = actionItem(speedtestLabel(env.speedtestRunner), action: actions.runSpeedtest)
         speedItem.isEnabled = !isSpeedtestRunning(env.speedtestRunner)
@@ -73,18 +79,74 @@ enum MenuBuilder {
         menu.addItem(staticItem(env.speedtestRunner.lastCheckedText,  color: .secondaryLabelColor))
         menu.addItem(staticItem(env.speedtestRunner.summaryText,      color: .secondaryLabelColor))
 
-        menu.addItem(actionItem("Export CSV", action: actions.exportCSV))
-        menu.addItem(actionItem("Export PDF", action: actions.exportPDF))
         menu.addItem(.separator())
 
         // MARK: - Misc
         menu.addItem(actionItem("Settings…", action: actions.openSettings))
-
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        menu.addItem(staticItem("Version \(version)", color: .tertiaryLabelColor))
+        menu.addItem(actionItem("About Me Or Them", action: actions.showAbout))
 
         menu.addItem(.separator())
         menu.addItem(actionItem("Quit", action: actions.quit))
+    }
+
+    // MARK: - Live refresh (called while menu is open)
+
+    @MainActor
+    static func refreshLiveItems(_ menu: NSMenu, environment env: AppEnvironment) {
+        let settings  = env.settings
+        let store     = env.metricStore
+        let targets   = settings.pingTargets
+        let threshold = settings.thresholds
+
+        let avgLoss = targets.compactMap { store.latestPing[$0.id]?.lossPercent }
+                             .reduce(0, +) / Double(max(targets.count, 1))
+
+        let remaining = max(0, Int(env.monitoringEngine.nextTickAt.timeIntervalSinceNow))
+
+        if let item = menu.item(withTag: tagLatency) {
+            item.attributedTitle = NSAttributedString(
+                string: latencyString(targets: targets, store: store,
+                                      threshold: threshold,
+                                      pollSecs: settings.pollIntervalSecs,
+                                      countdown: remaining),
+                attributes: _labelAttrs)
+        }
+        if let item = menu.item(withTag: tagPacketLoss) {
+            item.attributedTitle = NSAttributedString(
+                string: String(format: "Packet Loss: %.1f%%", avgLoss),
+                attributes: _labelAttrs)
+        }
+
+        let jitterValues = targets.compactMap { store.latestPing[$0.id]?.jitter }
+        let avgJitter = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
+        if let item = menu.item(withTag: tagJitter) {
+            item.attributedTitle = NSAttributedString(
+                string: jitterValues.isEmpty
+                    ? "Jitter: —"
+                    : String(format: "Jitter: %.1fms avg", avgJitter),
+                attributes: _labelAttrs)
+        }
+
+        for (i, target) in targets.enumerated() {
+            guard let item = menu.item(withTag: tagTargetBase + i) else { continue }
+            let result = store.latestPing[target.id]
+            let status = MetricStatus.forPingResult(result, thresholds: threshold)
+            (item.view as? TargetMenuItemView)?.update(result: result, status: status)
+        }
+    }
+
+    @MainActor
+    static func refreshCountdown(_ menu: NSMenu, environment env: AppEnvironment) {
+        guard let item = menu.item(withTag: tagLatency) else { return }
+        let settings  = env.settings
+        let store     = env.metricStore
+        let targets   = settings.pingTargets
+        let threshold = settings.thresholds
+        let remaining = max(0, Int(env.monitoringEngine.nextTickAt.timeIntervalSinceNow))
+        item.attributedTitle = NSAttributedString(
+            string: latencyString(targets: targets, store: store, threshold: threshold,
+                                  pollSecs: settings.pollIntervalSecs, countdown: remaining),
+            attributes: _labelAttrs)
     }
 
     // MARK: - Network Details submenu
@@ -94,7 +156,7 @@ enum MenuBuilder {
         let parent = NSMenuItem(title: "Network Details", action: nil, keyEquivalent: "")
         let sub = NSMenu(title: "Network Details")
 
-        if let w = store.latestWifi {
+        if let w = store.latestWifi ?? WiFiMonitor.snapshot() {
             // WiFi connection
             sub.addItem(staticItem("WiFi — \(w.ssid)"))
             sub.addItem(.separator())
@@ -108,7 +170,8 @@ enum MenuBuilder {
             sub.addItem(staticItem("PHY Mode:    \(w.phyMode)"))
         } else {
             // Ethernet or no network
-            if let eth = NetworkInfo.ethernetInfo() {
+            let wifiIfaceName = WiFiMonitor.interfaceName()
+            if let eth = NetworkInfo.ethernetInfo(excluding: wifiIfaceName) {
                 sub.addItem(staticItem("Ethernet — \(eth.interface)"))
                 sub.addItem(.separator())
                 sub.addItem(staticItem("IP Address:  \(eth.ip)"))
@@ -127,7 +190,31 @@ enum MenuBuilder {
 
     // MARK: - Helpers
 
+    @MainActor
+    private static func latencyString(targets: [PingTarget], store: MetricStore,
+                                      threshold: Thresholds, pollSecs: Double,
+                                      countdown: Int? = nil) -> String {
+        let rtts = targets.compactMap { store.latestPing[$0.id]?.rtt }
+        let intervalStr = pollSecs.truncatingRemainder(dividingBy: 1) == 0
+            ? "\(Int(pollSecs))s" : String(format: "%.1fs", pollSecs)
+        let countdownSuffix: String
+        if let cd = countdown, cd > 0 {
+            countdownSuffix = " (\(cd)s)"
+        } else {
+            countdownSuffix = ""
+        }
+        guard !rtts.isEmpty else { return "Latency: — · \(intervalStr)\(countdownSuffix)" }
+        let avg = rtts.reduce(0, +) / Double(rtts.count)
+        let quality = avg < threshold.latencyYellowMs ? "Excellent" :
+                      avg < threshold.latencyRedMs    ? "Fair" : "Poor"
+        return String(format: "Latency: %.1fms (%@) · %@%@", avg, quality, intervalStr, countdownSuffix)
+    }
+
     nonisolated(unsafe) private static let _menuFont = NSFont.menuFont(ofSize: 13)
+    nonisolated(unsafe) private static let _labelAttrs: [NSAttributedString.Key: Any] = [
+        .foregroundColor: NSColor.labelColor,
+        .font: NSFont.menuFont(ofSize: 13)
+    ]
 
     @MainActor
     private static func staticItem(_ title: String, color: NSColor = .labelColor) -> NSMenuItem {

@@ -70,7 +70,7 @@ final class MetricStore: ObservableObject {
 
     func summaryText(targets: [PingTarget]) -> String {
         let df = ISO8601DateFormatter()
-        var lines = ["MeOrThem Network Report — \(df.string(from: Date()))"]
+        var lines = ["Me Or Them Network Report — \(df.string(from: Date()))"]
         lines.append("")
         lines.append("PING TARGETS")
         for target in targets {
