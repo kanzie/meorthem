@@ -47,10 +47,15 @@ if [ -d "$BUNDLE_PATH" ]; then
     cp -r "$BUNDLE_PATH" "$APP_PATH/Contents/Resources/"
 fi
 
-# Generate and copy app icon
-if command -v swift &> /dev/null; then
-    echo "==> Generating app icon..."
-    bash "$SCRIPT_DIR/generate_icon.sh" "$APP_PATH/Contents/Resources"
+# Copy app icon (pre-generated); regenerate if missing
+ICON_SRC="$SOURCES_RESOURCES/AppIcon.icns"
+if [ ! -f "$ICON_SRC" ] && command -v swift &> /dev/null; then
+    echo "==> Regenerating app icon (missing from repo)..."
+    bash "$SCRIPT_DIR/generate_icon.sh" "$SOURCES_RESOURCES"
+fi
+if [ -f "$ICON_SRC" ]; then
+    echo "==> Copying app icon..."
+    cp "$ICON_SRC" "$APP_PATH/Contents/Resources/AppIcon.icns"
 fi
 
 echo "==> Ad-hoc code signing..."

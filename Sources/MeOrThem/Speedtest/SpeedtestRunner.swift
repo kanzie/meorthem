@@ -17,6 +17,7 @@ final class SpeedtestRunner: ObservableObject {
         let t = UserDefaults.standard.double(forKey: "speedtestLastRunDate")
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
     }()
+    @Published private(set) var lastResultSummary: String? = UserDefaults.standard.string(forKey: "speedtestLastResultSummary")
 
     private var runningTask: Task<Void, Never>?
 
@@ -29,11 +30,14 @@ final class SpeedtestRunner: ObservableObject {
             let result = await Self.executeSpeedtest()
             if !Task.isCancelled {
                 self.state = result
-                if case .completed = result {
+                if case .completed(let r) = result {
                     let now = Date()
                     self.lastRunDate = now
                     UserDefaults.standard.set(now.timeIntervalSince1970,
                                               forKey: "speedtestLastRunDate")
+                    let summary = "↓\(r.downloadFormatted)  ↑\(r.uploadFormatted)  \(r.latencyFormatted)"
+                    self.lastResultSummary = summary
+                    UserDefaults.standard.set(summary, forKey: "speedtestLastResultSummary")
                 }
             }
         }
@@ -46,7 +50,7 @@ final class SpeedtestRunner: ObservableObject {
 
     var summaryText: String {
         switch state {
-        case .idle:               return ""
+        case .idle:               return lastResultSummary ?? ""
         case .running:            return "Running…"
         case .unavailable(let m): return m
         case .failed(let m):      return "Failed: \(m)"

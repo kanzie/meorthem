@@ -12,22 +12,35 @@ final class ExportCoordinator {
     }
 
     func exportCSV() {
-        NSApp.activate(ignoringOtherApps: true)
         let panel = makeSavePanel(name: "Me-Or-Them-Report.csv", types: ["public.comma-separated-values-text", "csv"])
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        let csv = CSVExporter.export(store: store, targets: settings.pingTargets)
-        try? csv.write(to: url, atomically: true, encoding: .utf8)
+        showPanel(panel) { [self] url in
+            let csv = CSVExporter.export(store: self.store, targets: self.settings.pingTargets)
+            try? csv.write(to: url, atomically: true, encoding: .utf8)
+        }
     }
 
     func exportPDF() {
-        NSApp.activate(ignoringOtherApps: true)
         let panel = makeSavePanel(name: "Me-Or-Them-Report.pdf", types: ["com.adobe.pdf"])
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        let doc = PDFExporter.export(store: store, targets: settings.pingTargets, thresholds: settings.thresholds)
-        doc.write(to: url)
+        showPanel(panel) { [self] url in
+            let doc = PDFExporter.export(store: self.store, targets: self.settings.pingTargets, thresholds: self.settings.thresholds)
+            doc.write(to: url)
+        }
     }
 
     // MARK: - Private
+
+    private func showPanel(_ panel: NSSavePanel, completion: @escaping (URL) -> Void) {
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window) { response in
+                guard response == .OK, let url = panel.url else { return }
+                completion(url)
+            }
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            completion(url)
+        }
+    }
 
     private func makeSavePanel(name: String, types: [String]) -> NSSavePanel {
         let panel = NSSavePanel()
