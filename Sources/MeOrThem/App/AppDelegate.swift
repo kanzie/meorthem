@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var countdownTimer: Timer?
     private var isPulsing = false
     private var hasInitialData = false
+    private var loadingBlinkTimer: Timer?
+    private var loadingDotVisible = false
 
     // MARK: - Lifecycle
 
@@ -36,10 +38,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         updateIcon(status: .green)  // shows grey loading circle until data arrives
+        startLoadingBlink()
 
         let menu = NSMenu()
         menu.delegate = self
         statusItem.menu = menu
+    }
+
+    private func startLoadingBlink() {
+        let t = Timer.scheduledTimer(withTimeInterval: 1.0 / 6.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, !self.hasInitialData else { return }
+                self.loadingDotVisible.toggle()
+                self.updateIcon(status: self.environment.metricStore.overallStatus)
+            }
+        }
+        t.tolerance = 0.05  // 50 ms tolerance — fine for a visual blink, aids power efficiency
+        RunLoop.main.add(t, forMode: .common)
+        loadingBlinkTimer = t
+    }
+
+    private func stopLoadingBlink() {
+        loadingBlinkTimer?.invalidate()
+        loadingBlinkTimer = nil
+        loadingDotVisible = false
     }
 
     private func observeStatusChanges() {
@@ -54,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     let store   = self.environment.metricStore
                     if targets.allSatisfy({ store.latestPing[$0.id] != nil }) {
                         self.hasInitialData = true
+                        self.stopLoadingBlink()
                     }
                 }
                 self.updateIcon(status: status)
@@ -89,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 guard let self else { return }
+                StatusBarIconRenderer.invalidateCache()
                 self.updateIcon(status: self.environment.metricStore.overallStatus)
             }
             .store(in: &cancellables)
@@ -101,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             status: status,
             targetStatuses: recentStatuses,
             showBarChart: showBar,
-            pulse: isPulsing,
+            pulse: hasInitialData ? isPulsing : loadingDotVisible,
             isLoading: !hasInitialData
         )
         statusItem.button?.image = image
@@ -119,6 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             openSettings: { [weak self] in self?.showSettings() },
             copyReport:   { [weak self] in self?.showPingReport() },
             runSpeedtest: { [weak self] in self?.environment.speedtestRunner.run() },
+            showHelp:     { HelpWindowController.shared.showAndFocus() },
             quit:         { NSApp.terminate(nil) }
         ))
 

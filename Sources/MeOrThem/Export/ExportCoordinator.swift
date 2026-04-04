@@ -1,5 +1,6 @@
 import AppKit
 import PDFKit
+import UniformTypeIdentifiers
 import os.log
 
 private let exportLog = Logger(subsystem: "com.meorthem", category: "Export")
@@ -16,7 +17,7 @@ final class ExportCoordinator {
 
     func exportCSV() {
         exportLog.info("exportCSV: entry — thread=\(Thread.isMainThread ? "main" : "background")")
-        let panel = makeSavePanel(name: "Me-Or-Them-Report.csv", types: ["public.comma-separated-values-text", "csv"])
+        let panel = makeSavePanel(name: "Me-Or-Them-Report.csv", types: [.commaSeparatedText])
         exportLog.info("exportCSV: panel created, calling showPanel")
         showPanel(panel) { [self] url in
             exportLog.info("exportCSV: panel OK, writing to \(url.path)")
@@ -32,7 +33,7 @@ final class ExportCoordinator {
 
     func exportPDF() {
         exportLog.info("exportPDF: entry — thread=\(Thread.isMainThread ? "main" : "background")")
-        let panel = makeSavePanel(name: "Me-Or-Them-Report.pdf", types: ["com.adobe.pdf"])
+        let panel = makeSavePanel(name: "Me-Or-Them-Report.pdf", types: [.pdf])
         exportLog.info("exportPDF: panel created, calling showPanel")
         showPanel(panel) { [self] url in
             exportLog.info("exportPDF: panel OK, rendering PDF to \(url.path)")
@@ -83,21 +84,11 @@ final class ExportCoordinator {
         }
     }
 
-    private func makeSavePanel(name: String, types: [String]) -> NSSavePanel {
+    private func makeSavePanel(name: String, types: [UTType]) -> NSSavePanel {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
-        panel.allowedContentTypes = types.compactMap { UTType($0) }
+        panel.allowedContentTypes = types
         panel.isExtensionHidden = false
         return panel
-    }
-}
-
-import UniformTypeIdentifiers
-private extension UTType {
-    init?(_ string: String) {
-        if let t = UTType(mimeType: string) { self = t; return }
-        if let t = UTType(tag: string, tagClass: .filenameExtension, conformingTo: nil) { self = t; return }
-        if let t = UTType(string) as UTType? { self = t; return }
-        return nil
     }
 }
