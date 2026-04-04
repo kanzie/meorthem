@@ -7,7 +7,9 @@ public final class AppearanceObserver: NSObject {
     public static let shared = AppearanceObserver()
 
     /// Fires with the new effective appearance name when it changes.
-    public let appearanceChanged = PassthroughSubject<NSAppearance.Name, Never>()
+    /// nonisolated(unsafe): PassthroughSubject.send() is thread-safe; the KVO closure
+    /// is Sendable so the compiler can't verify MainActor isolation statically.
+    public nonisolated(unsafe) let appearanceChanged = PassthroughSubject<NSAppearance.Name, Never>()
 
     private var observation: NSKeyValueObservation?
 
