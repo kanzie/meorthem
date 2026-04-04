@@ -20,12 +20,7 @@ final class MonitoringEngine {
     }
 
     func start(fireImmediately: Bool = true) {
-        guard !isRunning else { return }
-        isRunning = true
-        scheduleTimer()
-        if fireImmediately {
-            Task { await tick() }
-        }
+        startEngine(interval: settings.pollIntervalSecs, fireImmediately: fireImmediately)
     }
 
     func stop() {
@@ -36,15 +31,25 @@ final class MonitoringEngine {
     }
 
     /// Call when poll interval setting changes — does not fire an immediate tick.
-    func restart() {
+    /// Pass `interval` directly from the @Published sink value to avoid reading
+    /// the stale property (@Published fires in willSet, before storage is committed).
+    func restart(interval: Double? = nil) {
         stop()
-        start(fireImmediately: false)
+        startEngine(interval: interval ?? settings.pollIntervalSecs, fireImmediately: false)
     }
 
     // MARK: - Private
 
-    private func scheduleTimer() {
-        let interval = settings.pollIntervalSecs
+    private func startEngine(interval: Double, fireImmediately: Bool) {
+        guard !isRunning else { return }
+        isRunning = true
+        scheduleTimer(interval: interval)
+        if fireImmediately {
+            Task { await tick() }
+        }
+    }
+
+    private func scheduleTimer(interval: Double) {
         nextTickAt = Date().addingTimeInterval(interval)
         let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             guard let self else { return }

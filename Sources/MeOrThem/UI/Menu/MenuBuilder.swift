@@ -9,6 +9,7 @@ enum MenuBuilder {
         let openSettings:  () -> Void
         let copyReport:    () -> Void
         let runSpeedtest:  () -> Void
+        let showHelp:      () -> Void
         let quit:          () -> Void
     }
 
@@ -86,6 +87,7 @@ enum MenuBuilder {
 
         // MARK: - Misc
         menu.addItem(actionItem("Settings…", action: actions.openSettings))
+        menu.addItem(actionItem("Help", action: actions.showHelp))
         menu.addItem(actionItem("About Me Or Them", action: actions.showAbout))
 
         menu.addItem(.separator())

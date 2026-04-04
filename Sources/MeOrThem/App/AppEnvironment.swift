@@ -28,11 +28,13 @@ final class AppEnvironment {
             }
             .store(in: &cancellables)
 
-        // Restart monitoring engine when poll interval changes
+        // Restart monitoring engine when poll interval changes.
+        // NOTE: @Published fires in willSet, before the new value is committed.
+        // Pass the received value directly to avoid reading the stale property.
         settings.$pollIntervalSecs
             .dropFirst()
-            .sink { [weak self] _ in
-                self?.monitoringEngine.restart()
+            .sink { [weak self] newInterval in
+                self?.monitoringEngine.restart(interval: newInterval)
             }
             .store(in: &cancellables)
 

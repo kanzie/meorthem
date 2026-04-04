@@ -3,6 +3,16 @@ import AppKit
 enum StatusBarIconRenderer {
     private static let iconSize = NSSize(width: 18, height: 18)
 
+    // Cache the two loading-state icons — these render 6×/sec during startup.
+    // Invalidated on appearance change so dark/light mode colours stay correct.
+    nonisolated(unsafe) private static var loadingDotOn:  NSImage?
+    nonisolated(unsafe) private static var loadingDotOff: NSImage?
+
+    static func invalidateCache() {
+        loadingDotOn  = nil
+        loadingDotOff = nil
+    }
+
     /// Renders the appropriate status bar icon.
     /// - Parameters:
     ///   - status: overall connection quality
@@ -18,7 +28,13 @@ enum StatusBarIconRenderer {
         isLoading: Bool = false
     ) -> NSImage {
         if isLoading {
-            return hollowCircleIcon(color: .secondaryLabelColor, pulse: false)
+            if pulse {
+                if loadingDotOn == nil { loadingDotOn = hollowCircleIcon(color: .secondaryLabelColor, pulse: true) }
+                return loadingDotOn!
+            } else {
+                if loadingDotOff == nil { loadingDotOff = hollowCircleIcon(color: .secondaryLabelColor, pulse: false) }
+                return loadingDotOff!
+            }
         }
         if showBarChart {
             return barChartIcon(statuses: targetStatuses.isEmpty ? [status] : targetStatuses)
