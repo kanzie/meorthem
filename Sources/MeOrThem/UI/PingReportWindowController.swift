@@ -59,8 +59,9 @@ private struct PingReportView: View {
             )
 
             HStack(spacing: 8) {
-                Button("Export CSV") { exporter.exportCSV() }
-                Button("Export PDF") { exporter.exportPDF() }
+                Button("Export CSV")  { exporter.exportCSV() }
+                Button("Export PDF")  { exporter.exportPDF() }
+                Button("Export JSON") { exporter.exportJSON() }
                 Spacer()
                 Button(copied ? "Copied!" : "Copy to Clipboard") {
                     NSPasteboard.general.clearContents()

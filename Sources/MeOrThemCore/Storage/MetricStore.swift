@@ -3,49 +3,65 @@ import Combine
 
 // 24h at 5s poll = 17,280 samples per target
 private let kPingHistoryCapacity = 17_280
-// 1h at 5s — WiFi stats change rarely; full day wastes ~2.9 MB
+// 1h at 5s — WiFi stats change rarely
 private let kWifiHistoryCapacity =    720
 
 @MainActor
 final class MetricStore: ObservableObject {
 
-    // MARK: - Published snapshots (drive icon + menu updates)
+    // MARK: - Published snapshots
     @Published private(set) var latestPing: [UUID: PingResult] = [:]
     @Published private(set) var latestWifi: WiFiSnapshot?
     @Published private(set) var overallStatus: MetricStatus = .green
+    @Published private(set) var networkFaultType: NetworkFaultType = .none
 
-    // MARK: - History (read by export + sparklines)
+    // MARK: - Gateway ping
+    private(set) var latestGatewayPing: PingResult?
+
+    // MARK: - History
     private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]
     private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)
     private var statusHistory: CircularBuffer<MetricStatus> = CircularBuffer(capacity: 5)
 
-    // MARK: - Settings reference for threshold evaluation
+    // MARK: - Hysteresis: consecutive non-green count per target
+    private var consecutiveBadCount: [UUID: Int] = [:]
+
     private let settings: AppSettings
 
     init(settings: AppSettings) {
         self.settings = settings
     }
 
-    // MARK: - Write methods (called from MonitoringEngine)
+    // MARK: - Write
 
     func record(result: PingResult, for targetID: UUID) {
         latestPing[targetID] = result
-        // Avoid double-hash lookup: modify in place
         pingHistory[targetID, default: CircularBuffer(capacity: kPingHistoryCapacity)].append(result)
+
+        let raw = MetricStatus.forPingResult(result, thresholds: settings.thresholds)
+        if raw == .green {
+            consecutiveBadCount[targetID] = 0
+        } else {
+            consecutiveBadCount[targetID] = (consecutiveBadCount[targetID] ?? 0) + 1
+        }
         recomputeOverallStatus()
     }
 
     func recordWiFi(_ snapshot: WiFiSnapshot?) {
         latestWifi = snapshot
-        if let s = snapshot {
-            wifiHistory.append(s)
-        }
+        if let s = snapshot { wifiHistory.append(s) }
+    }
+
+    func recordGatewayPing(_ result: PingResult?) {
+        latestGatewayPing = result
+        recomputeFaultType()
     }
 
     // MARK: - Derived
 
-    func status(for targetID: UUID) -> MetricStatus {
-        MetricStatus.forPingResult(latestPing[targetID], thresholds: settings.thresholds)
+    func effectiveStatus(for targetID: UUID) -> MetricStatus {
+        let raw = MetricStatus.forPingResult(latestPing[targetID], thresholds: settings.thresholds)
+        return applyHysteresis(raw: raw, count: consecutiveBadCount[targetID, default: 0])
     }
 
     func latencyHistory(for targetID: UUID, last n: Int = 60) -> [Double] {
@@ -56,24 +72,54 @@ final class MetricStore: ObservableObject {
         pingHistory[targetID]?.last(n).map(\.lossPercent) ?? []
     }
 
-    /// Returns the last N overall status values in chronological order (oldest first).
+    func sparklineData(for targetID: UUID, last n: Int = 12) -> [Double] {
+        pingHistory[targetID]?.last(n).map { $0.rtt ?? 0 } ?? []
+    }
+
     func recentOverallStatuses(last n: Int = 5) -> [MetricStatus] {
         statusHistory.last(n)
     }
 
     // MARK: - Private
 
+    private func applyHysteresis(raw: MetricStatus, count: Int) -> MetricStatus {
+        switch raw {
+        case .green:  return .green
+        case .yellow: return count >= 2 ? .yellow : .green
+        case .red:    return count >= 3 ? .red : (count >= 2 ? .yellow : .green)
+        }
+    }
+
     private func recomputeOverallStatus() {
         var worst: MetricStatus = .green
-        for (_, result) in latestPing {
-            let s = MetricStatus.forPingResult(result, thresholds: settings.thresholds)
-            if s > worst { worst = s }
+        for (targetID, result) in latestPing {
+            let raw = MetricStatus.forPingResult(result, thresholds: settings.thresholds)
+            let effective = applyHysteresis(raw: raw, count: consecutiveBadCount[targetID, default: 0])
+            if effective > worst { worst = effective }
         }
         overallStatus = worst
         statusHistory.append(worst)
+        recomputeFaultType()
     }
 
-    // MARK: - Summary for clipboard report
+    private func recomputeFaultType() {
+        guard overallStatus != .green else { networkFaultType = .none; return }
+        guard let gw = latestGatewayPing else { networkFaultType = .none; return }
+
+        let gatewayOk = gw.lossPercent < settings.thresholds.lossYellowPct
+        let externalStatuses = latestPing.keys.map { effectiveStatus(for: $0) }
+        let allFailed = !externalStatuses.isEmpty && externalStatuses.allSatisfy { $0 == .red }
+
+        if !gatewayOk {
+            networkFaultType = .local
+        } else if allFailed {
+            networkFaultType = .isp
+        } else {
+            networkFaultType = .mixed
+        }
+    }
+
+    // MARK: - Summary
 
     private static let _isoFormatter = ISO8601DateFormatter()
 
@@ -100,19 +146,9 @@ final class MetricStore: ObservableObject {
             lines.append("WI-FI")
             lines.append("  SSID:    \(w.ssid)")
             lines.append("  RSSI:    \(w.rssi) dBm  (\(w.rssiQuality))")
-            lines.append("  SNR:     \(w.snr) dB")
-            lines.append("  Channel: \(w.channelNumber)  (\(w.channelBandGHz, format: "%.1f") GHz)")
-            lines.append("  TX Rate: \(String(format: "%.0f Mbps", w.txRateMbps))")
         }
         lines.append("")
         lines.append("Overall status: \(overallStatus.label)")
         return lines.joined(separator: "\n")
-    }
-}
-
-// MARK: - Format helper
-private extension DefaultStringInterpolation {
-    mutating func appendInterpolation(_ value: Double, format: String) {
-        appendLiteral(String(format: format, value))
     }
 }

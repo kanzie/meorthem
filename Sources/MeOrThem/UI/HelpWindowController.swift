@@ -13,8 +13,8 @@ final class HelpWindowController: NSWindowController {
         window.title = "Me Or Them — Help"
         window.styleMask = [.titled, .closable, .resizable]
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 480, height: 600))
-        window.minSize = NSSize(width: 400, height: 400)
+        window.setContentSize(NSSize(width: 460, height: 620))
+        window.minSize = NSSize(width: 380, height: 400)
         window.center()
 
         super.init(window: window)
@@ -42,7 +42,7 @@ private struct HelpView: View {
                     icon: "network",
                     eli5: "Think of it like shouting across a room and timing how long it takes to hear the echo. Latency is the round-trip time for a tiny packet of data to travel from your device to a server and back.",
                     normal: "< 20 ms — Excellent\n20–50 ms — Good\n50–100 ms — Fair\n> 150 ms — Poor",
-                    concern: "A single spike is harmless — your router was briefly busy. Worry when latency stays high for more than 10 seconds, or is consistently above 100 ms.",
+                    concern: "A single spike is harmless — your router was briefly busy. Worry when latency stays high for more than two consecutive checks, or is consistently above 100 ms.",
                     useCases: [
                         ("Video calls", "< 150 ms"),
                         ("Online gaming", "< 50 ms"),
@@ -55,7 +55,7 @@ private struct HelpView: View {
                     icon: "waveform.path",
                     eli5: "Jitter measures how consistent your latency is. Low latency that varies wildly — say 10 ms one moment and 90 ms the next — still causes choppy audio and video, because packets arrive out of order.",
                     normal: "< 5 ms — Excellent\n5–15 ms — Good\n15–30 ms — Fair\n> 30 ms — Poor",
-                    concern: "Brief jitter during large downloads is normal (your link is busy). Sustained jitter above 20 ms while idle suggests an unstable connection.",
+                    concern: "Brief jitter during large downloads is normal (your link is busy). Sustained jitter above 20 ms across multiple checks while idle suggests an unstable connection.",
                     useCases: [
                         ("Video calls", "< 30 ms"),
                         ("Online gaming", "< 15 ms"),
@@ -68,7 +68,7 @@ private struct HelpView: View {
                     icon: "exclamationmark.triangle",
                     eli5: "Sometimes data packets simply vanish on the way — dropped by an overloaded router or a flaky cable. Even 1% loss causes visible glitches in calls and lag spikes in games, because the missing data must be re-sent.",
                     normal: "0% — Perfect\n< 0.5% — Acceptable\n1–3% — Noticeable\n> 5% — Severe",
-                    concern: "1–2 lost packets in an hour is nothing. Loss above 1% that persists for minutes means something is wrong — check your WiFi signal or router.",
+                    concern: "1–2 lost packets in an hour is nothing. Loss above 1% that persists across three or more consecutive checks means something is wrong — check your WiFi signal or router.",
                     useCases: [
                         ("Video calls", "< 1%"),
                         ("Online gaming", "< 0.5%"),
@@ -81,7 +81,7 @@ private struct HelpView: View {
             }
             .padding(24)
         }
-        .frame(minWidth: 400)
+        .frame(minWidth: 380)
     }
 
     // MARK: - Sub-views
@@ -113,7 +113,8 @@ private struct HelpView: View {
                 .foregroundColor(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(alignment: .top, spacing: 16) {
+            HStack(alignment: .top, spacing: 12) {
+                // Left box: typical ranges
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Typical ranges", systemImage: "ruler")
                         .font(.caption).bold()
@@ -122,27 +123,27 @@ private struct HelpView: View {
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.primary)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .cornerRadius(8)
 
+                // Right box: recommended value under (per use case)
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("When to act", systemImage: "exclamationmark.circle")
+                    Label("Recommended value under", systemImage: "checkmark.circle")
                         .font(.caption).bold()
                         .foregroundColor(.secondary)
                     ForEach(useCases, id: \.0) { useCase, threshold in
-                        HStack {
+                        HStack(spacing: 8) {
                             Text(useCase)
                                 .font(.caption)
-                            Spacer()
+                                .fixedSize(horizontal: true, vertical: false)
                             Text(threshold)
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundColor(.secondary)
+                                .fixedSize(horizontal: true, vertical: false)
                         }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(10)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .cornerRadius(8)
@@ -159,7 +160,7 @@ private struct HelpView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Normal temporary fluctuations", systemImage: "info.circle")
                 .font(.headline)
-            Text("Occasional latency spikes, a brief burst of jitter during a large download, or 1–2 lost packets per hour are all perfectly normal. Networks are shared resources — your neighbour downloading a game or your router running a firmware check can cause momentary blips. Me Or Them turns yellow or red only when problems are sustained, so a single-poll warning usually means nothing.")
+            Text("Occasional latency spikes, a brief burst of jitter during a large download, or 1–2 lost packets per hour are all perfectly normal. Me Or Them applies hysteresis — it only turns yellow after two consecutive bad readings, and red after three. A single-poll warning almost always means nothing.")
                 .font(.body)
                 .foregroundColor(.primary)
                 .fixedSize(horizontal: false, vertical: true)

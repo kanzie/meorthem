@@ -34,7 +34,24 @@ struct GeneralTab: View {
                 .pickerStyle(.menu)
             }
 
+            Section("Bandwidth Test") {
+                Picker("Auto-test interval", selection: $settings.bandwidthScheduleHours) {
+                    Text("Disabled").tag(0.0)
+                    Text("Every 1 hour").tag(1.0)
+                    Text("Every 3 hours").tag(3.0)
+                    Text("Every 6 hours").tag(6.0)
+                    Text("Every 12 hours").tag(12.0)
+                    Text("Every 24 hours").tag(24.0)
+                }
+                .pickerStyle(.menu)
+                Text("Latency polling is paused while a bandwidth test runs.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Appearance") {
+                Toggle("Show latency in menu bar", isOn: $settings.showLatencyInMenubar)
+                    .help("Displays the current average latency (e.g. 42ms) next to the status icon.")
+
                 Picker("Icon style", selection: $settings.alwaysShowBarChart) {
                     Label {
                         Text("Circle")
@@ -77,6 +94,15 @@ struct GeneralTab: View {
                     }
                 }
                 .pickerStyle(.segmented)
+            }
+
+            Section("Data") {
+                Toggle("Daily log rotation", isOn: $settings.enableLogRotation)
+                    .help("Saves a daily CSV snapshot to ~/Library/Logs/MeOrThem/. Keeps the last 30 days.")
+                if settings.enableLogRotation {
+                    Text("Saved to ~/Library/Logs/MeOrThem/")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
         .formStyle(.grouped)

@@ -1,5 +1,25 @@
 import AppKit
 
+// MARK: - Network Fault Type
+
+enum NetworkFaultType: Equatable {
+    case none
+    case local
+    case isp
+    case mixed
+
+    var displayLabel: String {
+        switch self {
+        case .none:   return ""
+        case .local:  return "Likely cause: local network / router"
+        case .isp:    return "Likely cause: ISP / internet outage"
+        case .mixed:  return "Likely cause: partial outage or routing issue"
+        }
+    }
+}
+
+// MARK: - Metric Status
+
 enum MetricStatus: Int, Comparable, CaseIterable {
     case green  = 0
     case yellow = 1

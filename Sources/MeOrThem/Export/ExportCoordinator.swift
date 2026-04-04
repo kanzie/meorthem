@@ -31,6 +31,21 @@ final class ExportCoordinator {
         }
     }
 
+    func exportJSON() {
+        exportLog.info("exportJSON: entry")
+        let panel = makeSavePanel(name: "Me-Or-Them-Report.json", types: [.json])
+        showPanel(panel) { [self] url in
+            exportLog.info("exportJSON: writing to \(url.path)")
+            do {
+                let data = try JSONExporter.export(store: self.store, targets: self.settings.pingTargets)
+                try data.write(to: url)
+                exportLog.info("exportJSON: write succeeded (\(data.count) bytes)")
+            } catch {
+                exportLog.error("exportJSON: failed — \(error.localizedDescription)")
+            }
+        }
+    }
+
     func exportPDF() {
         exportLog.info("exportPDF: entry — thread=\(Thread.isMainThread ? "main" : "background")")
         let panel = makeSavePanel(name: "Me-Or-Them-Report.pdf", types: [.pdf])

@@ -6,6 +6,7 @@ struct ThresholdsTab: View {
     var body: some View {
         Form {
             Section("Latency") {
+                recommendedRow("Recommended value under 100 ms (video calls) · 50 ms (gaming)")
                 thresholdRow("Yellow above",
                              value: yellowCapped($settings.thresholds.latencyYellowMs,
                                                  red: $settings.thresholds.latencyRedMs),
@@ -16,6 +17,7 @@ struct ThresholdsTab: View {
                              unit: "ms", range: 50...2000)
             }
             Section("Packet Loss") {
+                recommendedRow("Recommended value under 1% (video calls) · 0.5% (gaming)")
                 thresholdRow("Yellow above",
                              value: yellowCapped($settings.thresholds.lossYellowPct,
                                                  red: $settings.thresholds.lossRedPct),
@@ -26,6 +28,7 @@ struct ThresholdsTab: View {
                              unit: "%", range: 1...50)
             }
             Section("Jitter") {
+                recommendedRow("Recommended value under 30 ms (video calls) · 15 ms (gaming)")
                 thresholdRow("Yellow above",
                              value: yellowCapped($settings.thresholds.jitterYellowMs,
                                                  red: $settings.thresholds.jitterRedMs),
@@ -74,5 +77,11 @@ struct ThresholdsTab: View {
                 .monospacedDigit()
                 .frame(width: 60, alignment: .trailing)
         }
+    }
+
+    private func recommendedRow(_ text: String) -> some View {
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 }

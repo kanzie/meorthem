@@ -1,6 +1,6 @@
 import AppKit
 import Combine
-import MeOrThemCore   // for AppearanceObserver (Bug 15: removed duplicate from MeOrThem/Utilities)
+import MeOrThemCore   // for AppearanceObserver
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var cancellables = Set<AnyCancellable>()
     private var menuLiveUpdate: AnyCancellable?
     private var menuWifiUpdate: AnyCancellable?
+    private var menuSpeedtestUpdate: AnyCancellable?
     private var countdownTimer: Timer?
     private var isPulsing = false
     private var hasInitialData = false
@@ -37,7 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        updateIcon(status: .green)  // shows grey loading circle until data arrives
+        updateIcon(status: .green)
         startLoadingBlink()
 
         let menu = NSMenu()
@@ -53,7 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.updateIcon(status: self.environment.metricStore.overallStatus)
             }
         }
-        t.tolerance = 0.05  // 50 ms tolerance — fine for a visual blink, aids power efficiency
+        t.tolerance = 0.05
         RunLoop.main.add(t, forMode: .common)
         loadingBlinkTimer = t
     }
@@ -66,11 +67,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func observeStatusChanges() {
         environment.metricStore.$overallStatus
-            .removeDuplicates()                     // skip redundant icon redraws
+            .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 guard let self else { return }
-                // Mark initial data as received once all targets have results
                 if !self.hasInitialData {
                     let targets = self.environment.settings.pingTargets
                     let store   = self.environment.metricStore
@@ -92,6 +92,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             .store(in: &cancellables)
 
+        environment.settings.$showLatencyInMenubar
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.updateIcon(status: self.environment.metricStore.overallStatus)
+            }
+            .store(in: &cancellables)
+
         environment.monitoringEngine.tickStarted
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in
@@ -103,6 +112,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.isPulsing = false
                     self.updateIcon(status: self.environment.metricStore.overallStatus)
                 }
+            }
+            .store(in: &cancellables)
+
+        // Update menubar text when new ping data arrives
+        environment.metricStore.$latestPing
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self, self.environment.settings.showLatencyInMenubar else { return }
+                self.updateIcon(status: self.environment.metricStore.overallStatus)
             }
             .store(in: &cancellables)
     }
@@ -119,7 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func updateIcon(status: MetricStatus) {
-        let showBar = environment.settings.alwaysShowBarChart
+        let showBar       = environment.settings.alwaysShowBarChart
         let recentStatuses = environment.metricStore.recentOverallStatuses(last: 5)
         let image = StatusBarIconRenderer.render(
             status: status,
@@ -129,13 +148,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             isLoading: !hasInitialData
         )
         statusItem.button?.image = image
+
+        // Menubar text mode: show average latency next to icon
+        if environment.settings.showLatencyInMenubar && hasInitialData && !environment.monitoringEngine.isPaused {
+            let targets = environment.settings.pingTargets
+            let store   = environment.metricStore
+            let rtts    = targets.compactMap { store.latestPing[$0.id]?.rtt }
+            if !rtts.isEmpty {
+                let avg = rtts.reduce(0, +) / Double(rtts.count)
+                statusItem.button?.title = String(format: " %.0fms", avg)
+            } else {
+                statusItem.button?.title = ""
+            }
+        } else if environment.settings.showLatencyInMenubar && environment.monitoringEngine.isPaused {
+            statusItem.button?.title = " —"
+        } else {
+            statusItem.button?.title = ""
+        }
+
         statusItem.button?.toolTip = "Me Or Them — \(status.label)"
     }
 
     // MARK: - NSMenuDelegate
 
     func menuWillOpen(_ menu: NSMenu) {
-        // Clear previous action registrations to avoid leaking closures
         ActionTarget.shared.clear()
 
         MenuBuilder.rebuild(menu, environment: environment, actions: MenuBuilder.Actions(
@@ -147,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             quit:         { NSApp.terminate(nil) }
         ))
 
-        // Refresh live items every time new ping data arrives while the menu is open
+        // Refresh live items when new ping data arrives
         menuLiveUpdate = environment.metricStore.$latestPing
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -156,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 MenuBuilder.refreshLiveItems(menu, environment: self.environment)
             }
 
-        // Refresh Network Details when WiFi state changes while menu is open
+        // Refresh network details when WiFi state changes or paused state changes
         menuWifiUpdate = environment.metricStore.$latestWifi
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -165,11 +201,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 MenuBuilder.refreshNetworkDetails(menu, environment: self.environment)
             }
 
-        // 1-second countdown ticker
+        // Refresh speedtest section when state changes (covers both running → completed and idle)
+        menuSpeedtestUpdate = environment.speedtestRunner.$state
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak menu] _ in
+                guard let self, let menu else { return }
+                MenuBuilder.refreshSpeedtestItems(menu, runner: self.environment.speedtestRunner,
+                                                  environment: self.environment)
+                // Also refresh live items to show/hide Paused state
+                MenuBuilder.refreshLiveItems(menu, environment: self.environment)
+            }
+
+        // 1-second timer: countdown + refresh network details for real-time TX rate
         let ct = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, let menu = self.statusItem.menu else { return }
                 MenuBuilder.refreshCountdown(menu, environment: self.environment)
+                MenuBuilder.refreshNetworkDetails(menu, environment: self.environment)
             }
         }
         ct.tolerance = 0.1
@@ -178,8 +227,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func menuDidClose(_ menu: NSMenu) {
-        menuLiveUpdate = nil
-        menuWifiUpdate = nil
+        menuLiveUpdate       = nil
+        menuWifiUpdate       = nil
+        menuSpeedtestUpdate  = nil
         countdownTimer?.invalidate()
         countdownTimer = nil
     }
