@@ -38,16 +38,37 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(pollIntervalSecs, forKey: "pollIntervalSecs") }
     }
 
+    // MARK: - Menubar text mode
+    /// When true, shows current average latency as text alongside the icon.
+    @Published var showLatencyInMenubar: Bool {
+        didSet { UserDefaults.standard.set(showLatencyInMenubar, forKey: "showLatencyInMenubar") }
+    }
+
+    // MARK: - Bandwidth scheduling (0 = disabled)
+    /// Auto-run bandwidth test every N hours. 0 disables.
+    @Published var bandwidthScheduleHours: Double {
+        didSet { UserDefaults.standard.set(bandwidthScheduleHours, forKey: "bandwidthScheduleHours") }
+    }
+
+    // MARK: - Log rotation
+    /// When true, daily summaries are written to ~/Library/Logs/MeOrThem/.
+    @Published var enableLogRotation: Bool {
+        didSet { UserDefaults.standard.set(enableLogRotation, forKey: "enableLogRotation") }
+    }
+
     private init() {
         let ud = UserDefaults.standard
 
-        pingTargets = (try? ud.decoded([PingTarget].self, forKey: "pingTargets")) ?? PingTarget.defaults
-        thresholds  = (try? ud.decoded(Thresholds.self, forKey: "thresholds")) ?? .default
+        pingTargets  = (try? ud.decoded([PingTarget].self, forKey: "pingTargets")) ?? PingTarget.defaults
+        thresholds   = (try? ud.decoded(Thresholds.self, forKey: "thresholds")) ?? .default
 
-        alwaysShowBarChart = ud.bool(forKey: "alwaysShowBarChart")  // default false
-        colorTheme = ColorTheme(rawValue: ud.string(forKey: "colorTheme") ?? "") ?? .system
-        launchAtLogin = ud.bool(forKey: "launchAtLogin")
-        pollIntervalSecs = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
+        alwaysShowBarChart        = ud.bool(forKey: "alwaysShowBarChart")
+        colorTheme                = ColorTheme(rawValue: ud.string(forKey: "colorTheme") ?? "") ?? .system
+        launchAtLogin             = ud.bool(forKey: "launchAtLogin")
+        pollIntervalSecs          = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
+        showLatencyInMenubar      = ud.bool(forKey: "showLatencyInMenubar")
+        bandwidthScheduleHours    = ud.double(forKey: "bandwidthScheduleHours")   // 0 = disabled
+        enableLogRotation         = ud.bool(forKey: "enableLogRotation")
     }
 
     private func encode<T: Encodable>(_ value: T, forKey key: String) {

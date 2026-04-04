@@ -1,5 +1,26 @@
 import AppKit
 
+// MARK: - Network Fault Type
+
+/// Describes the likely source of a detected network issue.
+enum NetworkFaultType: Equatable {
+    case none           // connection is healthy
+    case local          // gateway unreachable — WiFi/router problem
+    case isp            // gateway OK but all external targets fail — ISP/WAN problem
+    case mixed          // some external targets fail — partial outage or routing issue
+
+    var displayLabel: String {
+        switch self {
+        case .none:   return ""
+        case .local:  return "Likely cause: local network / router"
+        case .isp:    return "Likely cause: ISP / internet outage"
+        case .mixed:  return "Likely cause: partial outage or routing issue"
+        }
+    }
+}
+
+// MARK: - Metric Status
+
 enum MetricStatus: Int, Comparable, CaseIterable {
     case green  = 0
     case yellow = 1

@@ -6,7 +6,6 @@ import Combine
 enum WiFiMonitor {
     static func snapshot() -> WiFiSnapshot? {
         // CWWiFiClient is not thread-safe — must be called on main thread.
-        // MonitoringEngine dispatches this to @MainActor, so we are safe.
         let client = CWWiFiClient.shared()
         guard let iface = client.interface(), iface.wlanChannel() != nil else {
             return nil
@@ -28,9 +27,13 @@ enum WiFiMonitor {
 
         let ifaceName = iface.interfaceName ?? "en0"
 
+        // CoreWLAN may return nil for SSID on macOS 14+ without Location permission.
+        // Fall back to networksetup subprocess which doesn't require Location.
+        let ssid = iface.ssid() ?? fetchSSID(interface: ifaceName) ?? "—"
+
         return WiFiSnapshot(
             timestamp:      Date(),
-            ssid:           iface.ssid() ?? "Unknown",
+            ssid:           ssid,
             bssid:          iface.bssid() ?? "—",
             rssi:           rssi,
             noise:          noise,
@@ -50,6 +53,33 @@ enum WiFiMonitor {
         CWWiFiClient.shared().interface()?.interfaceName
     }
 
+    // MARK: - SSID fallback via networksetup (no Location permission required)
+
+    private static func fetchSSID(interface: String) -> String? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
+        task.arguments = ["-getairportnetwork", interface]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError  = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch { return nil }
+        let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                            encoding: .utf8) ?? ""
+        // Output: "Current Wi-Fi Network: MyNetworkName"
+        let prefix = "Current Wi-Fi Network: "
+        for line in output.components(separatedBy: "\n") {
+            if line.hasPrefix(prefix) {
+                let name = String(line.dropFirst(prefix.count))
+                    .trimmingCharacters(in: .whitespaces)
+                return name.isEmpty ? nil : name
+            }
+        }
+        return nil
+    }
+
     private static func phyModeString(_ mode: CWPHYMode) -> String {
         switch mode {
         case .modeNone: return "—"
@@ -64,7 +94,7 @@ enum WiFiMonitor {
     }
 }
 
-// MARK: - Reactive WiFi observer
+// MARK: - Reactive WiFi observer (app target — wraps CWEventDelegate)
 
 /// Subscribes to CWEventDelegate notifications and publishes fresh snapshots
 /// whenever the OS reports a signal-strength or SSID change.
@@ -72,7 +102,6 @@ enum WiFiMonitor {
 final class WiFiObserver: NSObject, CWEventDelegate {
     static let shared = WiFiObserver()
 
-    /// Fires with a new snapshot (or nil when disconnected) on every relevant event.
     let wifiChanged = PassthroughSubject<WiFiSnapshot?, Never>()
 
     private let client = CWWiFiClient.shared()
@@ -85,8 +114,6 @@ final class WiFiObserver: NSObject, CWEventDelegate {
         try? client.startMonitoringEvent(with: .linkDidChange)
         try? client.startMonitoringEvent(with: .linkQualityDidChange)
     }
-
-    // MARK: CWEventDelegate
 
     nonisolated func ssidDidChangeForWiFiInterface(withName interfaceName: String) {
         Task { @MainActor in wifiChanged.send(WiFiMonitor.snapshot()) }

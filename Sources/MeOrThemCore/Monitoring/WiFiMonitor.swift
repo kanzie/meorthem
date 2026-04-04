@@ -1,12 +1,11 @@
 import Foundation
 import CoreWLAN
-import Combine
 
 /// Reads current WiFi interface stats synchronously (always called on @MainActor).
+/// The reactive WiFiObserver lives only in the app target; Core contains just
+/// the snapshot function for testability.
 enum WiFiMonitor {
     static func snapshot() -> WiFiSnapshot? {
-        // CWWiFiClient is not thread-safe — must be called on main thread.
-        // MonitoringEngine dispatches this to @MainActor, so we are safe.
         let client = CWWiFiClient.shared()
         guard let iface = client.interface(), iface.ssid() != nil else {
             return nil
@@ -30,7 +29,7 @@ enum WiFiMonitor {
 
         return WiFiSnapshot(
             timestamp:      Date(),
-            ssid:           iface.ssid() ?? "Unknown",
+            ssid:           iface.ssid() ?? "—",
             bssid:          iface.bssid() ?? "—",
             rssi:           rssi,
             noise:          noise,
@@ -57,48 +56,5 @@ enum WiFiMonitor {
         case .mode11ax: return "802.11ax"
         @unknown default: return "Unknown"
         }
-    }
-}
-
-// MARK: - Reactive WiFi observer
-
-/// Subscribes to CWEventDelegate notifications and publishes fresh snapshots
-/// whenever the OS reports a signal-strength or SSID change.
-@MainActor
-final class WiFiObserver: NSObject, CWEventDelegate {
-    static let shared = WiFiObserver()
-
-    /// Fires with a new snapshot (or nil when disconnected) on every relevant event.
-    let wifiChanged = PassthroughSubject<WiFiSnapshot?, Never>()
-
-    private let client = CWWiFiClient.shared()
-
-    private override init() {
-        super.init()
-        client.delegate = self
-        try? client.startMonitoringEvent(with: .ssidDidChange)
-        try? client.startMonitoringEvent(with: .bssidDidChange)
-        try? client.startMonitoringEvent(with: .linkDidChange)
-        try? client.startMonitoringEvent(with: .linkQualityDidChange)
-    }
-
-    // MARK: CWEventDelegate
-
-    nonisolated func ssidDidChangeForWiFiInterface(withName interfaceName: String) {
-        Task { @MainActor in wifiChanged.send(WiFiMonitor.snapshot()) }
-    }
-
-    nonisolated func bssidDidChangeForWiFiInterface(withName interfaceName: String) {
-        Task { @MainActor in wifiChanged.send(WiFiMonitor.snapshot()) }
-    }
-
-    nonisolated func linkDidChangeForWiFiInterface(withName interfaceName: String) {
-        Task { @MainActor in wifiChanged.send(WiFiMonitor.snapshot()) }
-    }
-
-    nonisolated func linkQualityDidChangeForWiFiInterface(withName interfaceName: String,
-                                                          rssi: Int,
-                                                          transmitRate: Double) {
-        Task { @MainActor in wifiChanged.send(WiFiMonitor.snapshot()) }
     }
 }

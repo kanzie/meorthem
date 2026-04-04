@@ -17,8 +17,12 @@ enum MenuBuilder {
     static let tagLatency        = 1
     static let tagPacketLoss     = 2
     static let tagJitter         = 3
-    static let tagCountdown      = 4
+    static let tagCountdown      = 4   // unused; countdown is embedded in tagLatency
     static let tagNetworkDetails = 5
+    static let tagFaultType      = 6
+    static let tagSpeedtestLabel = 7
+    static let tagSpeedtestLast  = 8
+    static let tagSpeedtestResult = 9
     static let tagTargetBase     = 100   // tagTargetBase + index per target
 
     @MainActor
@@ -26,42 +30,54 @@ enum MenuBuilder {
         menu.removeAllItems()
         menu.autoenablesItems = false
 
-        let settings  = env.settings
-        let store     = env.metricStore
-        let targets   = settings.pingTargets
-        let threshold = settings.thresholds
+        let settings   = env.settings
+        let store      = env.metricStore
+        let targets    = settings.pingTargets
+        let threshold  = settings.thresholds
+        let paused     = env.monitoringEngine.isPaused
 
         // MARK: - Overall summary
-        let avgLoss = targets.compactMap { store.latestPing[$0.id]?.lossPercent }
-                             .reduce(0, +) / Double(max(targets.count, 1))
-
         let remaining = max(0, Int(env.monitoringEngine.nextTickAt.timeIntervalSinceNow))
+
         let latencyItem = staticItem(latencyString(targets: targets, store: store,
                                                    threshold: threshold,
                                                    pollSecs: settings.pollIntervalSecs,
-                                                   countdown: remaining))
+                                                   countdown: remaining,
+                                                   paused: paused))
         latencyItem.tag = tagLatency
         menu.addItem(latencyItem)
 
-        let lossItem = staticItem(String(format: "Packet Loss: %.1f%%", avgLoss))
+        let avgLoss = paused ? nil : targets.compactMap { store.latestPing[$0.id]?.lossPercent }
+                                             .reduce(0, +) / Double(max(targets.count, 1))
+        let lossItem = staticItem(paused ? "Packet Loss: Paused"
+                                         : String(format: "Packet Loss: %.1f%%", avgLoss ?? 0))
         lossItem.tag = tagPacketLoss
         menu.addItem(lossItem)
 
-        let jitterValues = targets.compactMap { store.latestPing[$0.id]?.jitter }
+        let jitterValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.jitter }
         let avgJitter = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
-        let jitterItem = staticItem(jitterValues.isEmpty
-            ? "Jitter: —"
-            : String(format: "Jitter: %.1fms avg", avgJitter))
+        let jitterItem = staticItem(paused ? "Jitter: Paused" :
+                                    (jitterValues.isEmpty
+                                        ? "Jitter: —"
+                                        : String(format: "Jitter: %.1fms avg", avgJitter)))
         jitterItem.tag = tagJitter
         menu.addItem(jitterItem)
+
+        // Fault type hint (shown only when there is a known fault)
+        let faultItem = staticItem(store.networkFaultType.displayLabel, color: .secondaryLabelColor)
+        faultItem.tag = tagFaultType
+        faultItem.isHidden = store.networkFaultType == .none
+        menu.addItem(faultItem)
 
         menu.addItem(.separator())
 
         // MARK: - Per-target rows
         for (i, target) in targets.enumerated() {
-            let result = store.latestPing[target.id]
-            let status = MetricStatus.forPingResult(result, thresholds: threshold)
-            let item = TargetMenuItemView.menuItem(target: target, result: result, status: status)
+            let result   = paused ? nil : store.latestPing[target.id]
+            let status   = store.effectiveStatus(for: target.id)
+            let spark    = store.sparklineData(for: target.id)
+            let item     = TargetMenuItemView.menuItem(target: target, result: result,
+                                                       status: status, sparkline: spark)
             item.tag = tagTargetBase + i
             menu.addItem(item)
         }
@@ -76,12 +92,18 @@ enum MenuBuilder {
         // MARK: - Actions
         menu.addItem(actionItem("Ping Stats Report", action: actions.copyReport))
 
-        let speedItem = actionItem(speedtestLabel(env.speedtestRunner), action: actions.runSpeedtest)
-        speedItem.isEnabled = !isSpeedtestRunning(env.speedtestRunner)
-        menu.addItem(speedItem)
+        let speedLabelItem = actionItem(speedtestLabel(env.speedtestRunner), action: actions.runSpeedtest)
+        speedLabelItem.isEnabled = !isSpeedtestRunning(env.speedtestRunner)
+        speedLabelItem.tag = tagSpeedtestLabel
+        menu.addItem(speedLabelItem)
 
-        menu.addItem(staticItem(env.speedtestRunner.lastCheckedText,  color: .secondaryLabelColor))
-        menu.addItem(staticItem(env.speedtestRunner.summaryText,      color: .secondaryLabelColor))
+        let lastItem = staticItem(env.speedtestRunner.lastCheckedText, color: .secondaryLabelColor)
+        lastItem.tag = tagSpeedtestLast
+        menu.addItem(lastItem)
+
+        let resultItem = staticItem(env.speedtestRunner.summaryText, color: .secondaryLabelColor)
+        resultItem.tag = tagSpeedtestResult
+        menu.addItem(resultItem)
 
         menu.addItem(.separator())
 
@@ -102,41 +124,68 @@ enum MenuBuilder {
         let store     = env.metricStore
         let targets   = settings.pingTargets
         let threshold = settings.thresholds
-
-        let avgLoss = targets.compactMap { store.latestPing[$0.id]?.lossPercent }
-                             .reduce(0, +) / Double(max(targets.count, 1))
+        let paused    = env.monitoringEngine.isPaused
 
         let remaining = max(0, Int(env.monitoringEngine.nextTickAt.timeIntervalSinceNow))
 
         if let item = menu.item(withTag: tagLatency) {
             item.attributedTitle = NSAttributedString(
-                string: latencyString(targets: targets, store: store,
-                                      threshold: threshold,
-                                      pollSecs: settings.pollIntervalSecs,
-                                      countdown: remaining),
-                attributes: _labelAttrs)
-        }
-        if let item = menu.item(withTag: tagPacketLoss) {
-            item.attributedTitle = NSAttributedString(
-                string: String(format: "Packet Loss: %.1f%%", avgLoss),
+                string: latencyString(targets: targets, store: store, threshold: threshold,
+                                      pollSecs: settings.pollIntervalSecs, countdown: remaining,
+                                      paused: paused),
                 attributes: _labelAttrs)
         }
 
-        let jitterValues = targets.compactMap { store.latestPing[$0.id]?.jitter }
+        let avgLoss = paused ? nil : targets.compactMap { store.latestPing[$0.id]?.lossPercent }
+                                             .reduce(0, +) / Double(max(targets.count, 1))
+        if let item = menu.item(withTag: tagPacketLoss) {
+            item.attributedTitle = NSAttributedString(
+                string: paused ? "Packet Loss: Paused"
+                               : String(format: "Packet Loss: %.1f%%", avgLoss ?? 0),
+                attributes: _labelAttrs)
+        }
+
+        let jitterValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.jitter }
         let avgJitter = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
         if let item = menu.item(withTag: tagJitter) {
             item.attributedTitle = NSAttributedString(
-                string: jitterValues.isEmpty
-                    ? "Jitter: —"
-                    : String(format: "Jitter: %.1fms avg", avgJitter),
+                string: paused ? "Jitter: Paused" :
+                        (jitterValues.isEmpty ? "Jitter: —"
+                         : String(format: "Jitter: %.1fms avg", avgJitter)),
                 attributes: _labelAttrs)
+        }
+
+        if let item = menu.item(withTag: tagFaultType) {
+            item.attributedTitle = NSAttributedString(
+                string: store.networkFaultType.displayLabel,
+                attributes: [.foregroundColor: NSColor.secondaryLabelColor, .font: _menuFont])
+            item.isHidden = store.networkFaultType == .none
         }
 
         for (i, target) in targets.enumerated() {
             guard let item = menu.item(withTag: tagTargetBase + i) else { continue }
-            let result = store.latestPing[target.id]
-            let status = MetricStatus.forPingResult(result, thresholds: threshold)
-            (item.view as? TargetMenuItemView)?.update(result: result, status: status)
+            let result = paused ? nil : store.latestPing[target.id]
+            let status = store.effectiveStatus(for: target.id)
+            let spark  = store.sparklineData(for: target.id)
+            (item.view as? TargetMenuItemView)?.update(result: result, status: status, sparkline: spark)
+        }
+    }
+
+    @MainActor
+    static func refreshSpeedtestItems(_ menu: NSMenu, runner: SpeedtestRunner, environment env: AppEnvironment) {
+        if let item = menu.item(withTag: tagSpeedtestLabel) {
+            item.attributedTitle = NSAttributedString(string: speedtestLabel(runner), attributes: _labelAttrs)
+            item.isEnabled = !isSpeedtestRunning(runner)
+        }
+        if let item = menu.item(withTag: tagSpeedtestLast) {
+            item.attributedTitle = NSAttributedString(
+                string: runner.lastCheckedText,
+                attributes: [.foregroundColor: NSColor.secondaryLabelColor, .font: _menuFont])
+        }
+        if let item = menu.item(withTag: tagSpeedtestResult) {
+            item.attributedTitle = NSAttributedString(
+                string: runner.summaryText,
+                attributes: [.foregroundColor: NSColor.secondaryLabelColor, .font: _menuFont])
         }
     }
 
@@ -154,10 +203,12 @@ enum MenuBuilder {
         let store     = env.metricStore
         let targets   = settings.pingTargets
         let threshold = settings.thresholds
+        let paused    = env.monitoringEngine.isPaused
         let remaining = max(0, Int(env.monitoringEngine.nextTickAt.timeIntervalSinceNow))
         item.attributedTitle = NSAttributedString(
             string: latencyString(targets: targets, store: store, threshold: threshold,
-                                  pollSecs: settings.pollIntervalSecs, countdown: remaining),
+                                  pollSecs: settings.pollIntervalSecs, countdown: remaining,
+                                  paused: paused),
             attributes: _labelAttrs)
     }
 
@@ -169,7 +220,6 @@ enum MenuBuilder {
         let sub = NSMenu(title: "Network Details")
 
         if let w = store.latestWifi ?? WiFiMonitor.snapshot() {
-            // WiFi connection
             sub.addItem(infoItem("WiFi — \(w.ssid)", bold: true))
             sub.addItem(.separator())
             if let ip = w.ipAddress   { sub.addItem(infoItem("IP Address:  \(ip)")) }
@@ -181,7 +231,6 @@ enum MenuBuilder {
             sub.addItem(infoItem(String(format: "Tx Rate:     %.3f Mbps", w.txRateMbps)))
             sub.addItem(infoItem("PHY Mode:    \(w.phyMode)"))
         } else {
-            // Ethernet or no network
             let wifiIfaceName = WiFiMonitor.interfaceName()
             if let eth = NetworkInfo.ethernetInfo(excluding: wifiIfaceName) {
                 sub.addItem(infoItem("Ethernet — \(eth.interface)", bold: true))
@@ -200,7 +249,6 @@ enum MenuBuilder {
         return parent
     }
 
-    /// Creates a view-based menu item displaying text in labelColor with no hover highlight.
     @MainActor
     private static func infoItem(_ text: String, bold: Bool = false) -> NSMenuItem {
         let item = NSMenuItem()
@@ -215,10 +263,14 @@ enum MenuBuilder {
     @MainActor
     private static func latencyString(targets: [PingTarget], store: MetricStore,
                                       threshold: Thresholds, pollSecs: Double,
-                                      countdown: Int? = nil) -> String {
-        let rtts = targets.compactMap { store.latestPing[$0.id]?.rtt }
+                                      countdown: Int? = nil,
+                                      paused: Bool = false) -> String {
         let intervalStr = pollSecs.truncatingRemainder(dividingBy: 1) == 0
             ? "\(Int(pollSecs))s" : String(format: "%.1fs", pollSecs)
+        if paused {
+            return "Latency: Paused · \(intervalStr)"
+        }
+        let rtts = targets.compactMap { store.latestPing[$0.id]?.rtt }
         let countdownSuffix: String
         if let cd = countdown, cd > 0 {
             countdownSuffix = " (\(cd)s)"
@@ -274,7 +326,6 @@ enum MenuBuilder {
 
 // MARK: - InfoMenuItemView: non-hoverable info row with labelColor text
 
-/// A plain NSView-based menu item that shows readable (non-grey) text without hover highlight.
 final class InfoMenuItemView: NSView {
     private static let font12 = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
     private static let font12b = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
@@ -300,13 +351,11 @@ final class InfoMenuItemView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError() }
-
-    // No background drawing → no hover highlight
     override var isOpaque: Bool { false }
 }
 
 // MARK: - ActionTarget: bridges closures to @objc targets
-/// NSMenuItem.target must be an NSObject. This singleton maps items → closures.
+
 @MainActor
 final class ActionTarget: NSObject {
     static let shared = ActionTarget()
