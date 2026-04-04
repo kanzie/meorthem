@@ -1,15 +1,28 @@
 import AppKit
 import PDFKit
+import os.log
+
+private let pdfLog = Logger(subsystem: "com.meorthem", category: "PDFExporter")
 
 @MainActor
 enum PDFExporter {
     static func export(store: MetricStore, targets: [PingTarget], thresholds: Thresholds = .default) -> PDFDocument {
+        pdfLog.info("export: entry — thread=\(Thread.isMainThread ? "main" : "background"), targets=\(targets.count)")
         let pageSize = CGRect(x: 0, y: 0, width: 595, height: 842)  // A4
         let document = PDFDocument()
         let data = renderPage(store: store, targets: targets, thresholds: thresholds, pageSize: pageSize)
+        pdfLog.info("export: renderPage returned \(data.count) bytes")
 
-        if let page = PDFPage(image: NSImage(data: data) ?? NSImage()) {
-            document.insert(page, at: 0)
+        if let image = NSImage(data: data) {
+            pdfLog.info("export: NSImage created from data, size=\(image.size.width)x\(image.size.height)")
+            if let page = PDFPage(image: image) {
+                document.insert(page, at: 0)
+                pdfLog.info("export: PDFPage inserted, pageCount=\(document.pageCount)")
+            } else {
+                pdfLog.error("export: PDFPage(image:) returned nil — data.count=\(data.count)")
+            }
+        } else {
+            pdfLog.error("export: NSImage(data:) returned nil — data.count=\(data.count)")
         }
         return document
     }
@@ -19,8 +32,9 @@ enum PDFExporter {
     private static func renderPage(store: MetricStore, targets: [PingTarget], thresholds: Thresholds, pageSize: CGRect) -> Data {
         let scale: CGFloat = 2  // Retina
         let bitmapSize = NSSize(width: pageSize.width * scale, height: pageSize.height * scale)
+        pdfLog.info("renderPage: bitmapSize=\(bitmapSize.width)x\(bitmapSize.height)")
 
-        let rep = NSBitmapImageRep(
+        guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
             pixelsWide: Int(bitmapSize.width),
             pixelsHigh: Int(bitmapSize.height),
@@ -31,17 +45,29 @@ enum PDFExporter {
             colorSpaceName: .calibratedRGB,
             bytesPerRow: 0,
             bitsPerPixel: 0
-        )!
+        ) else {
+            pdfLog.error("renderPage: NSBitmapImageRep init returned nil — returning empty data")
+            return Data()
+        }
+        pdfLog.info("renderPage: NSBitmapImageRep created")
+
+        guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else {
+            pdfLog.error("renderPage: NSGraphicsContext(bitmapImageRep:) returned nil")
+            return Data()
+        }
+        pdfLog.info("renderPage: NSGraphicsContext created, drawing content")
 
         NSGraphicsContext.saveGraphicsState()
-        let ctx = NSGraphicsContext(bitmapImageRep: rep)!
         ctx.cgContext.scaleBy(x: scale, y: scale)
         NSGraphicsContext.current = ctx
 
         drawContent(store: store, targets: targets, thresholds: thresholds, in: pageSize)
 
         NSGraphicsContext.restoreGraphicsState()
-        return rep.representation(using: .png, properties: [:]) ?? Data()
+        pdfLog.info("renderPage: drawing complete, generating PNG data")
+        let data = rep.representation(using: .png, properties: [:]) ?? Data()
+        pdfLog.info("renderPage: PNG data size=\(data.count)")
+        return data
     }
 
     private static func drawContent(store: MetricStore, targets: [PingTarget], thresholds: Thresholds, in rect: CGRect) {
