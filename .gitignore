@@ -18,3 +18,8 @@ build/
 # Editor
 .idea/
 *.swp
+
+# Internal / AI tooling
+.claude/
+CLAUDE.md.old
+FIXES.md
