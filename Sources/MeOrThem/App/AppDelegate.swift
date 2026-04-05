@@ -22,6 +22,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Last known download speed from completed bandwidth test.
     private var lastDownloadMbps: Double?
 
+    /// Whether a bandwidth test is currently running (drives bar blink animation).
+    private var bandwidthTestRunning = false
+    private var bandwidthBlinkTimer: Timer?
+    private var bandwidthBlinkVisible = false
+
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -157,28 +162,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
                 guard let self else { return }
-                if case .completed(let result) = state {
+                switch state {
+                case .running:
+                    self.bandwidthTestRunning = true
+                    self.startBandwidthBlink()
+                case .completed(let result):
                     self.lastDownloadMbps = result.downloadMbps
-                    self.updateIcon(status: self.environment.metricStore.overallStatus)
+                    self.bandwidthTestRunning = false
+                    self.stopBandwidthBlink()
+                case .idle, .failed, .unavailable:
+                    self.bandwidthTestRunning = false
+                    self.stopBandwidthBlink()
                 }
+                self.updateIcon(status: self.environment.metricStore.overallStatus)
             }
             .store(in: &cancellables)
+    }
+
+    private func startBandwidthBlink() {
+        guard bandwidthBlinkTimer == nil else { return }
+        let t = Timer.scheduledTimer(withTimeInterval: 1.0 / 6.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.bandwidthTestRunning else { return }
+                self.bandwidthBlinkVisible.toggle()
+                self.updateIcon(status: self.environment.metricStore.overallStatus)
+            }
+        }
+        t.tolerance = 0.03
+        RunLoop.main.add(t, forMode: .common)
+        bandwidthBlinkTimer = t
+    }
+
+    private func stopBandwidthBlink() {
+        bandwidthBlinkTimer?.invalidate()
+        bandwidthBlinkTimer = nil
+        bandwidthBlinkVisible = false
     }
 
     private func updateIcon(status: MetricStatus) {
         let showBar        = environment.settings.alwaysShowBarChart
         let recentStatuses = environment.metricStore.recentOverallStatuses(last: 5)
         let settings       = environment.settings
+        let paused         = environment.monitoringEngine.isManuallyPaused
         let image = StatusBarIconRenderer.render(
-            status:                status,
-            targetStatuses:        recentStatuses,
-            showBarChart:          showBar,
-            pulse:                 hasInitialData ? isPulsing : loadingDotVisible,
-            isLoading:             !hasInitialData,
-            bandwidthMbps:         lastDownloadMbps,
-            showBandwidthBar:      settings.showBandwidthBar,
-            bandwidthBarRedMbps:   settings.bandwidthBarRedMbps,
-            bandwidthBarYellowMbps: settings.bandwidthBarYellowMbps
+            status:                  status,
+            targetStatuses:          recentStatuses,
+            showBarChart:            showBar,
+            pulse:                   hasInitialData ? isPulsing : loadingDotVisible,
+            isLoading:               !hasInitialData,
+            isPaused:                paused,
+            bandwidthMbps:           lastDownloadMbps,
+            showBandwidthBar:        settings.showBandwidthBar,
+            bandwidthBarRunning:     bandwidthTestRunning,
+            bandwidthBarBlinkVisible: bandwidthBlinkVisible,
+            bandwidthBarRedMbps:     settings.bandwidthBarRedMbps,
+            bandwidthBarYellowMbps:  settings.bandwidthBarYellowMbps
         )
         statusItem.button?.image = image
 
