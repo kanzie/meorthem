@@ -7,15 +7,16 @@ final class HelpWindowController: NSWindowController {
 
     private init() {
         let vc = NSHostingController(rootView: HelpView())
-        vc.sizingOptions = .preferredContentSize
+        // Do NOT set sizingOptions — that would let SwiftUI dictate the window size.
+        // The window owns its size; content reflows to fit.
 
         let window = NSWindow(contentViewController: vc)
         window.title = "Me Or Them — Help"
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 420, height: 620))
-        window.minSize = NSSize(width: 320, height: 400)
-        window.maxSize = NSSize(width: 800, height: 1200)
+        window.setContentSize(NSSize(width: 360, height: 600))
+        window.minSize = NSSize(width: 280, height: 360)
+        window.maxSize = NSSize(width: 900, height: 1400)
         window.center()
 
         super.init(window: window)
@@ -24,6 +25,10 @@ final class HelpWindowController: NSWindowController {
     required init?(coder: NSCoder) { fatalError() }
 
     func showAndFocus() {
+        // Re-center only on first show (window position is nil until displayed)
+        if !(window?.isVisible ?? false) {
+            window?.center()
+        }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -80,7 +85,7 @@ private struct HelpView: View {
                 temporaryNote
                     .padding(.bottom, 20)
             }
-            .padding(20)
+            .padding(16)
         }
     }
 
@@ -111,43 +116,40 @@ private struct HelpView: View {
             Text(eli5)
                 .font(.body)
                 .foregroundColor(.primary)
-                .fixedSize(horizontal: false, vertical: true)
 
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 8) {
                 // Left box: typical ranges
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 5) {
                     Label("Typical ranges", systemImage: "ruler")
                         .font(.caption).bold()
                         .foregroundColor(.secondary)
                     Text(normal)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.primary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .cornerRadius(8)
 
-                // Right box: recommended value under (per use case)
-                VStack(alignment: .leading, spacing: 6) {
+                // Right box: recommended thresholds
+                VStack(alignment: .leading, spacing: 5) {
                     Label("Rec. under", systemImage: "checkmark.circle")
                         .font(.caption).bold()
                         .foregroundColor(.secondary)
                     ForEach(useCases, id: \.0) { useCase, threshold in
-                        HStack(spacing: 6) {
+                        HStack {
                             Text(useCase)
                                 .font(.caption)
-                                .lineLimit(1)
+                            Spacer()
                             Text(threshold)
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundColor(.secondary)
-                                .lineLimit(1)
                         }
                     }
                 }
                 .padding(10)
-                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .cornerRadius(8)
             }
@@ -155,7 +157,6 @@ private struct HelpView: View {
             Text(concern)
                 .font(.callout)
                 .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -166,7 +167,6 @@ private struct HelpView: View {
             Text("Occasional latency spikes, a brief burst of jitter during a large download, or 1–2 lost packets per hour are all perfectly normal. Me Or Them applies hysteresis — it only turns yellow after two consecutive bad readings, and red after three. A single-poll warning almost always means nothing.")
                 .font(.body)
                 .foregroundColor(.primary)
-                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
