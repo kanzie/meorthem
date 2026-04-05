@@ -20,7 +20,7 @@ final class SpeedtestRunner: ObservableObject {
     private var runningTask: Task<Void, Never>?
 
     func run() {
-        guard case .idle = state else { return }
+        if case .running = state { return }
         runningTask?.cancel()
         state = .running
 
