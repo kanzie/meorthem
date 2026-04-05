@@ -92,26 +92,37 @@ final class MetricStore: ObservableObject {
 
     private func recomputeOverallStatus() {
         var worst: MetricStatus = .green
+        // Compute and collect effective statuses in one pass; reuse in fault-type logic
+        // to avoid calling forPingResult() + applyHysteresis() a second time per target.
+        var effectiveStatuses = [UUID: MetricStatus](minimumCapacity: latestPing.count)
         for (targetID, result) in latestPing {
-            guard targetID != PingTarget.gatewayID else { continue }  // gateway handled separately
+            guard targetID != PingTarget.gatewayID else { continue }
             let raw = MetricStatus.forPingResult(result, thresholds: settings.thresholds)
             let effective = applyHysteresis(raw: raw, count: consecutiveBadCount[targetID, default: 0])
+            effectiveStatuses[targetID] = effective
             if effective > worst { worst = effective }
         }
         overallStatus = worst
         statusHistory.append(worst)
-        recomputeFaultType()
+        recomputeFaultType(using: effectiveStatuses)
     }
 
-    private func recomputeFaultType() {
+    /// Called from recomputeOverallStatus (statuses pre-computed) or standalone from recordGatewayPing.
+    private func recomputeFaultType(using precomputed: [UUID: MetricStatus]? = nil) {
         guard overallStatus != .green else { networkFaultType = .none; return }
         guard let gw = latestGatewayPing else { networkFaultType = .none; return }
 
         let gatewayOk = gw.lossPercent < settings.thresholds.lossYellowPct
-        let externalStatuses = latestPing.keys
-            .filter { $0 != PingTarget.gatewayID }
-            .map { effectiveStatus(for: $0) }
-        let allFailed = !externalStatuses.isEmpty && externalStatuses.allSatisfy { $0 == .red }
+        // Use pre-computed statuses when available; otherwise compute fresh (gateway-only path).
+        let statuses: [MetricStatus]
+        if let precomputed {
+            statuses = Array(precomputed.values)
+        } else {
+            statuses = latestPing.keys
+                .filter { $0 != PingTarget.gatewayID }
+                .map { effectiveStatus(for: $0) }
+        }
+        let allFailed = !statuses.isEmpty && statuses.allSatisfy { $0 == .red }
 
         if !gatewayOk {
             networkFaultType = .local

@@ -63,23 +63,38 @@ final class TargetMenuItemView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    // Cache last rendered values to skip redundant String(format:) calls on unchanged data.
+    private var _lastRTT: Double?       = .nan   // .nan sentinel = "never set"
+    private var _lastResultNil: Bool    = true
+    private var _lastLoss: Double       = -1     // -1 sentinel = "never set"
+
     func update(result: PingResult?, status: MetricStatus, sparkline: [Double] = []) {
         dotView.statusColor = status.color
 
-        if let rtt = result?.rtt {
-            rttLabel.stringValue = String(format: "%.1f ms", rtt)
-            rttLabel.textColor   = .labelColor
-        } else {
-            rttLabel.stringValue = result == nil ? "—" : "timeout"
-            rttLabel.textColor   = .secondaryLabelColor
+        let rtt = result?.rtt
+        let resultNil = result == nil
+        if rtt != _lastRTT || resultNil != _lastResultNil {
+            _lastRTT = rtt
+            _lastResultNil = resultNil
+            if let rtt {
+                rttLabel.stringValue = String(format: "%.1f ms", rtt)
+                rttLabel.textColor   = .labelColor
+            } else {
+                rttLabel.stringValue = resultNil ? "—" : "timeout"
+                rttLabel.textColor   = .secondaryLabelColor
+            }
         }
 
-        if let loss = result?.lossPercent, loss > 0 {
-            lossLabel.stringValue = String(format: "%.0f%% loss", loss)
-            lossLabel.isHidden    = false
-        } else {
-            lossLabel.stringValue = ""
-            lossLabel.isHidden    = true
+        let loss = result?.lossPercent ?? 0
+        if loss != _lastLoss {
+            _lastLoss = loss
+            if loss > 0 {
+                lossLabel.stringValue = String(format: "%.0f%% loss", loss)
+                lossLabel.isHidden    = false
+            } else {
+                lossLabel.stringValue = ""
+                lossLabel.isHidden    = true
+            }
         }
 
         if !sparkline.isEmpty {
@@ -109,18 +124,19 @@ final class TargetMenuItemView: NSView {
 /// Draws a tiny 40×16 pt sparkline of recent RTT values.
 private final class SparklineView: NSView {
     private var values: [Double]
-    private var color: NSColor
+    // strokeColor is pre-computed from status.color — avoids NSColor allocation on every draw().
+    private var strokeColor: NSColor
 
     init(values: [Double], status: MetricStatus) {
-        self.values = values
-        self.color  = status.color
+        self.values      = values
+        self.strokeColor = status.color.withAlphaComponent(0.7)
         super.init(frame: .zero)
     }
     required init?(coder: NSCoder) { fatalError() }
 
     func update(values: [Double], status: MetricStatus) {
-        self.values = values
-        self.color  = status.color
+        self.values      = values
+        self.strokeColor = status.color.withAlphaComponent(0.7)
         needsDisplay = true
     }
 
@@ -144,7 +160,7 @@ private final class SparklineView: NSView {
             else { path.line(to: NSPoint(x: x, y: y)) }
         }
 
-        color.withAlphaComponent(0.7).setStroke()
+        strokeColor.setStroke()
         path.stroke()
     }
 
