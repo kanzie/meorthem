@@ -12,6 +12,11 @@ final class LogExporter {
     private var dailyTimer:  Timer?
 
     private static let kMaxRotatedFiles = 30
+    private static let _dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
     private static let logDir: URL = {
         let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
         return lib.appendingPathComponent("Logs/MeOrThem", isDirectory: true)
@@ -107,8 +112,6 @@ final class LogExporter {
     }
 
     private func todayFileName() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return "meorthem-\(f.string(from: Date())).csv"
+        "meorthem-\(Self._dateFormatter.string(from: Date())).csv"
     }
 }

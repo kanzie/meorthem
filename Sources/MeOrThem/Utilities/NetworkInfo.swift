@@ -53,12 +53,13 @@ enum NetworkInfo {
         var ptr: UnsafeMutablePointer<ifaddrs>? = first
         while let iface = ptr {
             let name   = String(cString: iface.pointee.ifa_name)
-            let family = iface.pointee.ifa_addr.pointee.sa_family
+            guard let ifaAddr = iface.pointee.ifa_addr else { ptr = iface.pointee.ifa_next; continue }
+            let family = ifaAddr.pointee.sa_family
 
             if name.hasPrefix("en") {
                 if name == wifiInterface { ptr = iface.pointee.ifa_next; continue }
                 if family == UInt8(AF_INET), candidate == nil {
-                    var addr = iface.pointee.ifa_addr.withMemoryRebound(
+                    var addr = ifaAddr.withMemoryRebound(
                         to: sockaddr_in.self, capacity: 1) { $0.pointee }
                     var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
                     inet_ntop(AF_INET, &addr.sin_addr, &buf, socklen_t(INET_ADDRSTRLEN))
@@ -66,7 +67,7 @@ enum NetworkInfo {
                     if !ip.hasPrefix("127.") { candidate = (name, ip) }
 
                 } else if family == UInt8(AF_LINK) {
-                    let sdl  = iface.pointee.ifa_addr.withMemoryRebound(
+                    let sdl  = ifaAddr.withMemoryRebound(
                         to: sockaddr_dl.self, capacity: 1) { $0.pointee }
                     let len  = Int(sdl.sdl_alen)
                     let nlen = Int(sdl.sdl_nlen)
@@ -96,9 +97,10 @@ enum NetworkInfo {
         var ptr: UnsafeMutablePointer<ifaddrs>? = first
         while let iface = ptr {
             let name = String(cString: iface.pointee.ifa_name)
+            guard let ifaAddr = iface.pointee.ifa_addr else { ptr = iface.pointee.ifa_next; continue }
             if name == interfaceName,
-               iface.pointee.ifa_addr.pointee.sa_family == UInt8(AF_INET) {
-                var addr = iface.pointee.ifa_addr.withMemoryRebound(
+               ifaAddr.pointee.sa_family == UInt8(AF_INET) {
+                var addr = ifaAddr.withMemoryRebound(
                     to: sockaddr_in.self, capacity: 1) { $0.pointee }
                 var buf = [CChar](repeating: 0, count: Int(INET_ADDRSTRLEN))
                 inet_ntop(AF_INET, &addr.sin_addr, &buf, socklen_t(INET_ADDRSTRLEN))

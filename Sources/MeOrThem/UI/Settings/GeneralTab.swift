@@ -3,6 +3,7 @@ import SwiftUI
 struct GeneralTab: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var loginError: String?
+    @State private var isUpdatingLogin = false
     private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
 
     var body: some View {
@@ -10,6 +11,9 @@ struct GeneralTab: View {
             Section("Startup") {
                 Toggle("Launch at Login", isOn: $settings.launchAtLogin)
                     .onChange(of: settings.launchAtLogin) { _, enabled in
+                        guard !isUpdatingLogin else { return }
+                        isUpdatingLogin = true
+                        defer { isUpdatingLogin = false }
                         loginError = nil
                         do {
                             try LaunchAtLoginHelper.set(enabled)

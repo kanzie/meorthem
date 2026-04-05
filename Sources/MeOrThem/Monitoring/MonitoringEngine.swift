@@ -78,6 +78,7 @@ final class MonitoringEngine {
 
     /// Call when poll interval setting changes — does not fire an immediate tick.
     func restart(interval: Double? = nil) {
+        guard !isPaused else { return }
         // Reset adaptive mode when restarted externally
         if interval != nil {
             isAdaptiveMode = false
