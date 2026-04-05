@@ -14,7 +14,7 @@ struct SettingsView: View {
             ThresholdsTab()
                 .tabItem { Label("Thresholds", systemImage: "dial.medium") }
         }
-        .frame(width: 520, height: 440)
+        .frame(width: 540, height: 460)
         .preferredColorScheme(colorScheme(for: settings.colorTheme))
     }
 

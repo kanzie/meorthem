@@ -14,8 +14,14 @@ final class MonitoringEngine {
     /// The scheduled fire date of the next poll tick (updated when the timer is scheduled).
     private(set) var nextTickAt: Date = .distantFuture
 
-    /// Whether monitoring is paused (e.g., during a bandwidth test).
+    /// Whether monitoring is paused (auto-pause during bandwidth test, or manual user pause).
     private(set) var isPaused = false
+
+    /// Whether monitoring was explicitly paused by the user (disables bandwidth test trigger).
+    private(set) var isManuallyPaused = false
+
+    /// Most recently resolved default gateway IP (used to display gateway target in UI).
+    private(set) var lastGatewayIP: String?
 
     // MARK: - Adaptive polling state
     private var consecutiveNonGreenPolls = 0
@@ -38,7 +44,7 @@ final class MonitoringEngine {
         nextTickAt = .distantFuture
     }
 
-    /// Pause polling (e.g., during bandwidth test). Does not affect isRunning — resume() restarts.
+    /// Auto-pause (e.g., during bandwidth test). Ignored if user manually paused.
     func pause() {
         guard !isPaused else { return }
         isPaused = true
@@ -46,11 +52,26 @@ final class MonitoringEngine {
         nextTickAt = .distantFuture
     }
 
-    /// Resume polling after pause().
+    /// Auto-resume after bandwidth test. Ignored if user manually paused.
     func resume() {
-        guard isPaused else { return }
+        guard isPaused, !isManuallyPaused else { return }
         isPaused = false
-        // Re-enter at current adaptive interval if applicable, otherwise user interval
+        let interval = isAdaptiveMode ? max(2, settings.pollIntervalSecs / 2) : settings.pollIntervalSecs
+        startEngine(interval: interval, fireImmediately: true)
+    }
+
+    /// User-initiated pause — stops monitoring and disables auto-resume.
+    func manualPause() {
+        isManuallyPaused = true
+        isPaused = true
+        stop()
+        nextTickAt = .distantFuture
+    }
+
+    /// User-initiated resume — re-enables auto-resume and restarts monitoring.
+    func manualResume() {
+        isManuallyPaused = false
+        isPaused = false
         let interval = isAdaptiveMode ? max(2, settings.pollIntervalSecs / 2) : settings.pollIntervalSecs
         startEngine(interval: interval, fireImmediately: true)
     }
@@ -128,8 +149,12 @@ final class MonitoringEngine {
             store.recordGatewayPing(nil)
             return
         }
+        lastGatewayIP = gatewayIP
         let result = await Self.pingHost(gatewayIP)
-        store.recordGatewayPing(result)
+        // Store in regular history so gateway target shows sparklines + latency in the menu.
+        store.record(result: result, for: PingTarget.gatewayID)
+        // Also record for fault isolation logic.
+        store.recordGatewayPing(result, gatewayIP: gatewayIP)
     }
 
     // MARK: - Adaptive polling

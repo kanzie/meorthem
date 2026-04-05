@@ -1,6 +1,7 @@
 import Foundation
 import CoreWLAN
 import Combine
+import SystemConfiguration
 
 /// Reads current WiFi interface stats synchronously (always called on @MainActor).
 enum WiFiMonitor {
@@ -29,7 +30,10 @@ enum WiFiMonitor {
 
         // CoreWLAN may return nil for SSID on macOS 14+ without Location permission.
         // Fall back to networksetup subprocess which doesn't require Location.
-        let ssid = iface.ssid() ?? fetchSSID(interface: ifaceName) ?? "—"
+        let ssid = iface.ssid()
+            ?? fetchSSIDFromDynamicStore(interface: ifaceName)
+            ?? fetchSSIDFromNetworksetup(interface: ifaceName)
+            ?? "—"
 
         return WiFiSnapshot(
             timestamp:      Date(),
@@ -53,9 +57,23 @@ enum WiFiMonitor {
         CWWiFiClient.shared().interface()?.interfaceName
     }
 
-    // MARK: - SSID fallback via networksetup (no Location permission required)
+    // MARK: - SSID via SCDynamicStore (no Location permission required)
 
-    private static func fetchSSID(interface: String) -> String? {
+    /// Reads SSID directly from the OS network configuration state store.
+    /// This is the most reliable method on macOS 14+ without Location permission.
+    private static func fetchSSIDFromDynamicStore(interface: String) -> String? {
+        guard let store = SCDynamicStoreCreate(nil, "com.meorthem.ssid" as CFString, nil, nil) else {
+            return nil
+        }
+        let key = "State:/Network/Interface/\(interface)/AirPort" as CFString
+        guard let dict = SCDynamicStoreCopyValue(store, key) as? [String: Any] else { return nil }
+        let ssid = dict["SSID_STR"] as? String
+        return ssid?.isEmpty == false ? ssid : nil
+    }
+
+    // MARK: - SSID fallback via networksetup subprocess
+
+    private static func fetchSSIDFromNetworksetup(interface: String) -> String? {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/networksetup")
         task.arguments = ["-getairportnetwork", interface]
@@ -68,12 +86,11 @@ enum WiFiMonitor {
         } catch { return nil }
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
                             encoding: .utf8) ?? ""
-        // Output: "Current Wi-Fi Network: MyNetworkName"
         let prefix = "Current Wi-Fi Network: "
         for line in output.components(separatedBy: "\n") {
             if line.hasPrefix(prefix) {
                 let name = String(line.dropFirst(prefix.count))
-                    .trimmingCharacters(in: .whitespaces)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 return name.isEmpty ? nil : name
             }
         }

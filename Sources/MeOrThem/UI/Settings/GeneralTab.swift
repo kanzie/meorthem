@@ -46,6 +46,33 @@ struct GeneralTab: View {
                 .pickerStyle(.menu)
                 Text("Latency polling is paused while a bandwidth test runs.")
                     .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("Show bandwidth bar in menu bar", isOn: $settings.showBandwidthBar)
+                    .help("Displays a thin colored bar under the status icon reflecting download speed after a bandwidth test.")
+                if settings.showBandwidthBar {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Red below")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack(spacing: 4) {
+                                TextField("Mbps", value: $settings.bandwidthBarRedMbps, format: .number)
+                                    .frame(width: 60)
+                                    .textFieldStyle(.roundedBorder)
+                                Text("Mbps").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Yellow below")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack(spacing: 4) {
+                                TextField("Mbps", value: $settings.bandwidthBarYellowMbps, format: .number)
+                                    .frame(width: 60)
+                                    .textFieldStyle(.roundedBorder)
+                                Text("Mbps").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
             }
 
             Section("Appearance") {
