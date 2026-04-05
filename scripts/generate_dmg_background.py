@@ -23,13 +23,14 @@ OUT_PNG    = os.path.join(OUT_DIR, "dmg_background.png")
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ── Dimensions ────────────────────────────────────────────────────────────────
-# DMG window: {200,150,1000,650} → 800×500 logical → 1600×1000 at @2x
-W, H = 1600, 1000
+# Background image displayed by Finder at 1:1 pixel-to-point.
+# Target window size: ~1270×686 (measured from actual Finder window).
+W, H = 1270, 686
 
-# Icon centres in @2x image coords (Quartz: origin = bottom-left)
-# Finder logical {220,240}: x_img = 220*2=440, y_img = (500-240)*2=520
-APP_X, APP_Y   = 440, 520
-APPL_X, APPL_Y = 1160, 520
+# Icon positions match AppleScript set position {320,300} and {950,300}.
+# Quartz origin is bottom-left, so y_img = H - y_finder
+APP_X, APP_Y   = 320, 386   # H - 300 = 386
+APPL_X, APPL_Y = 950, 386
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def srgb(r, g, b, a=1.0):
@@ -137,5 +138,21 @@ def save_png(ns_image, path):
 
 save_png(img, OUT_PNG)
 
+# NSImage.lockFocus renders at the screen's native Retina scale (e.g. @2x),
+# which doubles the pixel dimensions and sets DPI accordingly.
+# Finder calculates logical display size as pixels ÷ (dpi/72).
+# Force DPI to 72 so Finder displays at exactly the intended pixel dimensions.
+import subprocess
+subprocess.run(
+    ["sips", "-z", str(H), str(W), "-s", "dpiWidth", "72", "-s", "dpiHeight", "72", OUT_PNG],
+    capture_output=True, check=True
+)
+
+# Verify final dimensions
+info = subprocess.run(
+    ["sips", "-g", "pixelWidth", "-g", "pixelHeight", "-g", "dpiWidth", OUT_PNG],
+    capture_output=True, text=True
+)
+print(info.stdout.strip())
 print()
 print("  Background image ready.")
