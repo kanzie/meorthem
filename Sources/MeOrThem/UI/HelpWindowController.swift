@@ -11,11 +11,11 @@ final class HelpWindowController: NSWindowController {
 
         let window = NSWindow(contentViewController: vc)
         window.title = "Me Or Them — Help"
-        window.styleMask = [.titled, .closable, .resizable]
+        window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 480, height: 620))
-        window.minSize = NSSize(width: 340, height: 400)
-        window.maxSize = NSSize(width: 600, height: 900)
+        window.setContentSize(NSSize(width: 420, height: 620))
+        window.minSize = NSSize(width: 320, height: 400)
+        window.maxSize = NSSize(width: 800, height: 1200)
         window.center()
 
         super.init(window: window)
@@ -131,23 +131,23 @@ private struct HelpView: View {
 
                 // Right box: recommended value under (per use case)
                 VStack(alignment: .leading, spacing: 6) {
-                    Label("Recommended value under", systemImage: "checkmark.circle")
+                    Label("Rec. under", systemImage: "checkmark.circle")
                         .font(.caption).bold()
                         .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                     ForEach(useCases, id: \.0) { useCase, threshold in
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             Text(useCase)
                                 .font(.caption)
-                            Spacer()
+                                .lineLimit(1)
                             Text(threshold)
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundColor(.secondary)
+                                .lineLimit(1)
                         }
                     }
                 }
                 .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: true, vertical: false)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .cornerRadius(8)
             }
