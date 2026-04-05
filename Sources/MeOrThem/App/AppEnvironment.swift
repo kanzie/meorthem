@@ -13,6 +13,7 @@ final class AppEnvironment {
 
     private var cancellables = Set<AnyCancellable>()
     private var bandwidthScheduleTimer: Timer?
+    private var lastBandwidthScheduleHours: Double = 0
 
     init() {
         settings          = AppSettings.shared
@@ -62,10 +63,22 @@ final class AppEnvironment {
             }
             .store(in: &cancellables)
 
-        // Bandwidth test scheduling
+        // Bandwidth test scheduling — trigger immediately when enabling from disabled.
+        lastBandwidthScheduleHours = settings.bandwidthScheduleHours
+        rescheduleBandwidthTimer(hours: settings.bandwidthScheduleHours)
         settings.$bandwidthScheduleHours
+            .dropFirst()
             .sink { [weak self] hours in
-                self?.rescheduleBandwidthTimer(hours: hours)
+                guard let self else { return }
+                let wasDisabled = self.lastBandwidthScheduleHours == 0
+                self.lastBandwidthScheduleHours = hours
+                self.rescheduleBandwidthTimer(hours: hours)
+                if wasDisabled && hours > 0 {
+                    Task { @MainActor [weak self] in
+                        guard let self, case .idle = self.speedtestRunner.state else { return }
+                        self.speedtestRunner.run()
+                    }
+                }
             }
             .store(in: &cancellables)
 
