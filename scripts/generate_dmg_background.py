@@ -18,19 +18,18 @@ except ImportError:
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR    = os.path.join(SCRIPT_DIR, "assets")
-OUT_2X     = os.path.join(OUT_DIR, "dmg_background@2x.png")
-OUT_1X     = os.path.join(OUT_DIR, "dmg_background.png")
+OUT_PNG    = os.path.join(OUT_DIR, "dmg_background.png")
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ── Dimensions ────────────────────────────────────────────────────────────────
-# DMG window: {400,100,940,420} → 540×320 logical → 1080×640 at @2x
-W, H = 1080, 640
+# DMG window: {200,150,1000,650} → 800×500 logical → 1600×1000 at @2x
+W, H = 1600, 1000
 
 # Icon centres in @2x image coords (Quartz: origin = bottom-left)
-# Finder logical {150,150}: x_img = 150*2, y_img = (320-150)*2
-APP_X, APP_Y  = 300, 340
-APPL_X, APPL_Y = 780, 340
+# Finder logical {220,240}: x_img = 220*2=440, y_img = (500-240)*2=520
+APP_X, APP_Y   = 440, 520
+APPL_X, APPL_Y = 1160, 520
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def srgb(r, g, b, a=1.0):
@@ -136,21 +135,7 @@ def save_png(ns_image, path):
         print(f"  ❌  Failed to write {path}")
         sys.exit(1)
 
-save_png(img, OUT_2X)
-
-# Downsample to 1x using sips
-import subprocess
-result = subprocess.run(
-    ["sips", "-z", "320", "540", OUT_2X, "--out", OUT_1X],
-    capture_output=True
-)
-if result.returncode == 0:
-    print(f"  ✅  {OUT_1X}")
-else:
-    print(f"  ⚠️   sips downscale failed: {result.stderr.decode()}")
-    # Fall back: just copy the @2x as the 1x
-    import shutil
-    shutil.copy(OUT_2X, OUT_1X)
+save_png(img, OUT_PNG)
 
 print()
-print("  Background images ready.")
+print("  Background image ready.")
