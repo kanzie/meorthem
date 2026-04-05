@@ -168,7 +168,7 @@ RELEASE_NOTES="### Install
 2. Open the DMG and drag **MeOrThem.app** to Applications
 3. First launch: right-click → Open (Gatekeeper warning expected — app is ad-hoc signed, source is open for inspection)
 
-**Requires macOS 13 Ventura or later · Apple Silicon & Intel**"
+**Requires macOS 14 Sonoma or later · Apple Silicon & Intel**"
 
 if gh release view "v${VERSION}" --repo kanzie/meorthem &>/dev/null 2>&1; then
     echo "    Release v${VERSION} exists — uploading DMG assets..."
