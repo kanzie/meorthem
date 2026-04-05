@@ -50,8 +50,8 @@ enum MenuBuilder {
         latencyItem.tag = tagLatency
         menu.addItem(latencyItem)
 
-        let avgLoss = paused ? nil : targets.compactMap { store.latestPing[$0.id]?.lossPercent }
-                                             .reduce(0, +) / Double(max(targets.count, 1))
+        let lossValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.lossPercent }
+        let avgLoss: Double? = lossValues.isEmpty ? nil : lossValues.reduce(0, +) / Double(lossValues.count)
         let lossItem = staticItem(paused ? "Packet Loss: Paused"
                                          : String(format: "Packet Loss: %.1f%%", avgLoss ?? 0))
         lossItem.tag = tagPacketLoss
@@ -160,8 +160,8 @@ enum MenuBuilder {
                 attributes: _labelAttrs)
         }
 
-        let avgLoss = paused ? nil : targets.compactMap { store.latestPing[$0.id]?.lossPercent }
-                                             .reduce(0, +) / Double(max(targets.count, 1))
+        let lossValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.lossPercent }
+        let avgLoss: Double? = lossValues.isEmpty ? nil : lossValues.reduce(0, +) / Double(lossValues.count)
         if let item = menu.item(withTag: tagPacketLoss) {
             item.attributedTitle = NSAttributedString(
                 string: paused ? "Packet Loss: Paused"
@@ -207,7 +207,7 @@ enum MenuBuilder {
     static func refreshSpeedtestItems(_ menu: NSMenu, runner: SpeedtestRunner, environment env: AppEnvironment) {
         if let item = menu.item(withTag: tagSpeedtestLabel) {
             item.attributedTitle = NSAttributedString(string: speedtestLabel(runner), attributes: _labelAttrs)
-            item.isEnabled = !isSpeedtestRunning(runner)
+            item.isEnabled = !isSpeedtestRunning(runner) && !env.monitoringEngine.isManuallyPaused
         }
         if let item = menu.item(withTag: tagSpeedtestLast) {
             item.attributedTitle = NSAttributedString(

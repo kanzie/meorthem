@@ -63,11 +63,6 @@ extension MetricStatus {
         return .green
     }
 
-    static func forRSSI(_ rssi: Int) -> MetricStatus {
-        if rssi < -80 { return .red }
-        if rssi < -67 { return .yellow }
-        return .green
-    }
 }
 
 struct Thresholds: Codable {

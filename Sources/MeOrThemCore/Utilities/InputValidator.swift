@@ -67,6 +67,3 @@ private extension Substring {
     var string: String { String(self) }
 }
 
-private extension String {
-    var prefix64: Substring { prefix(64) }
-}

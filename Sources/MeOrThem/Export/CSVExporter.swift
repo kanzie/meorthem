@@ -18,7 +18,7 @@ enum CSVExporter {
                 let rtt    = r.rtt.map { String(format: "%.3f", $0) } ?? ""
                 let loss   = String(format: "%.1f", r.lossPercent)
                 let jitter = r.jitter.map { String(format: "%.3f", $0) } ?? ""
-                lines.append("\(ts),\(target.host),\(target.label),\(rtt),\(loss),\(jitter)")
+                lines.append("\(ts),\(csvQuote(target.host)),\(csvQuote(target.label)),\(rtt),\(loss),\(jitter)")
             }
         }
 
@@ -30,9 +30,18 @@ enum CSVExporter {
         let wifiHistory = store.wifiHistory.toArray()
         for w in wifiHistory {
             let ts = isoFormatter.string(from: w.timestamp)
-            lines.append("\(ts),\(w.ssid),\(w.rssi),\(w.snr),\(w.channelNumber),\(String(format:"%.1f",w.channelBandGHz)),\(String(format:"%.0f",w.txRateMbps))")
+            lines.append("\(ts),\(csvQuote(w.ssid)),\(w.rssi),\(w.snr),\(w.channelNumber),\(String(format:"%.1f",w.channelBandGHz)),\(String(format:"%.0f",w.txRateMbps))")
         }
 
         return lines.joined(separator: "\n")
+    }
+
+    /// RFC 4180 quoting: wraps field in quotes if it contains comma, quote, or newline;
+    /// internal quotes are escaped as "".
+    private static func csvQuote(_ field: String) -> String {
+        guard field.contains(",") || field.contains("\"") || field.contains("\n") || field.contains("\r") else {
+            return field
+        }
+        return "\"" + field.replacingOccurrences(of: "\"", with: "\"\"") + "\""
     }
 }

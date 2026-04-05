@@ -18,14 +18,17 @@ final class SpeedtestRunner: ObservableObject {
     }()
 
     private var runningTask: Task<Void, Never>?
+    private var runningProcess: Process?
 
     func run() {
         if case .running = state { return }
         runningTask?.cancel()
+        runningProcess?.terminate()
+        runningProcess = nil
         state = .running
 
         runningTask = Task {
-            let result = await Self.executeSpeedtest()
+            let result = await self.executeSpeedtest()
             if !Task.isCancelled {
                 self.state = result
                 if case .completed = result {
@@ -40,6 +43,8 @@ final class SpeedtestRunner: ObservableObject {
 
     func cancel() {
         runningTask?.cancel()
+        runningProcess?.terminate()
+        runningProcess = nil
         state = .idle
     }
 
@@ -76,7 +81,7 @@ final class SpeedtestRunner: ObservableObject {
         return "Not checked"
     }
 
-    private static func executeSpeedtest() async -> SpeedtestState {
+    private func executeSpeedtest() async -> SpeedtestState {
         // Locate binary in app bundle
         guard let binaryPath = Bundle.main.path(forResource: "speedtest", ofType: nil) else {
             return .unavailable("Speedtest binary not found")
@@ -101,6 +106,9 @@ final class SpeedtestRunner: ObservableObject {
         process.executableURL = URL(fileURLWithPath: binaryPath)
         // Args as array — no shell, no injection
         process.arguments = ["--format=json", "--accept-license", "--accept-gdpr"]
+        self.runningProcess = process
+
+        defer { self.runningProcess = nil }
 
         do {
             let (stdout, exitCode) = try await process.runAsync()

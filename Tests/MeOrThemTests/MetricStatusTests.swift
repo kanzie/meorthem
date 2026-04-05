@@ -30,10 +30,6 @@ func runMetricStatusTests() {
 
         let statuses: [MetricStatus] = [.green, .yellow, .green, .red, .green]
         expectEqual(statuses.max(), .red, "max of mixed = red")
-
-        expectEqual(MetricStatus.forRSSI(-40), .green,  "RSSI -40 → green")
-        expectEqual(MetricStatus.forRSSI(-70), .yellow, "RSSI -70 → yellow")
-        expectEqual(MetricStatus.forRSSI(-85), .red,    "RSSI -85 → red")
     }
 
     suite("MetricStatus respects custom thresholds") {

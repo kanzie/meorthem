@@ -19,8 +19,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var loadingBlinkTimer: Timer?
     private var loadingDotVisible = false
 
-    /// Last known download speed from completed bandwidth test.
-    private var lastDownloadMbps: Double?
+    /// Last known download speed from completed bandwidth test (persisted across restarts).
+    private var lastDownloadMbps: Double? = {
+        let v = UserDefaults.standard.double(forKey: "bandwidthLastDownloadMbps")
+        return v > 0 ? v : nil
+    }()
 
     /// Whether a bandwidth test is currently running (drives bar blink animation).
     private var bandwidthTestRunning = false
@@ -169,6 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.startBandwidthBlink()
                 case .completed(let result):
                     self.lastDownloadMbps = result.downloadMbps
+                    UserDefaults.standard.set(result.downloadMbps, forKey: "bandwidthLastDownloadMbps")
                     self.bandwidthTestRunning = false
                     self.stopBandwidthBlink()
                 case .idle, .failed, .unavailable:
