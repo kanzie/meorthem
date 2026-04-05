@@ -11,7 +11,14 @@ VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" \
 DMG_PATH="$BUILD_DIR/${APP_NAME}-${VERSION}.dmg"
 TMP_DMG="$BUILD_DIR/${APP_NAME}_tmp.dmg"
 VOLUME_NAME="$APP_NAME"
-DMG_SIZE="60m"
+DMG_SIZE="80m"
+BG_1X="$SCRIPT_DIR/assets/dmg_background.png"
+BG_2X="$SCRIPT_DIR/assets/dmg_background@2x.png"
+
+if [ ! -f "$BG_1X" ] || [ ! -f "$BG_2X" ]; then
+    echo "==> Generating DMG background..."
+    python3 "$SCRIPT_DIR/generate_dmg_background.py"
+fi
 
 if [ ! -d "$APP_PATH" ]; then
     echo "❌  $APP_PATH not found. Run scripts/build.sh first."
@@ -44,6 +51,11 @@ sleep 2
 # Create Applications symlink
 ln -sf /Applications "/Volumes/$VOLUME_NAME/Applications"
 
+# Copy background image (hidden folder — Finder ignores dot-dirs in DMG)
+mkdir -p "/Volumes/$VOLUME_NAME/.background"
+cp "$BG_1X" "/Volumes/$VOLUME_NAME/.background/background.png"
+cp "$BG_2X" "/Volumes/$VOLUME_NAME/.background/background@2x.png"
+
 # Set DMG window appearance via AppleScript
 echo "==> Setting DMG window layout..."
 osascript <<EOF
@@ -57,6 +69,7 @@ tell application "Finder"
         set viewOptions to icon view options of container window
         set arrangement of viewOptions to not arranged
         set icon size of viewOptions to 128
+        set background picture of viewOptions to file ".background:background.png"
         set position of item "$APP_NAME.app" of container window to {150, 150}
         set position of item "Applications" of container window to {390, 150}
         close
