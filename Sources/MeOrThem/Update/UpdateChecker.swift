@@ -93,7 +93,7 @@ final class UpdateChecker {
               (response as? HTTPURLResponse)?.statusCode == 200,
               let release = try? JSONDecoder().decode(GitHubRelease.self, from: data)
         else {
-            // Silent failure — no DMG or network issue
+            if manual { showAlreadyUpToDate(current: currentVersion()) }
             return
         }
 
