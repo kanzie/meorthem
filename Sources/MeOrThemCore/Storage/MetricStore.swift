@@ -1,8 +1,8 @@
 import Foundation
 import Combine
 
-// 24h at 5s poll = 17,280 samples per target
-private let kPingHistoryCapacity = 17_280
+// 6h at 5s poll = 4,320 samples per target — enough for export/reports
+private let kPingHistoryCapacity = 4_320
 // 1h at 5s — WiFi stats change rarely
 private let kWifiHistoryCapacity =    720
 

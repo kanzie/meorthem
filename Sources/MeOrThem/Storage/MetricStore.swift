@@ -1,8 +1,10 @@
 import Foundation
 import Combine
 
-// 24h at 5s poll = 17,280 samples per target
-private let kHistoryCapacity = 17_280
+// 6h at 5s poll = 4,320 samples per target — enough for export/reports
+private let kPingHistoryCapacity = 4_320
+// 1h of WiFi snapshots (changes rarely — RSSI, channel, SSID)
+private let kWifiHistoryCapacity = 720
 
 @MainActor
 final class MetricStore: ObservableObject {
@@ -19,7 +21,7 @@ final class MetricStore: ObservableObject {
 
     // MARK: - History (read by export + sparklines)
     private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]
-    private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kHistoryCapacity)
+    private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)
     private var statusHistory: CircularBuffer<MetricStatus> = CircularBuffer(capacity: 5)
 
     // MARK: - Hysteresis: consecutive non-green count per target
@@ -38,7 +40,7 @@ final class MetricStore: ObservableObject {
     func record(result: PingResult, for targetID: UUID) {
         latestPing[targetID] = result
         if pingHistory[targetID] == nil {
-            pingHistory[targetID] = CircularBuffer(capacity: kHistoryCapacity)
+            pingHistory[targetID] = CircularBuffer(capacity: kPingHistoryCapacity)
         }
         pingHistory[targetID]!.append(result)
 
