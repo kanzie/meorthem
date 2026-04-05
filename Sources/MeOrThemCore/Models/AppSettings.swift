@@ -50,10 +50,6 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(enableLogRotation, forKey: "enableLogRotation") }
     }
 
-    @Published var showBandwidthBar: Bool {
-        didSet { UserDefaults.standard.set(showBandwidthBar, forKey: "showBandwidthBar") }
-    }
-
     @Published var bandwidthBarRedMbps: Double {
         didSet { UserDefaults.standard.set(bandwidthBarRedMbps, forKey: "bandwidthBarRedMbps") }
     }
@@ -75,7 +71,6 @@ final class AppSettings: ObservableObject {
         showLatencyInMenubar   = ud.bool(forKey: "showLatencyInMenubar")
         bandwidthScheduleHours = ud.double(forKey: "bandwidthScheduleHours")
         enableLogRotation      = ud.bool(forKey: "enableLogRotation")
-        showBandwidthBar       = ud.object(forKey: "showBandwidthBar") as? Bool ?? true
         bandwidthBarRedMbps    = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
         bandwidthBarYellowMbps = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
     }
