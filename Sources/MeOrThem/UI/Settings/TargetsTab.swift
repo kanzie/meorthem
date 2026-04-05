@@ -8,32 +8,55 @@ struct TargetsTab: View {
     @State private var newHost     = ""
     @State private var editingIndex: Int?
     @State private var errorMsg: String?
+    @State private var gatewayIP: String = "—"
 
     private var isEditing: Bool { editingIndex != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             List {
-                ForEach(Array(settings.pingTargets.enumerated()), id: \.element.id) { index, target in
+                // System targets section (non-removable)
+                Section(header: Text("System").font(.caption).foregroundStyle(.secondary)) {
                     HStack {
+                        Image(systemName: "lock.fill")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(target.label)
+                            Text("Gateway")
                                 .font(.system(.body, design: .monospaced))
-                            Text(target.host)
+                            Text(gatewayIP)
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        if editingIndex == index {
-                            Image(systemName: "pencil.circle.fill")
-                                .foregroundStyle(Color.accentColor)
-                        }
                     }
                     .padding(.vertical, 2)
-                    .contentShape(Rectangle())
-                    .onTapGesture { selectForEditing(index: index) }
+                    .opacity(0.8)
                 }
-                .onDelete(perform: delete)
+
+                // User targets section
+                Section(header: Text("Targets").font(.caption).foregroundStyle(.secondary)) {
+                    ForEach(Array(settings.pingTargets.enumerated()), id: \.element.id) { index, target in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(target.label)
+                                    .font(.system(.body, design: .monospaced))
+                                Text(target.host)
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if editingIndex == index {
+                                Image(systemName: "pencil.circle.fill")
+                                    .foregroundStyle(Color.accentColor)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
+                        .onTapGesture { selectForEditing(index: index) }
+                    }
+                    .onDelete(perform: delete)
+                }
             }
             .listStyle(.bordered)
             .frame(maxHeight: .infinity)
@@ -76,6 +99,9 @@ struct TargetsTab: View {
             }
             .padding(12)
         }
+        .onAppear {
+            gatewayIP = NetworkInfo.defaultGateway() ?? "—"
+        }
     }
 
     // MARK: - Actions
@@ -112,7 +138,6 @@ struct TargetsTab: View {
         }
 
         if let idx = editingIndex {
-            // Update existing entry
             settings.pingTargets[idx] = PingTarget(
                 id: settings.pingTargets[idx].id,
                 label: InputValidator.sanitizedLabel(label),
@@ -120,7 +145,6 @@ struct TargetsTab: View {
             )
             cancelEditing()
         } else {
-            // Add new entry
             guard settings.pingTargets.count < 10 else {
                 errorMsg = "Maximum 10 targets allowed."
                 return
@@ -135,7 +159,6 @@ struct TargetsTab: View {
     }
 
     private func delete(at offsets: IndexSet) {
-        // Cancel edit if the edited row is being deleted
         if let idx = editingIndex, offsets.contains(idx) { cancelEditing() }
 
         guard settings.pingTargets.count - offsets.count >= 1 else {
@@ -144,7 +167,6 @@ struct TargetsTab: View {
         }
         settings.pingTargets.remove(atOffsets: offsets)
 
-        // Adjust editingIndex if a row above the edited row was deleted
         if let idx = editingIndex {
             let deletedBelow = offsets.filter { $0 < idx }.count
             editingIndex = idx - deletedBelow

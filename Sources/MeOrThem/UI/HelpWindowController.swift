@@ -113,7 +113,7 @@ private struct HelpView: View {
                 .foregroundColor(.primary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(alignment: .top, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
                 // Left box: typical ranges
                 VStack(alignment: .leading, spacing: 6) {
                     Label("Typical ranges", systemImage: "ruler")
@@ -122,8 +122,10 @@ private struct HelpView: View {
                     Text(normal)
                         .font(.system(.caption, design: .monospaced))
                         .foregroundColor(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .cornerRadius(8)
 
@@ -132,19 +134,20 @@ private struct HelpView: View {
                     Label("Recommended value under", systemImage: "checkmark.circle")
                         .font(.caption).bold()
                         .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     ForEach(useCases, id: \.0) { useCase, threshold in
                         HStack(spacing: 8) {
                             Text(useCase)
                                 .font(.caption)
-                                .fixedSize(horizontal: true, vertical: false)
+                            Spacer()
                             Text(threshold)
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundColor(.secondary)
-                                .fixedSize(horizontal: true, vertical: false)
                         }
                     }
                 }
                 .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color(nsColor: .controlBackgroundColor))
                 .cornerRadius(8)
             }

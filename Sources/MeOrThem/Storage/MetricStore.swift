@@ -15,6 +15,7 @@ final class MetricStore: ObservableObject {
 
     // MARK: - Gateway ping (set by MonitoringEngine each tick)
     private(set) var latestGatewayPing: PingResult?
+    @Published private(set) var latestGatewayIP: String?
 
     // MARK: - History (read by export + sparklines)
     private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]
@@ -59,7 +60,8 @@ final class MetricStore: ObservableObject {
         }
     }
 
-    func recordGatewayPing(_ result: PingResult?) {
+    func recordGatewayPing(_ result: PingResult?, gatewayIP: String? = nil) {
+        if let ip = gatewayIP { latestGatewayIP = ip }
         latestGatewayPing = result
         recomputeFaultType()
     }
@@ -104,6 +106,7 @@ final class MetricStore: ObservableObject {
     private func recomputeOverallStatus() {
         var worst: MetricStatus = .green
         for (targetID, result) in latestPing {
+            guard targetID != PingTarget.gatewayID else { continue }  // gateway handled separately
             let raw = MetricStatus.forPingResult(result, thresholds: settings.thresholds)
             let effective = applyHysteresis(raw: raw, count: consecutiveBadCount[targetID, default: 0])
             if effective > worst { worst = effective }
@@ -126,7 +129,9 @@ final class MetricStore: ObservableObject {
 
         let gatewayOk = gw.lossPercent < settings.thresholds.lossYellowPct
 
-        let externalStatuses = latestPing.keys.map { effectiveStatus(for: $0) }
+        let externalStatuses = latestPing.keys
+            .filter { $0 != PingTarget.gatewayID }
+            .map { effectiveStatus(for: $0) }
         let allExternalFailed = !externalStatuses.isEmpty && externalStatuses.allSatisfy { $0 == .red }
 
         if !gatewayOk {

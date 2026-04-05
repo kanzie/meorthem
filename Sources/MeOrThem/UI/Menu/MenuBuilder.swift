@@ -10,6 +10,7 @@ enum MenuBuilder {
         let copyReport:    () -> Void
         let runSpeedtest:  () -> Void
         let showHelp:      () -> Void
+        let togglePause:   () -> Void
         let quit:          () -> Void
     }
 
@@ -24,6 +25,8 @@ enum MenuBuilder {
     static let tagSpeedtestLast  = 8
     static let tagSpeedtestResult = 9
     static let tagTargetBase     = 100   // tagTargetBase + index per target
+    static let tagGatewayTarget  = 200   // gateway system target row
+    static let tagPauseItem      = 10    // pause/resume menu item
 
     @MainActor
     static func rebuild(_ menu: NSMenu, environment env: AppEnvironment, actions: Actions) {
@@ -71,7 +74,7 @@ enum MenuBuilder {
 
         menu.addItem(.separator())
 
-        // MARK: - Per-target rows
+        // MARK: - Per-target rows (user targets)
         for (i, target) in targets.enumerated() {
             let result   = paused ? nil : store.latestPing[target.id]
             let status   = store.effectiveStatus(for: target.id)
@@ -81,6 +84,18 @@ enum MenuBuilder {
             item.tag = tagTargetBase + i
             menu.addItem(item)
         }
+
+        // Gateway system target row
+        let gatewayIP   = env.monitoringEngine.lastGatewayIP ?? "—"
+        let gatewayTarget = PingTarget(id: PingTarget.gatewayID, label: "Gateway",
+                                       host: gatewayIP, isSystem: true)
+        let gwResult    = paused ? nil : store.latestPing[PingTarget.gatewayID]
+        let gwStatus    = store.effectiveStatus(for: PingTarget.gatewayID)
+        let gwSpark     = store.sparklineData(for: PingTarget.gatewayID)
+        let gwItem      = TargetMenuItemView.menuItem(target: gatewayTarget, result: gwResult,
+                                                      status: gwStatus, sparkline: gwSpark)
+        gwItem.tag = tagGatewayTarget
+        menu.addItem(gwItem)
         menu.addItem(.separator())
 
         // MARK: - Network Details submenu
@@ -93,7 +108,9 @@ enum MenuBuilder {
         menu.addItem(actionItem("Ping Stats Report", action: actions.copyReport))
 
         let speedLabelItem = actionItem(speedtestLabel(env.speedtestRunner), action: actions.runSpeedtest)
+        // Disable "Check Bandwidth" when user manually paused or test already running
         speedLabelItem.isEnabled = !isSpeedtestRunning(env.speedtestRunner)
+            && !env.monitoringEngine.isManuallyPaused
         speedLabelItem.tag = tagSpeedtestLabel
         menu.addItem(speedLabelItem)
 
@@ -111,6 +128,13 @@ enum MenuBuilder {
         menu.addItem(actionItem("Settings…", action: actions.openSettings))
         menu.addItem(actionItem("Help", action: actions.showHelp))
         menu.addItem(actionItem("About Me Or Them", action: actions.showAbout))
+
+        menu.addItem(.separator())
+
+        let pauseLabel = env.monitoringEngine.isManuallyPaused ? "Resume Monitoring" : "Pause Monitoring"
+        let pauseItem = actionItem(pauseLabel, action: actions.togglePause)
+        pauseItem.tag = tagPauseItem
+        menu.addItem(pauseItem)
 
         menu.addItem(.separator())
         menu.addItem(actionItem("Quit", action: actions.quit))
@@ -168,6 +192,14 @@ enum MenuBuilder {
             let status = store.effectiveStatus(for: target.id)
             let spark  = store.sparklineData(for: target.id)
             (item.view as? TargetMenuItemView)?.update(result: result, status: status, sparkline: spark)
+        }
+
+        // Refresh gateway target row
+        if let gwItem = menu.item(withTag: tagGatewayTarget) {
+            let gwResult = paused ? nil : store.latestPing[PingTarget.gatewayID]
+            let gwStatus = store.effectiveStatus(for: PingTarget.gatewayID)
+            let gwSpark  = store.sparklineData(for: PingTarget.gatewayID)
+            (gwItem.view as? TargetMenuItemView)?.update(result: gwResult, status: gwStatus, sparkline: gwSpark)
         }
     }
 

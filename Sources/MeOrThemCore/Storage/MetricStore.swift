@@ -93,6 +93,7 @@ final class MetricStore: ObservableObject {
     private func recomputeOverallStatus() {
         var worst: MetricStatus = .green
         for (targetID, result) in latestPing {
+            guard targetID != PingTarget.gatewayID else { continue }  // gateway handled separately
             let raw = MetricStatus.forPingResult(result, thresholds: settings.thresholds)
             let effective = applyHysteresis(raw: raw, count: consecutiveBadCount[targetID, default: 0])
             if effective > worst { worst = effective }
@@ -107,7 +108,9 @@ final class MetricStore: ObservableObject {
         guard let gw = latestGatewayPing else { networkFaultType = .none; return }
 
         let gatewayOk = gw.lossPercent < settings.thresholds.lossYellowPct
-        let externalStatuses = latestPing.keys.map { effectiveStatus(for: $0) }
+        let externalStatuses = latestPing.keys
+            .filter { $0 != PingTarget.gatewayID }
+            .map { effectiveStatus(for: $0) }
         let allFailed = !externalStatuses.isEmpty && externalStatuses.allSatisfy { $0 == .red }
 
         if !gatewayOk {

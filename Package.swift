@@ -11,6 +11,7 @@ let sharedLinkerSettings: [LinkerSetting] = [
     .linkedFramework("PDFKit"),
     .linkedFramework("UserNotifications"),
     .linkedFramework("ServiceManagement"),
+    .linkedFramework("SystemConfiguration"),
 ]
 
 let package = Package(
@@ -38,6 +39,7 @@ let package = Package(
             resources: [
                 .copy("Resources/speedtest"),
                 .copy("Resources/author.jpg"),
+                .copy("Resources/AppIcon.icns"),
             ],
             swiftSettings: sharedSwiftSettings,
             linkerSettings: sharedLinkerSettings

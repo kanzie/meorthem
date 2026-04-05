@@ -19,6 +19,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var loadingBlinkTimer: Timer?
     private var loadingDotVisible = false
 
+    /// Last known download speed from completed bandwidth test.
+    private var lastDownloadMbps: Double?
+
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -26,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setupStatusItem()
         observeStatusChanges()
         observeAppearance()
+        observeBandwidth()
         environment.alertManager.requestPermission()
         environment.monitoringEngine.start()
     }
@@ -66,19 +70,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func observeStatusChanges() {
+        // Fix: also watch latestPing so we detect initial data even when overallStatus stays green.
+        environment.metricStore.$latestPing
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] latestPing in
+                guard let self else { return }
+                if !self.hasInitialData {
+                    let targets = self.environment.settings.pingTargets
+                    if targets.allSatisfy({ latestPing[$0.id] != nil }) {
+                        self.hasInitialData = true
+                        self.stopLoadingBlink()
+                        self.updateIcon(status: self.environment.metricStore.overallStatus)
+                    }
+                }
+                // Update menubar text when data arrives (showLatencyInMenubar mode)
+                if self.environment.settings.showLatencyInMenubar {
+                    self.updateIcon(status: self.environment.metricStore.overallStatus)
+                }
+            }
+            .store(in: &cancellables)
+
         environment.metricStore.$overallStatus
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] status in
                 guard let self else { return }
-                if !self.hasInitialData {
-                    let targets = self.environment.settings.pingTargets
-                    let store   = self.environment.metricStore
-                    if targets.allSatisfy({ store.latestPing[$0.id] != nil }) {
-                        self.hasInitialData = true
-                        self.stopLoadingBlink()
-                    }
-                }
                 self.updateIcon(status: status)
             }
             .store(in: &cancellables)
@@ -101,6 +117,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             .store(in: &cancellables)
 
+        environment.settings.$showBandwidthBar
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.updateIcon(status: self.environment.metricStore.overallStatus)
+            }
+            .store(in: &cancellables)
+
         environment.monitoringEngine.tickStarted
             .receive(on: DispatchQueue.main)
             .sink { [weak self] in
@@ -112,16 +137,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     self.isPulsing = false
                     self.updateIcon(status: self.environment.metricStore.overallStatus)
                 }
-            }
-            .store(in: &cancellables)
-
-        // Update menubar text when new ping data arrives
-        environment.metricStore.$latestPing
-            .dropFirst()
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in
-                guard let self, self.environment.settings.showLatencyInMenubar else { return }
-                self.updateIcon(status: self.environment.metricStore.overallStatus)
             }
             .store(in: &cancellables)
     }
@@ -137,21 +152,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .store(in: &cancellables)
     }
 
+    private func observeBandwidth() {
+        environment.speedtestRunner.$state
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] state in
+                guard let self else { return }
+                if case .completed(let result) = state {
+                    self.lastDownloadMbps = result.downloadMbps
+                    self.updateIcon(status: self.environment.metricStore.overallStatus)
+                }
+            }
+            .store(in: &cancellables)
+    }
+
     private func updateIcon(status: MetricStatus) {
-        let showBar       = environment.settings.alwaysShowBarChart
+        let showBar        = environment.settings.alwaysShowBarChart
         let recentStatuses = environment.metricStore.recentOverallStatuses(last: 5)
+        let settings       = environment.settings
         let image = StatusBarIconRenderer.render(
-            status: status,
-            targetStatuses: recentStatuses,
-            showBarChart: showBar,
-            pulse: hasInitialData ? isPulsing : loadingDotVisible,
-            isLoading: !hasInitialData
+            status:                status,
+            targetStatuses:        recentStatuses,
+            showBarChart:          showBar,
+            pulse:                 hasInitialData ? isPulsing : loadingDotVisible,
+            isLoading:             !hasInitialData,
+            bandwidthMbps:         lastDownloadMbps,
+            showBandwidthBar:      settings.showBandwidthBar,
+            bandwidthBarRedMbps:   settings.bandwidthBarRedMbps,
+            bandwidthBarYellowMbps: settings.bandwidthBarYellowMbps
         )
         statusItem.button?.image = image
 
-        // Menubar text mode: show average latency next to icon
-        if environment.settings.showLatencyInMenubar && hasInitialData && !environment.monitoringEngine.isPaused {
-            let targets = environment.settings.pingTargets
+        if settings.showLatencyInMenubar && hasInitialData && !environment.monitoringEngine.isPaused {
+            let targets = settings.pingTargets
             let store   = environment.metricStore
             let rtts    = targets.compactMap { store.latestPing[$0.id]?.rtt }
             if !rtts.isEmpty {
@@ -160,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             } else {
                 statusItem.button?.title = ""
             }
-        } else if environment.settings.showLatencyInMenubar && environment.monitoringEngine.isPaused {
+        } else if settings.showLatencyInMenubar && environment.monitoringEngine.isPaused {
             statusItem.button?.title = " —"
         } else {
             statusItem.button?.title = ""
@@ -180,10 +212,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             copyReport:   { [weak self] in self?.showPingReport() },
             runSpeedtest: { [weak self] in self?.environment.speedtestRunner.run() },
             showHelp:     { HelpWindowController.shared.showAndFocus() },
+            togglePause:  { [weak self] in self?.toggleManualPause() },
             quit:         { NSApp.terminate(nil) }
         ))
 
-        // Refresh live items when new ping data arrives
         menuLiveUpdate = environment.metricStore.$latestPing
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -192,7 +224,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 MenuBuilder.refreshLiveItems(menu, environment: self.environment)
             }
 
-        // Refresh network details when WiFi state changes or paused state changes
         menuWifiUpdate = environment.metricStore.$latestWifi
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -201,7 +232,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 MenuBuilder.refreshNetworkDetails(menu, environment: self.environment)
             }
 
-        // Refresh speedtest section when state changes (covers both running → completed and idle)
         menuSpeedtestUpdate = environment.speedtestRunner.$state
             .dropFirst()
             .receive(on: DispatchQueue.main)
@@ -209,11 +239,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self, let menu else { return }
                 MenuBuilder.refreshSpeedtestItems(menu, runner: self.environment.speedtestRunner,
                                                   environment: self.environment)
-                // Also refresh live items to show/hide Paused state
                 MenuBuilder.refreshLiveItems(menu, environment: self.environment)
             }
 
-        // 1-second timer: countdown + refresh network details for real-time TX rate
         let ct = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, let menu = self.statusItem.menu else { return }
@@ -252,6 +280,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             )
         }
         pingReportController?.showAndFocus()
+    }
+
+    private func toggleManualPause() {
+        if environment.monitoringEngine.isManuallyPaused {
+            environment.monitoringEngine.manualResume()
+        } else {
+            environment.monitoringEngine.manualPause()
+        }
+        // Rebuild menu to update pause item label
+        if let menu = statusItem.menu {
+            ActionTarget.shared.clear()
+            MenuBuilder.rebuild(menu, environment: environment, actions: MenuBuilder.Actions(
+                showAbout:    { AboutWindowController.shared.showAndFocus() },
+                openSettings: { [weak self] in self?.showSettings() },
+                copyReport:   { [weak self] in self?.showPingReport() },
+                runSpeedtest: { [weak self] in self?.environment.speedtestRunner.run() },
+                showHelp:     { HelpWindowController.shared.showAndFocus() },
+                togglePause:  { [weak self] in self?.toggleManualPause() },
+                quit:         { NSApp.terminate(nil) }
+            ))
+        }
+        updateIcon(status: environment.metricStore.overallStatus)
     }
 
     // MARK: - Dummy @objc selector required by NSMenuItem
