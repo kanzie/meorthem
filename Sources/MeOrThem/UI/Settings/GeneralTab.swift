@@ -48,8 +48,6 @@ struct GeneralTab: View {
                 Text("Latency polling is paused while a bandwidth test runs.")
                     .font(.caption).foregroundStyle(.secondary)
 
-                Toggle("Show bandwidth bar in menu bar", isOn: $settings.showBandwidthBar)
-                    .help("Displays a thin colored bar under the status icon after a bandwidth test. Thresholds are configurable in the Thresholds tab.")
             }
 
             Section("Appearance") {

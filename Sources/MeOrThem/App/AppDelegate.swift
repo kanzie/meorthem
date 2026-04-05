@@ -123,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             .store(in: &cancellables)
 
-        environment.settings.$showBandwidthBar
+        environment.settings.$bandwidthScheduleHours
             .dropFirst()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
@@ -205,6 +205,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let recentStatuses = environment.metricStore.recentOverallStatuses(last: 5)
         let settings       = environment.settings
         let paused         = environment.monitoringEngine.isManuallyPaused
+
+        // Bar is shown only when auto-bandwidth polling is configured.
+        let showBandwidthBar = settings.bandwidthScheduleHours > 0
+
+        // During startup the bar blinks in sync with the loading circle; after that it
+        // uses its own blink timer while the speedtest is running.
+        let barRunning     = bandwidthTestRunning || (!hasInitialData && showBandwidthBar)
+        let barBlinkPhase  = hasInitialData ? bandwidthBlinkVisible : loadingDotVisible
+
         let image = StatusBarIconRenderer.render(
             status:                  status,
             targetStatuses:          recentStatuses,
@@ -213,9 +222,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             isLoading:               !hasInitialData,
             isPaused:                paused,
             bandwidthMbps:           lastDownloadMbps,
-            showBandwidthBar:        settings.showBandwidthBar,
-            bandwidthBarRunning:     bandwidthTestRunning,
-            bandwidthBarBlinkVisible: bandwidthBlinkVisible,
+            showBandwidthBar:        showBandwidthBar,
+            bandwidthBarRunning:     barRunning,
+            bandwidthBarBlinkVisible: barBlinkPhase,
             bandwidthBarRedMbps:     settings.bandwidthBarRedMbps,
             bandwidthBarYellowMbps:  settings.bandwidthBarYellowMbps
         )

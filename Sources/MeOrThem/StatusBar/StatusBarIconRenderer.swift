@@ -3,12 +3,8 @@ import AppKit
 enum StatusBarIconRenderer {
     private static let iconSize = NSSize(width: 18, height: 18)
 
-    nonisolated(unsafe) private static var loadingDotOn:  NSImage?
-    nonisolated(unsafe) private static var loadingDotOff: NSImage?
-
     static func invalidateCache() {
-        loadingDotOn  = nil
-        loadingDotOff = nil
+        // Reserved for future caching; loading frames are now rendered fresh each tick.
     }
 
     /// Renders the status bar icon.
@@ -39,18 +35,10 @@ enum StatusBarIconRenderer {
         bandwidthBarYellowMbps: Double = 25
     ) -> NSImage {
 
-        // Paused: grey circle + grey bar (if bar enabled and data exists)
-        if isPaused {
-            let barColor: NSColor? = showBandwidthBar && (bandwidthMbps != nil || bandwidthBarRunning)
-                ? .secondaryLabelColor : nil
-            return hollowCircleIcon(color: .secondaryLabelColor, pulse: false, bandwidthBarColor: barColor)
-        }
-
-        // Bandwidth bar colour
+        // Compute bandwidth bar colour first — used in all states including loading/paused.
         let barColor: NSColor?
         if showBandwidthBar {
             if bandwidthBarRunning {
-                // Blinking grey while test is running
                 barColor = bandwidthBarBlinkVisible ? .secondaryLabelColor : nil
             } else if let mbps = bandwidthMbps {
                 barColor = bandwidthColor(mbps: mbps, redThreshold: bandwidthBarRedMbps,
@@ -62,14 +50,16 @@ enum StatusBarIconRenderer {
             barColor = nil
         }
 
+        // Paused: grey circle + grey bar (if data or test exists)
+        if isPaused {
+            let pausedBar: NSColor? = showBandwidthBar && (bandwidthMbps != nil || bandwidthBarRunning)
+                ? .secondaryLabelColor : nil
+            return hollowCircleIcon(color: .secondaryLabelColor, pulse: false, bandwidthBarColor: pausedBar)
+        }
+
+        // Loading: grey blinking circle + grey blinking bar (bar blink uses same phase as loading dot)
         if isLoading {
-            if pulse {
-                if loadingDotOn == nil { loadingDotOn = hollowCircleIcon(color: .secondaryLabelColor, pulse: true, bandwidthBarColor: nil) }
-                return loadingDotOn!
-            } else {
-                if loadingDotOff == nil { loadingDotOff = hollowCircleIcon(color: .secondaryLabelColor, pulse: false, bandwidthBarColor: nil) }
-                return loadingDotOff!
-            }
+            return hollowCircleIcon(color: .secondaryLabelColor, pulse: pulse, bandwidthBarColor: barColor)
         }
 
         if showBarChart {
