@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         observeBandwidth()
         environment.alertManager.requestPermission()
         environment.monitoringEngine.start()
+        UpdateChecker.shared.startPeriodicChecks()
     }
 
     func applicationWillTerminate(_ notification: Notification) {

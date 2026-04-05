@@ -3,6 +3,7 @@ import SwiftUI
 struct GeneralTab: View {
     @EnvironmentObject private var settings: AppSettings
     @State private var loginError: String?
+    private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
 
     var body: some View {
         Form {
@@ -105,6 +106,18 @@ struct GeneralTab: View {
                 if settings.enableLogRotation {
                     Text("Saved to ~/Library/Logs/MeOrThem/")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Updates") {
+                HStack {
+                    Text("Current version: \(appVersion)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Check for Updates") {
+                        UpdateChecker.shared.checkManually()
+                    }
                 }
             }
         }
