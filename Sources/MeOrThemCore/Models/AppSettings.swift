@@ -76,11 +76,16 @@ final class AppSettings: ObservableObject {
     }
 
     private func encode<T: Encodable>(_ value: T, forKey key: String) {
-        if let data = try? JSONEncoder().encode(value) {
+        if let data = try? _sharedEncoder.encode(value) {
             UserDefaults.standard.set(data, forKey: key)
         }
     }
 }
+
+// Shared codec instances — JSONEncoder/Decoder are expensive to allocate (~0.1ms each).
+// Settings are @MainActor so no concurrent access is possible.
+private let _sharedEncoder = JSONEncoder()
+private let _sharedDecoder = JSONDecoder()
 
 // MARK: - UserDefaults helpers
 private extension UserDefaults {
@@ -88,7 +93,7 @@ private extension UserDefaults {
         guard let data = data(forKey: key) else {
             throw DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "No data for key \(key)"))
         }
-        return try JSONDecoder().decode(type, from: data)
+        return try _sharedDecoder.decode(type, from: data)
     }
 }
 
