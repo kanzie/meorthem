@@ -15,29 +15,52 @@ enum StatusBarIconRenderer {
     /// - Parameters:
     ///   - status: overall connection quality
     ///   - targetStatuses: per-target statuses for bar chart rendering
-    ///   - showBarChart: if true, always render bar chart; if false, use circle/square
-    ///   - pulse: if true, draws a small heartbeat dot in the centre of the circle icon
-    ///   - isLoading: if true, renders a grey hollow circle (no data yet)
-    ///   - bandwidthMbps: last known download speed — when non-nil and showBandwidthBar is true,
-    ///     draws a thin colored bar at the bottom of the icon
+    ///   - showBarChart: render bar chart instead of circle/square
+    ///   - pulse: heartbeat dot in circle centre
+    ///   - isLoading: grey hollow circle while waiting for first data
+    ///   - isPaused: monitoring is manually paused — renders grey circle + grey bar
+    ///   - bandwidthMbps: last known download speed for the quality bar
     ///   - showBandwidthBar: whether the bandwidth bar feature is enabled
-    ///   - bandwidthBarRedMbps: download speed below which bar turns red
-    ///   - bandwidthBarYellowMbps: download speed below which bar turns yellow
+    ///   - bandwidthBarRunning: bandwidth test is in progress (bar blinks grey)
+    ///   - bandwidthBarBlinkVisible: blink phase; alternates for animated grey bar
+    ///   - bandwidthBarRedMbps / bandwidthBarYellowMbps: quality thresholds
     static func render(
         status: MetricStatus,
         targetStatuses: [MetricStatus],
         showBarChart: Bool,
         pulse: Bool = false,
         isLoading: Bool = false,
+        isPaused: Bool = false,
         bandwidthMbps: Double? = nil,
         showBandwidthBar: Bool = false,
+        bandwidthBarRunning: Bool = false,
+        bandwidthBarBlinkVisible: Bool = false,
         bandwidthBarRedMbps: Double = 10,
         bandwidthBarYellowMbps: Double = 25
     ) -> NSImage {
-        let drawBandwidthBar = showBandwidthBar && bandwidthMbps != nil && !isLoading
-        let barColor: NSColor? = drawBandwidthBar ? bandwidthColor(
-            mbps: bandwidthMbps!, redThreshold: bandwidthBarRedMbps, yellowThreshold: bandwidthBarYellowMbps
-        ) : nil
+
+        // Paused: grey circle + grey bar (if bar enabled and data exists)
+        if isPaused {
+            let barColor: NSColor? = showBandwidthBar && (bandwidthMbps != nil || bandwidthBarRunning)
+                ? .secondaryLabelColor : nil
+            return hollowCircleIcon(color: .secondaryLabelColor, pulse: false, bandwidthBarColor: barColor)
+        }
+
+        // Bandwidth bar colour
+        let barColor: NSColor?
+        if showBandwidthBar {
+            if bandwidthBarRunning {
+                // Blinking grey while test is running
+                barColor = bandwidthBarBlinkVisible ? .secondaryLabelColor : nil
+            } else if let mbps = bandwidthMbps {
+                barColor = bandwidthColor(mbps: mbps, redThreshold: bandwidthBarRedMbps,
+                                          yellowThreshold: bandwidthBarYellowMbps)
+            } else {
+                barColor = nil
+            }
+        } else {
+            barColor = nil
+        }
 
         if isLoading {
             if pulse {
@@ -48,6 +71,7 @@ enum StatusBarIconRenderer {
                 return loadingDotOff!
             }
         }
+
         if showBarChart {
             return barChartIcon(statuses: targetStatuses.isEmpty ? [status] : targetStatuses,
                                 bandwidthBarColor: barColor)
@@ -64,7 +88,7 @@ enum StatusBarIconRenderer {
     private static func hollowCircleIcon(color: NSColor, pulse: Bool, bandwidthBarColor: NSColor?) -> NSImage {
         draw { size in
             let margin: CGFloat = 2.5
-            let bottomExtra: CGFloat = bandwidthBarColor != nil ? 1 : 0  // shift up to make room for bar
+            let bottomExtra: CGFloat = bandwidthBarColor != nil ? 2 : 0  // 2px gap between circle and bar
             let rect = NSRect(x: margin, y: margin + bottomExtra,
                               width: size.width - margin * 2,
                               height: size.height - margin * 2 - bottomExtra)
@@ -76,7 +100,7 @@ enum StatusBarIconRenderer {
             if pulse {
                 let dotR: CGFloat = 2
                 let cx = size.width / 2
-                let cy = (size.height + bottomExtra) / 2
+                let cy = (margin + bottomExtra + rect.height / 2)
                 let dot = NSBezierPath(ovalIn: NSRect(x: cx - dotR, y: cy - dotR,
                                                       width: dotR * 2, height: dotR * 2))
                 color.setFill()
@@ -90,7 +114,7 @@ enum StatusBarIconRenderer {
     private static func solidSquareIcon(color: NSColor, bandwidthBarColor: NSColor?) -> NSImage {
         draw { size in
             let margin: CGFloat = 3.0
-            let bottomExtra: CGFloat = bandwidthBarColor != nil ? 1 : 0
+            let bottomExtra: CGFloat = bandwidthBarColor != nil ? 2 : 0
             let rect = NSRect(x: margin, y: margin + bottomExtra,
                               width: size.width - margin * 2,
                               height: size.height - margin * 2 - bottomExtra)
@@ -107,7 +131,7 @@ enum StatusBarIconRenderer {
             let count      = statuses.count
             guard count > 0 else { return }
             let topMargin: CGFloat    = 2
-            let bottomMargin: CGFloat = bandwidthBarColor != nil ? 4 : 2  // leave room for bandwidth bar
+            let bottomMargin: CGFloat = bandwidthBarColor != nil ? 5 : 2  // room for bar + 2px gap
             let maxBarH   = size.height - topMargin - bottomMargin
             let totalW    = size.width - 2
             let barW      = (totalW - CGFloat(count - 1)) / CGFloat(count)

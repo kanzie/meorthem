@@ -13,8 +13,9 @@ final class HelpWindowController: NSWindowController {
         window.title = "Me Or Them — Help"
         window.styleMask = [.titled, .closable, .resizable]
         window.isReleasedWhenClosed = false
-        window.setContentSize(NSSize(width: 460, height: 620))
-        window.minSize = NSSize(width: 380, height: 400)
+        window.setContentSize(NSSize(width: 480, height: 620))
+        window.minSize = NSSize(width: 340, height: 400)
+        window.maxSize = NSSize(width: 600, height: 900)
         window.center()
 
         super.init(window: window)
@@ -79,9 +80,8 @@ private struct HelpView: View {
                 temporaryNote
                     .padding(.bottom, 20)
             }
-            .padding(24)
+            .padding(20)
         }
-        .frame(minWidth: 380)
     }
 
     // MARK: - Sub-views

@@ -69,6 +69,14 @@ final class AppEnvironment {
             }
             .store(in: &cancellables)
 
+        // Auto-start bandwidth test at launch if scheduling is enabled
+        if settings.bandwidthScheduleHours > 0 {
+            Task { @MainActor [weak self] in
+                guard let self, case .idle = self.speedtestRunner.state else { return }
+                self.speedtestRunner.run()
+            }
+        }
+
         // Log rotation scheduling (daily check)
         if settings.enableLogRotation {
             logExporter.scheduleDaily()

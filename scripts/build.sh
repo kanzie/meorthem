@@ -58,6 +58,9 @@ if [ -f "$ICON_SRC" ]; then
     cp "$ICON_SRC" "$APP_PATH/Contents/Resources/AppIcon.icns"
 fi
 
+# Touch the bundle to help macOS icon services pick up the new icon
+touch "$APP_PATH" 2>/dev/null || true
+
 echo "==> Ad-hoc code signing..."
 codesign --force --deep --sign - \
     --entitlements "$SOURCES_RESOURCES/MeOrThem.entitlements" \

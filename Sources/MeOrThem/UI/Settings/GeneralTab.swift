@@ -48,31 +48,7 @@ struct GeneralTab: View {
                     .font(.caption).foregroundStyle(.secondary)
 
                 Toggle("Show bandwidth bar in menu bar", isOn: $settings.showBandwidthBar)
-                    .help("Displays a thin colored bar under the status icon reflecting download speed after a bandwidth test.")
-                if settings.showBandwidthBar {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Red below")
-                                .font(.caption).foregroundStyle(.secondary)
-                            HStack(spacing: 4) {
-                                TextField("Mbps", value: $settings.bandwidthBarRedMbps, format: .number)
-                                    .frame(width: 60)
-                                    .textFieldStyle(.roundedBorder)
-                                Text("Mbps").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Yellow below")
-                                .font(.caption).foregroundStyle(.secondary)
-                            HStack(spacing: 4) {
-                                TextField("Mbps", value: $settings.bandwidthBarYellowMbps, format: .number)
-                                    .frame(width: 60)
-                                    .textFieldStyle(.roundedBorder)
-                                Text("Mbps").font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+                    .help("Displays a thin colored bar under the status icon after a bandwidth test. Thresholds are configurable in the Thresholds tab.")
             }
 
             Section("Appearance") {
@@ -133,6 +109,8 @@ struct GeneralTab: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .padding(8)
     }
 }

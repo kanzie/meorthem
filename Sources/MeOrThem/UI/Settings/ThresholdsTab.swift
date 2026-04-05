@@ -38,18 +38,34 @@ struct ThresholdsTab: View {
                                                yellow: $settings.thresholds.jitterYellowMs),
                              unit: "ms", range: 5...500)
             }
+            Section("Download Speed (Bandwidth Bar)") {
+                recommendedRow("Bar appears in the menu bar icon after a bandwidth test · green ≥ yellow threshold · red below red threshold")
+                thresholdRow("Yellow below",
+                             value: bwYellow($settings.bandwidthBarYellowMbps,
+                                             red: $settings.bandwidthBarRedMbps),
+                             unit: "Mbps", range: 5...500)
+                thresholdRow("Red below",
+                             value: bwRed($settings.bandwidthBarRedMbps,
+                                          yellow: $settings.bandwidthBarYellowMbps),
+                             unit: "Mbps", range: 1...200)
+            }
 
             Section {
                 Button("Reset to Defaults") {
                     settings.thresholds = .default
+                    settings.bandwidthBarRedMbps    = 10
+                    settings.bandwidthBarYellowMbps = 25
                 }
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .padding(8)
     }
 
-    /// Yellow binding: value is clamped to ≤ red on every set.
+    // MARK: - Latency/Loss/Jitter bindings (yellow ≤ red)
+
     private func yellowCapped(_ yellow: Binding<Double>, red: Binding<Double>) -> Binding<Double> {
         Binding(
             get: { yellow.wrappedValue },
@@ -57,7 +73,6 @@ struct ThresholdsTab: View {
         )
     }
 
-    /// Red binding: if red drops below yellow, yellow is pulled down with it.
     private func redClamping(_ red: Binding<Double>, yellow: Binding<Double>) -> Binding<Double> {
         Binding(
             get: { red.wrappedValue },
@@ -68,6 +83,29 @@ struct ThresholdsTab: View {
         )
     }
 
+    // MARK: - Bandwidth bindings (yellow ≥ red — higher Mbps = better)
+
+    /// Yellow must stay ≥ red (yellow threshold is the higher "good enough" value).
+    private func bwYellow(_ yellow: Binding<Double>, red: Binding<Double>) -> Binding<Double> {
+        Binding(
+            get: { yellow.wrappedValue },
+            set: { yellow.wrappedValue = max($0, red.wrappedValue) }
+        )
+    }
+
+    /// Red must stay ≤ yellow; if red goes up past yellow, yellow follows.
+    private func bwRed(_ red: Binding<Double>, yellow: Binding<Double>) -> Binding<Double> {
+        Binding(
+            get: { red.wrappedValue },
+            set: {
+                red.wrappedValue    = $0
+                yellow.wrappedValue = max(yellow.wrappedValue, $0)
+            }
+        )
+    }
+
+    // MARK: - Shared row helpers
+
     private func thresholdRow(_ label: String, value: Binding<Double>,
                                unit: String, range: ClosedRange<Double>) -> some View {
         HStack {
@@ -75,7 +113,7 @@ struct ThresholdsTab: View {
             Slider(value: value, in: range)
             Text(String(format: "%.0f \(unit)", value.wrappedValue))
                 .monospacedDigit()
-                .frame(width: 60, alignment: .trailing)
+                .frame(width: 72, alignment: .trailing)
         }
     }
 
