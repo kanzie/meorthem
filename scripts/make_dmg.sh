@@ -51,6 +51,9 @@ echo "==> Mounted at: $MOUNT_POINT"
 # Create Applications symlink
 ln -sf /Applications "$MOUNT_POINT/Applications"
 
+# Normalise background: ensure 1270×686 at 72 DPI regardless of editor export settings
+sips -z 686 1270 -s dpiWidth 72 -s dpiHeight 72 "$BG_PNG" > /dev/null
+
 # Copy background image and set the macOS hidden attribute on the folder
 mkdir -p "$MOUNT_POINT/.background"
 cp "$BG_PNG" "$MOUNT_POINT/.background/background.png"
@@ -71,13 +74,13 @@ tell application "Finder"
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set bounds of container window to {200, 150, 1000, 650}
+        set bounds of container window to {100, 100, 1370, 786}
         set viewOptions to icon view options of container window
         set arrangement of viewOptions to not arranged
         set icon size of viewOptions to 128
         set background picture of viewOptions to POSIX file "$MOUNT_POINT/.background/background.png"
-        set position of item "$APP_NAME.app" of container window to {220, 240}
-        set position of item "Applications" of container window to {580, 240}
+        set position of item "$APP_NAME.app" of container window to {320, 300}
+        set position of item "Applications" of container window to {950, 300}
         update without registering applications
         delay 5
     end tell
