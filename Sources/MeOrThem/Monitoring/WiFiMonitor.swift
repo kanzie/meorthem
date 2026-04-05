@@ -5,6 +5,15 @@ import SystemConfiguration
 
 /// Reads current WiFi interface stats synchronously (always called on @MainActor).
 enum WiFiMonitor {
+    // SSID cache — avoids spawning a networksetup subprocess on every snapshot call.
+    // Invalidated by WiFiObserver when the OS reports an SSID change.
+    // @MainActor isolation guarantees single-threaded access.
+    nonisolated(unsafe) private static var _cachedSSID: String? = nil
+
+    static func invalidateSSIDCache() {
+        _cachedSSID = nil
+    }
+
     static func snapshot() -> WiFiSnapshot? {
         // CWWiFiClient is not thread-safe — must be called on main thread.
         let client = CWWiFiClient.shared()
@@ -29,11 +38,19 @@ enum WiFiMonitor {
         let ifaceName = iface.interfaceName ?? "en0"
 
         // CoreWLAN may return nil for SSID on macOS 14+ without Location permission.
-        // Fall back to networksetup subprocess which doesn't require Location.
-        let ssid = iface.ssid()
-            ?? fetchSSIDFromDynamicStore(interface: ifaceName)
-            ?? fetchSSIDFromNetworksetup(interface: ifaceName)
-            ?? "—"
+        // Use cache first; fall back to DynamicStore, then networksetup (subprocess — expensive).
+        // Cache prevents networksetup from being spawned on every snapshot call.
+        let ssid: String
+        if let cached = _cachedSSID {
+            ssid = cached
+        } else {
+            let resolved = iface.ssid()
+                ?? fetchSSIDFromDynamicStore(interface: ifaceName)
+                ?? fetchSSIDFromNetworksetup(interface: ifaceName)
+                ?? "—"
+            _cachedSSID = resolved
+            ssid = resolved
+        }
 
         return WiFiSnapshot(
             timestamp:      Date(),
@@ -129,11 +146,16 @@ final class WiFiObserver: NSObject, CWEventDelegate {
         try? client.startMonitoringEvent(with: .ssidDidChange)
         try? client.startMonitoringEvent(with: .bssidDidChange)
         try? client.startMonitoringEvent(with: .linkDidChange)
-        try? client.startMonitoringEvent(with: .linkQualityDidChange)
+        // linkQualityDidChange is intentionally NOT subscribed — it fires on every RSSI
+        // fluctuation (can be dozens/sec) and RSSI is already captured on every poll tick.
+        // Subscribing to it caused networksetup subprocess spawning at high frequency → ~20% CPU.
     }
 
     nonisolated func ssidDidChangeForWiFiInterface(withName interfaceName: String) {
-        Task { @MainActor in wifiChanged.send(WiFiMonitor.snapshot()) }
+        Task { @MainActor in
+            WiFiMonitor.invalidateSSIDCache()   // force re-resolve on next snapshot
+            wifiChanged.send(WiFiMonitor.snapshot())
+        }
     }
 
     nonisolated func bssidDidChangeForWiFiInterface(withName interfaceName: String) {
@@ -141,12 +163,9 @@ final class WiFiObserver: NSObject, CWEventDelegate {
     }
 
     nonisolated func linkDidChangeForWiFiInterface(withName interfaceName: String) {
-        Task { @MainActor in wifiChanged.send(WiFiMonitor.snapshot()) }
-    }
-
-    nonisolated func linkQualityDidChangeForWiFiInterface(withName interfaceName: String,
-                                                          rssi: Int,
-                                                          transmitRate: Double) {
-        Task { @MainActor in wifiChanged.send(WiFiMonitor.snapshot()) }
+        Task { @MainActor in
+            WiFiMonitor.invalidateSSIDCache()   // link drop/reconnect may mean a new SSID
+            wifiChanged.send(WiFiMonitor.snapshot())
+        }
     }
 }
