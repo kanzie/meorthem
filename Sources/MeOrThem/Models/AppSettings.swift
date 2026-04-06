@@ -35,7 +35,27 @@ final class AppSettings: ObservableObject {
     }
 
     @Published var pollIntervalSecs: Double {
-        didSet { UserDefaults.standard.set(pollIntervalSecs, forKey: "pollIntervalSecs") }
+        didSet {
+            UserDefaults.standard.set(pollIntervalSecs, forKey: "pollIntervalSecs")
+            // Evaluation windows must always be at least one poll interval long.
+            if latencyWindowSecs < pollIntervalSecs { latencyWindowSecs = pollIntervalSecs }
+            if lossWindowSecs    < pollIntervalSecs { lossWindowSecs    = pollIntervalSecs }
+            if jitterWindowSecs  < pollIntervalSecs { jitterWindowSecs  = pollIntervalSecs }
+        }
+    }
+
+    // ── Evaluation windows (seconds) ─────────────────────────────────────────
+    // Each metric is averaged over its window before being compared to thresholds.
+    // Defaults: latency 15 s, loss 10 s, jitter 30 s (guards against AWDL scans).
+    // All windows are clamped to ≥ pollIntervalSecs whenever that setting changes.
+    @Published var latencyWindowSecs: Double {
+        didSet { UserDefaults.standard.set(latencyWindowSecs, forKey: "latencyWindowSecs") }
+    }
+    @Published var lossWindowSecs: Double {
+        didSet { UserDefaults.standard.set(lossWindowSecs, forKey: "lossWindowSecs") }
+    }
+    @Published var jitterWindowSecs: Double {
+        didSet { UserDefaults.standard.set(jitterWindowSecs, forKey: "jitterWindowSecs") }
     }
 
     // MARK: - Menubar text mode
@@ -79,6 +99,11 @@ final class AppSettings: ObservableObject {
         enableLogRotation         = ud.bool(forKey: "enableLogRotation")
         bandwidthBarRedMbps       = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
         bandwidthBarYellowMbps    = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
+
+        let poll = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
+        latencyWindowSecs = Swift.max(ud.double(forKey: "latencyWindowSecs").nonZero ?? 15, poll)
+        lossWindowSecs    = Swift.max(ud.double(forKey: "lossWindowSecs").nonZero    ?? 10, poll)
+        jitterWindowSecs  = Swift.max(ud.double(forKey: "jitterWindowSecs").nonZero  ?? 30, poll)
     }
 
     private func encode<T: Encodable>(_ value: T, forKey key: String) {

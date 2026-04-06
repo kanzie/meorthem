@@ -1,60 +1,107 @@
 @testable import MeOrThemCore
 
 func runMetricStoreTests() {
-    suite("MetricStore overallStatus aggregation") {
+    suite("MetricStore window-based evaluation") {
         // MetricStore and AppSettings are @MainActor; the test runner executes on the main
         // thread so MainActor.assumeIsolated is valid here.
         MainActor.assumeIsolated {
             let settings = AppSettings.shared
-            let store = MetricStore(settings: settings)
             let id1 = PingTarget.defaults[0].id
             let id2 = PingTarget.defaults[1].id
 
+            // Default poll=5s, latency window=15s, loss window=10s, jitter window=30s gives:
+            //   latency: ceil(15/5) = 3   loss: ceil(10/5) = 2   jitter: ceil(30/5) = 6
+
             // ── Green baseline ──────────────────────────────────────────────
+            let store = MetricStore(settings: settings)
             store.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
             store.record(result: PingResult(timestamp: .now, rtt: 60, lossPercent: 0, jitter: 5), for: id2)
             expectEqual(store.overallStatus, .green, "all green → overall green")
 
-            // ── Hysteresis: yellow requires 2 consecutive bad polls ─────────
-            // First bad poll: still green
-            store.record(result: PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5), for: id1)
-            expectEqual(store.overallStatus, .green, "1st yellow poll → still green (hysteresis)")
+            // ── AWDL protection: single bad jitter in 6-sample window ───────
+            // Simulates an AWDL channel scan: 5 good polls followed by 1 spike.
+            // avg jitter = (5×5 + 60) / 6 ≈ 14 ms — well below the 30 ms yellow threshold.
+            let storeAWDL = MetricStore(settings: settings)
+            for _ in 0..<5 {
+                storeAWDL.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
+            }
+            storeAWDL.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 60), for: id1)
+            expectEqual(storeAWDL.overallStatus, .green,
+                        "AWDL spike (1 bad jitter in 6-sample window) → averaged out → green")
 
-            // Second consecutive bad poll: escalates to yellow
-            store.record(result: PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5), for: id1)
-            expectEqual(store.overallStatus, .yellow, "2nd consecutive yellow poll → yellow")
+            // ── Sustained jitter escalates correctly ────────────────────────
+            let storeJ = MetricStore(settings: settings)
+            for _ in 0..<6 {
+                storeJ.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 60), for: id1)
+            }
+            // avg jitter = 60 ms >= 30 ms yellow threshold
+            expectEqual(storeJ.overallStatus, .yellow, "6 consecutive bad jitter samples → yellow")
 
-            // Good poll resets hysteresis immediately
-            store.record(result: PingResult(timestamp: .now, rtt: 30, lossPercent: 0, jitter: 2), for: id1)
-            store.record(result: PingResult(timestamp: .now, rtt: 30, lossPercent: 0, jitter: 2), for: id2)
-            expectEqual(store.overallStatus, .green, "green poll resets hysteresis")
+            // Red jitter sustained
+            let storeJR = MetricStore(settings: settings)
+            for _ in 0..<6 {
+                storeJR.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 100), for: id1)
+            }
+            // avg jitter = 100 ms >= 80 ms red threshold
+            expectEqual(storeJR.overallStatus, .red, "6 consecutive red-level jitter samples → red")
 
-            // ── Hysteresis: red requires 3 consecutive bad polls ────────────
-            let store2 = MetricStore(settings: settings)
-            let r1 = PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil) // red-level
+            // ── Latency window absorbs a brief spike ─────────────────────────
+            // 2 good (50 ms) + 1 spike (150 ms) → avg = 250/3 ≈ 83 ms < 100 ms yellow
+            let storeLS = MetricStore(settings: settings)
+            storeLS.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
+            storeLS.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
+            storeLS.record(result: PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5), for: id1)
+            expectEqual(storeLS.overallStatus, .green, "brief latency spike in 3-sample window → averaged out → green")
 
-            store2.record(result: r1, for: id1)
-            expectEqual(store2.overallStatus, .green, "1st red poll → still green")
-            store2.record(result: r1, for: id1)
-            expectEqual(store2.overallStatus, .yellow, "2nd consecutive red poll → yellow")
-            store2.record(result: r1, for: id1)
-            expectEqual(store2.overallStatus, .red, "3rd consecutive red poll → red")
+            // ── Sustained latency escalates ──────────────────────────────────
+            let storeL = MetricStore(settings: settings)
+            for _ in 0..<3 {
+                storeL.record(result: PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5), for: id1)
+            }
+            // avg latency = 150 ms >= 100 ms yellow threshold
+            expectEqual(storeL.overallStatus, .yellow, "3 consecutive 150 ms latency samples → yellow")
 
-            // ── Loss threshold hysteresis ───────────────────────────────────
-            let store3 = MetricStore(settings: settings)
-            // yellow loss threshold (default 1%)
-            let yellowLoss = PingResult(timestamp: .now, rtt: 50, lossPercent: 2, jitter: 2)
-            store3.record(result: yellowLoss, for: id1)
-            expectEqual(store3.overallStatus, .green, "1st 2% loss poll → still green")
-            store3.record(result: yellowLoss, for: id1)
-            expectEqual(store3.overallStatus, .yellow, "2nd consecutive 2% loss poll → yellow")
+            let storeLR = MetricStore(settings: settings)
+            for _ in 0..<3 {
+                storeLR.record(result: PingResult(timestamp: .now, rtt: 250, lossPercent: 0, jitter: 5), for: id1)
+            }
+            // avg latency = 250 ms >= 200 ms red threshold
+            expectEqual(storeLR.overallStatus, .red, "3 consecutive 250 ms latency samples → red")
 
-            // red loss threshold (default 3%)
-            // At this point consecutiveBadCount=2 from the yellow polls above.
-            // A red-level poll increments to 3, immediately satisfying the red threshold.
-            let redLoss = PingResult(timestamp: .now, rtt: 50, lossPercent: 10, jitter: 2)
-            store3.record(result: redLoss, for: id1)
-            expectEqual(store3.overallStatus, .red, "3rd consecutive bad poll (1st red-level) → red")
+            // ── Loss window (2 samples) ──────────────────────────────────────
+            // Loss window is the tightest: 2 samples. Two bad polls → alarm.
+            let storeLoss = MetricStore(settings: settings)
+            storeLoss.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
+            storeLoss.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 5, jitter: 5), for: id1)
+            // avg loss = (0 + 5) / 2 = 2.5 % >= 1 % yellow
+            expectEqual(storeLoss.overallStatus, .yellow, "1 bad loss in 2-sample window → 2.5 % avg → yellow")
+
+            let storeLoss2 = MetricStore(settings: settings)
+            for _ in 0..<2 {
+                storeLoss2.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 10, jitter: 5), for: id1)
+            }
+            // avg loss = 10 % >= 3 % red threshold
+            expectEqual(storeLoss2.overallStatus, .red, "2 consecutive 10 % loss samples → red")
+
+            // ── Timeout (100 % loss) escalates immediately ───────────────────
+            let storeTimeout = MetricStore(settings: settings)
+            storeTimeout.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1)
+            // avg loss = 100 % >= 3 % red threshold → red on first poll
+            expectEqual(storeTimeout.overallStatus, .red, "timeout (100 % loss) → red immediately")
+
+            // ── Recovery requires window to refill with good samples ─────────
+            let storeRec = MetricStore(settings: settings)
+            // Fill with 3 bad latency samples (avg 150 ms → yellow)
+            for _ in 0..<3 {
+                storeRec.record(result: PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5), for: id1)
+            }
+            expectEqual(storeRec.overallStatus, .yellow, "sustained bad latency → yellow before recovery")
+            // Add 1 good poll: window = [150, 150, 50] → avg ≈ 116 ms → still yellow
+            storeRec.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
+            expectEqual(storeRec.overallStatus, .yellow, "1 good poll out of 3 still above threshold → yellow")
+            // Add 2nd good poll: window = [150, 50, 50] → avg ≈ 83 ms → green
+            storeRec.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
+            expectEqual(storeRec.overallStatus, .green, "2 good polls in 3-sample latency window → avg below threshold → green")
 
             // ── rssiQuality labels ──────────────────────────────────────────
             let great = WiFiSnapshot(timestamp: .now, ssid: "T", bssid: "", rssi: -50, noise: -95, snr: 45,
@@ -83,12 +130,14 @@ func runMetricStoreTests() {
 
             // ── networkFaultType ────────────────────────────────────────────
             let storeF = MetricStore(settings: settings)
-            // Seed with good results first
+            // Seed with good result first (window will have 1 sample)
             storeF.record(result: PingResult(timestamp: .now, rtt: 20, lossPercent: 0, jitter: 1), for: id1)
-            // No gateway data yet — fault type should stay .none even when degraded
-            storeF.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1)
-            storeF.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1)
-            storeF.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1)
+            // Three full-loss polls → loss window (2 samples) fills with 100 % → red
+            let fullLoss = PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil)
+            storeF.record(result: fullLoss, for: id1)
+            storeF.record(result: fullLoss, for: id1)
+            storeF.record(result: fullLoss, for: id1)
+            // No gateway data → fault type stays .none regardless of status
             expectEqual(storeF.networkFaultType, .none, "no gateway data → faultType none")
 
             // Gateway failed → local fault

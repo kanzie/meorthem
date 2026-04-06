@@ -48,21 +48,38 @@ enum MetricStatus: Int, Comparable, CaseIterable {
 }
 
 extension MetricStatus {
-    static func forPingResult(_ result: PingResult?, thresholds: Thresholds) -> MetricStatus {
-        guard let r = result else { return .red }
-        if r.lossPercent >= thresholds.lossRedPct   { return .red }
-        if r.lossPercent >= thresholds.lossYellowPct { return .yellow }
-        if let rtt = r.rtt {
-            if rtt >= thresholds.latencyRedMs    { return .red }
-            if rtt >= thresholds.latencyYellowMs { return .yellow }
+    /// Evaluate a window of samples against thresholds using averages.
+    /// Loss, latency, and jitter are each averaged independently over their
+    /// respective sample windows, then compared to yellow/red thresholds.
+    static func forWindow(loss: [Double], latency: [Double], jitter: [Double],
+                          thresholds: Thresholds) -> MetricStatus {
+        let avgLoss    = loss.isEmpty    ? 100.0 : loss.reduce(0, +)    / Double(loss.count)
+        let avgLatency = latency.isEmpty ? nil   : latency.reduce(0, +) / Double(latency.count)
+        let avgJitter  = jitter.isEmpty  ? nil   : jitter.reduce(0, +)  / Double(jitter.count)
+
+        if avgLoss >= thresholds.lossRedPct    { return .red }
+        if avgLoss >= thresholds.lossYellowPct { return .yellow }
+        if let l = avgLatency {
+            if l >= thresholds.latencyRedMs    { return .red }
+            if l >= thresholds.latencyYellowMs { return .yellow }
         }
-        if let j = r.jitter {
+        if let j = avgJitter {
             if j >= thresholds.jitterRedMs    { return .red }
             if j >= thresholds.jitterYellowMs { return .yellow }
         }
         return .green
     }
 
+    /// Single-sample evaluation — used for gateway ping and fault-type logic.
+    static func forPingResult(_ result: PingResult?, thresholds: Thresholds) -> MetricStatus {
+        guard let r = result else { return .red }
+        return forWindow(
+            loss:    [r.lossPercent],
+            latency: r.rtt.map { [$0] } ?? [],
+            jitter:  r.jitter.map { [$0] } ?? [],
+            thresholds: thresholds
+        )
+    }
 }
 
 struct Thresholds: Codable {
