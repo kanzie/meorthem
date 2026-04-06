@@ -24,46 +24,84 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     }
 }
 
-struct SettingsView: View {
-    @EnvironmentObject private var settings: AppSettings
-    @State private var selectedTab: SettingsTab? = .general
+// MARK: - Sidebar item
+
+private struct SidebarRow: View {
+    let tab: SettingsTab
+    let isSelected: Bool
+    let action: () -> Void
 
     var body: some View {
-        NavigationSplitView {
-            List(selection: $selectedTab) {
-                ForEach(SettingsTab.allCases) { tab in
-                    Label {
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(tab.rawValue)
-                                .font(.system(size: 13, weight: .medium))
-                            Text(tab.subtitle)
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.vertical, 2)
-                    } icon: {
-                        Image(systemName: tab.icon)
-                            .font(.system(size: 14, weight: .medium))
-                            .foregroundStyle(Color.accentColor)
-                            .frame(width: 20)
-                    }
-                    .tag(tab as SettingsTab?)
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(isSelected ? .white : Color.accentColor)
+                    .frame(width: 18)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(tab.rawValue)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(isSelected ? .white : Color.primary)
+                    Text(tab.subtitle)
+                        .font(.system(size: 11))
+                        .foregroundStyle(isSelected
+                                         ? Color.white.opacity(0.75)
+                                         : Color.secondary)
                 }
+
+                Spacer()
             }
-            .listStyle(.sidebar)
-            .navigationSplitViewColumnWidth(min: 185, ideal: 200, max: 220)
-        } detail: {
+            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(isSelected ? Color.accentColor : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Settings view
+
+struct SettingsView: View {
+    @EnvironmentObject private var settings: AppSettings
+    @State private var selectedTab: SettingsTab = .general
+
+    var body: some View {
+        HStack(spacing: 0) {
+
+            // ── Sidebar ────────────────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SettingsTab.allCases) { tab in
+                    SidebarRow(tab: tab,
+                               isSelected: selectedTab == tab,
+                               action: { selectedTab = tab })
+                }
+                Spacer()
+            }
+            .padding(.top, 14)
+            .padding(.bottom, 12)
+            .padding(.horizontal, 8)
+            .frame(width: 195)
+            .background(Color(nsColor: .controlBackgroundColor))
+
+            Divider()
+
+            // ── Detail ─────────────────────────────────────────────────────────
             Group {
-                switch selectedTab ?? .general {
+                switch selectedTab {
                 case .general:    GeneralTab()
                 case .targets:    TargetsTab()
                 case .thresholds: ThresholdsTab()
                 }
             }
-            .frame(minWidth: 380, minHeight: 440)
-            .navigationTitle((selectedTab ?? .general).rawValue)
+            .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(width: 660, height: 520)
+        .frame(width: 660, height: 540)
+        .background(Color(nsColor: .windowBackgroundColor))
         .preferredColorScheme(colorScheme(for: settings.colorTheme))
     }
 
