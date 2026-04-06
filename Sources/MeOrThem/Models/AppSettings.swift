@@ -72,7 +72,7 @@ final class AppSettings: ObservableObject {
 
         alwaysShowBarChart        = ud.bool(forKey: "alwaysShowBarChart")
         colorTheme                = ColorTheme(rawValue: ud.string(forKey: "colorTheme") ?? "") ?? .system
-        launchAtLogin             = ud.bool(forKey: "launchAtLogin")
+        launchAtLogin             = ud.object(forKey: "launchAtLogin") as? Bool ?? true
         pollIntervalSecs          = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
         showLatencyInMenubar      = ud.bool(forKey: "showLatencyInMenubar")
         bandwidthScheduleHours    = ud.double(forKey: "bandwidthScheduleHours")   // 0 = disabled

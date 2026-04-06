@@ -15,29 +15,36 @@ enum MenuBuilder {
     }
 
     // Tags for items updated during live refresh
-    static let tagLatency        = 1
-    static let tagPacketLoss     = 2
-    static let tagJitter         = 3
-    static let tagCountdown      = 4   // unused; countdown is embedded in tagLatency
-    static let tagNetworkDetails = 5
-    static let tagFaultType      = 6
-    static let tagSpeedtestLabel = 7
-    static let tagSpeedtestLast  = 8
-    static let tagSpeedtestResult = 9
-    static let tagTargetBase     = 100   // tagTargetBase + index per target
-    static let tagGatewayTarget  = 200   // gateway system target row
-    static let tagPauseItem      = 10    // pause/resume menu item
+    static let tagLatency          = 1
+    static let tagPacketLoss       = 2
+    static let tagJitter           = 3
+    static let tagNetworkDetails   = 5
+    static let tagFaultType        = 6
+    static let tagSpeedtestLabel   = 7
+    static let tagSpeedtestLast    = 8
+    static let tagSpeedtestResult  = 9
+    static let tagPauseItem        = 10
+    static let tagLastEvent        = 11   // Task 2: last degradation event (cause + recovery)
+    static let tagTargetBase       = 100
+    static let tagGatewayTarget    = 200
 
     @MainActor
     static func rebuild(_ menu: NSMenu, environment env: AppEnvironment, actions: Actions) {
         menu.removeAllItems()
         menu.autoenablesItems = false
 
-        let settings   = env.settings
-        let store      = env.metricStore
-        let targets    = settings.pingTargets
-        let threshold  = settings.thresholds
-        let paused     = env.monitoringEngine.isPaused
+        let settings  = env.settings
+        let store     = env.metricStore
+        let targets   = settings.pingTargets
+        let threshold = settings.thresholds
+        let paused    = env.monitoringEngine.isPaused
+
+        // MARK: - Pause / Resume (top of menu — task 7)
+        let pauseLabel = env.monitoringEngine.isManuallyPaused ? "Resume Monitoring" : "Pause Monitoring"
+        let pauseItem  = actionItem(pauseLabel, action: actions.togglePause)
+        pauseItem.tag  = tagPauseItem
+        menu.addItem(pauseItem)
+        menu.addItem(.separator())
 
         // MARK: - Overall summary
         let remaining = max(0, Int(env.monitoringEngine.nextTickAt.timeIntervalSinceNow))
@@ -58,57 +65,63 @@ enum MenuBuilder {
         menu.addItem(lossItem)
 
         let jitterValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.jitter }
-        let avgJitter = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
-        let jitterItem = staticItem(paused ? "Jitter: Paused" :
-                                    (jitterValues.isEmpty
-                                        ? "Jitter: —"
-                                        : String(format: "Jitter: %.1fms avg", avgJitter)))
+        let avgJitter    = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
+        let jitterItem   = staticItem(paused ? "Jitter: Paused" :
+                                     (jitterValues.isEmpty
+                                         ? "Jitter: —"
+                                         : String(format: "Jitter: %.1fms avg", avgJitter)))
         jitterItem.tag = tagJitter
         menu.addItem(jitterItem)
 
-        // Fault type hint (shown only when there is a known fault)
+        // Fault type — WHERE the fault is (ISP / local / mixed)
         let faultItem = staticItem(store.networkFaultType.displayLabel, color: .secondaryLabelColor)
         faultItem.tag = tagFaultType
         faultItem.isHidden = store.networkFaultType == .none
         menu.addItem(faultItem)
 
+        // Task 2: last event — WHAT caused the degradation, shown both during and after recovery
+        let lastEventItem = lastEventMenuItem(store: store)
+        lastEventItem.tag = tagLastEvent
+        menu.addItem(lastEventItem)
+
         menu.addItem(.separator())
 
         // MARK: - Per-target rows (user targets)
         for (i, target) in targets.enumerated() {
-            let result   = paused ? nil : store.latestPing[target.id]
-            let status   = store.effectiveStatus(for: target.id)
-            let spark    = store.sparklineData(for: target.id)
-            let item     = TargetMenuItemView.menuItem(target: target, result: result,
-                                                       status: status, sparkline: spark)
+            let result = paused ? nil : store.latestPing[target.id]
+            let status = store.effectiveStatus(for: target.id)
+            let spark  = store.sparklineData(for: target.id)
+            let item   = TargetMenuItemView.menuItem(target: target, result: result,
+                                                     status: status, sparkline: spark)
             item.tag = tagTargetBase + i
             menu.addItem(item)
         }
 
         // Gateway system target row
-        let gatewayIP   = env.monitoringEngine.lastGatewayIP ?? "—"
+        let gatewayIP    = env.monitoringEngine.lastGatewayIP ?? "—"
         let gatewayTarget = PingTarget(id: PingTarget.gatewayID, label: "Gateway",
                                        host: gatewayIP, isSystem: true)
-        let gwResult    = paused ? nil : store.latestPing[PingTarget.gatewayID]
-        let gwStatus    = store.effectiveStatus(for: PingTarget.gatewayID)
-        let gwSpark     = store.sparklineData(for: PingTarget.gatewayID)
-        let gwItem      = TargetMenuItemView.menuItem(target: gatewayTarget, result: gwResult,
-                                                      status: gwStatus, sparkline: gwSpark)
+        let gwResult  = paused ? nil : store.latestPing[PingTarget.gatewayID]
+        let gwStatus  = store.effectiveStatus(for: PingTarget.gatewayID)
+        let gwSpark   = store.sparklineData(for: PingTarget.gatewayID)
+        let gwItem    = TargetMenuItemView.menuItem(target: gatewayTarget, result: gwResult,
+                                                    status: gwStatus, sparkline: gwSpark)
         gwItem.tag = tagGatewayTarget
         menu.addItem(gwItem)
         menu.addItem(.separator())
 
-        // MARK: - Network Details submenu
-        let netItem = networkDetailsSubmenu(store: store)
-        netItem.tag = tagNetworkDetails
-        menu.addItem(netItem)
-        menu.addItem(.separator())
-
-        // MARK: - Actions
+        // MARK: - Actions section
         menu.addItem(actionItem("Ping Stats Report", action: actions.copyReport))
 
+        // Task 8: Network Details moved here (under Ping Stats Report)
+        let netItem = networkDetailsSubmenu(store: store,
+                                            clearHistory: { store.clearConnectionHistory() })
+        netItem.tag = tagNetworkDetails
+        menu.addItem(netItem)
+
+        menu.addItem(.separator())
+
         let speedLabelItem = actionItem(speedtestLabel(env.speedtestRunner), action: actions.runSpeedtest)
-        // Disable "Check Bandwidth" when user manually paused or test already running
         speedLabelItem.isEnabled = !isSpeedtestRunning(env.speedtestRunner)
             && !env.monitoringEngine.isManuallyPaused
         speedLabelItem.tag = tagSpeedtestLabel
@@ -124,17 +137,10 @@ enum MenuBuilder {
 
         menu.addItem(.separator())
 
-        // MARK: - Misc
-        menu.addItem(actionItem("Settings…", action: actions.openSettings))
-        menu.addItem(actionItem("Help", action: actions.showHelp))
+        // Task 9: Help, Settings, About order
+        menu.addItem(actionItem("Help",            action: actions.showHelp))
+        menu.addItem(actionItem("Settings…",       action: actions.openSettings))
         menu.addItem(actionItem("About Me Or Them", action: actions.showAbout))
-
-        menu.addItem(.separator())
-
-        let pauseLabel = env.monitoringEngine.isManuallyPaused ? "Resume Monitoring" : "Pause Monitoring"
-        let pauseItem = actionItem(pauseLabel, action: actions.togglePause)
-        pauseItem.tag = tagPauseItem
-        menu.addItem(pauseItem)
 
         menu.addItem(.separator())
         menu.addItem(actionItem("Quit", action: actions.quit))
@@ -170,7 +176,7 @@ enum MenuBuilder {
         }
 
         let jitterValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.jitter }
-        let avgJitter = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
+        let avgJitter    = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
         if let item = menu.item(withTag: tagJitter) {
             item.attributedTitle = NSAttributedString(
                 string: paused ? "Jitter: Paused" :
@@ -186,6 +192,12 @@ enum MenuBuilder {
             item.isHidden = store.networkFaultType == .none
         }
 
+        if let item = menu.item(withTag: tagLastEvent) {
+            let updated = lastEventMenuItem(store: store)
+            item.attributedTitle = updated.attributedTitle
+            item.isHidden        = updated.isHidden
+        }
+
         for (i, target) in targets.enumerated() {
             guard let item = menu.item(withTag: tagTargetBase + i) else { continue }
             let result = paused ? nil : store.latestPing[target.id]
@@ -194,7 +206,6 @@ enum MenuBuilder {
             (item.view as? TargetMenuItemView)?.update(result: result, status: status, sparkline: spark)
         }
 
-        // Refresh gateway target row
         if let gwItem = menu.item(withTag: tagGatewayTarget) {
             let gwResult = paused ? nil : store.latestPing[PingTarget.gatewayID]
             let gwStatus = store.effectiveStatus(for: PingTarget.gatewayID)
@@ -224,7 +235,8 @@ enum MenuBuilder {
     @MainActor
     static func refreshNetworkDetails(_ menu: NSMenu, environment env: AppEnvironment) {
         guard let item = menu.item(withTag: tagNetworkDetails) else { return }
-        let updated = networkDetailsSubmenu(store: env.metricStore)
+        let updated = networkDetailsSubmenu(store: env.metricStore,
+                                            clearHistory: { env.metricStore.clearConnectionHistory() })
         item.submenu = updated.submenu
     }
 
@@ -244,12 +256,42 @@ enum MenuBuilder {
             attributes: _labelAttrs)
     }
 
-    // MARK: - Network Details submenu
+    // MARK: - Last event item (Task 2)
 
     @MainActor
-    private static func networkDetailsSubmenu(store: MetricStore) -> NSMenuItem {
+    private static func lastEventMenuItem(store: MetricStore) -> NSMenuItem {
+        guard let event = store.connectionHistory.first else {
+            return hiddenItem()
+        }
+
+        let text: String
+        let color: NSColor
+
+        if event.isActive {
+            // Currently degraded — show cause and elapsed time
+            text  = "Cause: \(event.cause) · \(event.durationString())"
+            color = event.severity == .red ? .systemRed : .systemOrange
+        } else {
+            // Recovered — show what happened and how long it lasted
+            text  = "Recovered · was: \(event.cause) · lasted \(event.durationString())"
+            color = .secondaryLabelColor
+        }
+
+        let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.attributedTitle = NSAttributedString(
+            string: text,
+            attributes: [.foregroundColor: color, .font: _menuFont])
+        return item
+    }
+
+    // MARK: - Network Details submenu (now includes Connection History — tasks 3, 4, 8)
+
+    @MainActor
+    private static func networkDetailsSubmenu(store: MetricStore,
+                                              clearHistory: @escaping () -> Void) -> NSMenuItem {
         let parent = NSMenuItem(title: "Network Details", action: nil, keyEquivalent: "")
-        let sub = NSMenu(title: "Network Details")
+        let sub    = NSMenu(title: "Network Details")
 
         if let w = store.latestWifi ?? WiFiMonitor.snapshot() {
             sub.addItem(infoItem("WiFi — \(w.ssid)", bold: true))
@@ -277,8 +319,75 @@ enum MenuBuilder {
             }
         }
 
+        // Task 3: Connection History submenu
+        sub.addItem(.separator())
+        let histItem = NSMenuItem(title: "Connection History", action: nil, keyEquivalent: "")
+        let histSub  = connectionHistorySubmenu(history: store.connectionHistory,
+                                                clearHistory: clearHistory)
+        histItem.submenu = histSub
+        sub.addItem(histItem)
+
         parent.submenu = sub
         return parent
+    }
+
+    // MARK: - Connection History submenu (tasks 3, 4)
+
+    @MainActor
+    private static func connectionHistorySubmenu(history: [ConnectionEvent],
+                                                 clearHistory: @escaping () -> Void) -> NSMenu {
+        let sub = NSMenu(title: "Connection History")
+
+        if history.isEmpty {
+            sub.addItem(infoItem("No degradation events recorded"))
+            return sub
+        }
+
+        for event in history {
+            let dotColor: NSColor = event.severity == .red ? .systemRed : .systemOrange
+            let dot  = "● "
+            let ts   = event.timestampString
+            let dur  = event.isActive
+                ? "active · \(event.durationString())"
+                : "lasted \(event.durationString())"
+            let text = "\(dot)\(ts) · \(event.cause) · \(dur)"
+
+            let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+
+            let attrs: [NSAttributedString.Key: Any] = [
+                .foregroundColor: dotColor,
+                .font: NSFont.menuFont(ofSize: 12)
+            ]
+            let bodyAttrs: [NSAttributedString.Key: Any] = [
+                .foregroundColor: NSColor.labelColor,
+                .font: NSFont.menuFont(ofSize: 12)
+            ]
+            let attributed = NSMutableAttributedString(string: dot, attributes: attrs)
+            attributed.append(NSAttributedString(string: "\(ts) · \(event.cause) · \(dur)",
+                                                 attributes: bodyAttrs))
+            item.attributedTitle = attributed
+            sub.addItem(item)
+        }
+
+        sub.addItem(.separator())
+
+        let clearItem = NSMenuItem(title: "Clear All", action: #selector(AppDelegate.noop),
+                                   keyEquivalent: "")
+        clearItem.isEnabled = true
+        clearItem.target    = ActionTarget.shared
+        ActionTarget.shared.register(clearItem, action: clearHistory)
+        sub.addItem(clearItem)
+
+        return sub
+    }
+
+    @MainActor
+    private static func hiddenItem() -> NSMenuItem {
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.isHidden  = true
+        return item
     }
 
     @MainActor
@@ -310,7 +419,7 @@ enum MenuBuilder {
             countdownSuffix = ""
         }
         guard !rtts.isEmpty else { return "Latency: — · \(intervalStr)\(countdownSuffix)" }
-        let avg = rtts.reduce(0, +) / Double(rtts.count)
+        let avg     = rtts.reduce(0, +) / Double(rtts.count)
         let quality = avg < threshold.latencyYellowMs ? "Excellent" :
                       avg < threshold.latencyRedMs    ? "Fair" : "Poor"
         return String(format: "Latency: %.1fms (%@) · %@%@", avg, quality, intervalStr, countdownSuffix)
@@ -328,9 +437,7 @@ enum MenuBuilder {
         item.isEnabled = false
         item.attributedTitle = NSAttributedString(
             string: title,
-            attributes: [.foregroundColor: color,
-                         .font: _menuFont]
-        )
+            attributes: [.foregroundColor: color, .font: _menuFont])
         return item
     }
 
@@ -338,7 +445,7 @@ enum MenuBuilder {
     private static func actionItem(_ title: String, action: @escaping () -> Void) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: #selector(AppDelegate.noop), keyEquivalent: "")
         item.isEnabled = true
-        item.target = ActionTarget.shared
+        item.target    = ActionTarget.shared
         ActionTarget.shared.register(item, action: action)
         return item
     }
@@ -359,7 +466,7 @@ enum MenuBuilder {
 // MARK: - InfoMenuItemView: non-hoverable info row with labelColor text
 
 final class InfoMenuItemView: NSView {
-    private static let font12 = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+    private static let font12  = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
     private static let font12b = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
 
     init(text: String, bold: Bool = false) {
