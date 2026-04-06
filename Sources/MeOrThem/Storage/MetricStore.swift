@@ -24,10 +24,6 @@ final class MetricStore: ObservableObject {
     private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)
     private var statusHistory: CircularBuffer<MetricStatus> = CircularBuffer(capacity: 5)
 
-    // MARK: - Hysteresis: consecutive non-green count per target
-    // Yellow requires ≥2 consecutive bad polls; red requires ≥3.
-    private var consecutiveBadCount: [UUID: Int] = [:]
-
     // MARK: - Connection history (last 5 degradation events, persisted)
     @Published private(set) var connectionHistory: [ConnectionEvent] = []
     private var previousOverallStatus: MetricStatus = .green
@@ -50,15 +46,6 @@ final class MetricStore: ObservableObject {
             pingHistory[targetID] = CircularBuffer(capacity: kPingHistoryCapacity)
         }
         pingHistory[targetID]!.append(result)
-
-        // Update hysteresis counter
-        let raw = MetricStatus.forPingResult(result, thresholds: settings.thresholds)
-        if raw == .green {
-            consecutiveBadCount[targetID] = 0
-        } else {
-            consecutiveBadCount[targetID] = (consecutiveBadCount[targetID] ?? 0) + 1
-        }
-
         recomputeOverallStatus()
     }
 
@@ -77,11 +64,9 @@ final class MetricStore: ObservableObject {
 
     // MARK: - Derived
 
-    /// Returns the effective (hysteresis-adjusted) status for a target.
-    /// Yellow requires 2+ consecutive bad polls; red requires 3+.
+    /// Returns the window-averaged status for a target.
     func effectiveStatus(for targetID: UUID) -> MetricStatus {
-        let raw = MetricStatus.forPingResult(latestPing[targetID], thresholds: settings.thresholds)
-        return applyHysteresis(raw: raw, count: consecutiveBadCount[targetID, default: 0])
+        windowedStatus(for: targetID)
     }
 
     func latencyHistory(for targetID: UUID, last n: Int = 60) -> [Double] {
@@ -104,23 +89,36 @@ final class MetricStore: ObservableObject {
 
     // MARK: - Private
 
-    private func applyHysteresis(raw: MetricStatus, count: Int) -> MetricStatus {
-        switch raw {
-        case .green:  return .green
-        case .yellow: return count >= 2 ? .yellow : .green
-        case .red:    return count >= 3 ? .red : (count >= 2 ? .yellow : .green)
-        }
+    /// Returns the window-averaged status for a target.
+    /// Each metric is averaged over its configured evaluation window, expressed as
+    /// sample count = ceil(windowSecs / pollIntervalSecs). This naturally filters
+    /// brief single-poll spikes (AWDL, roaming) without needing a separate debounce.
+    private func windowedStatus(for targetID: UUID) -> MetricStatus {
+        guard let history = pingHistory[targetID] else { return .red }
+        let t    = settings.thresholds
+        let poll = settings.pollIntervalSecs
+
+        let latencyN = max(1, Int(ceil(settings.latencyWindowSecs / poll)))
+        let lossN    = max(1, Int(ceil(settings.lossWindowSecs    / poll)))
+        let jitterN  = max(1, Int(ceil(settings.jitterWindowSecs  / poll)))
+
+        let samples = history.last(max(latencyN, max(lossN, jitterN)))
+        let lossSlice    = Array(samples.suffix(lossN)).map(\.lossPercent)
+        let latencySlice = Array(samples.suffix(latencyN)).compactMap(\.rtt)
+        let jitterSlice  = Array(samples.suffix(jitterN)).compactMap(\.jitter)
+
+        return MetricStatus.forWindow(loss: lossSlice, latency: latencySlice,
+                                      jitter: jitterSlice, thresholds: t)
     }
 
     private func recomputeOverallStatus() {
         var worst: MetricStatus = .green
-        // Compute and collect effective statuses in one pass; reuse in fault-type logic
-        // to avoid calling forPingResult() + applyHysteresis() a second time per target.
+        // Compute and collect windowed statuses in one pass; reuse in fault-type logic
+        // to avoid re-reading the circular buffer a second time per target.
         var effectiveStatuses = [UUID: MetricStatus](minimumCapacity: latestPing.count)
-        for (targetID, result) in latestPing {
+        for targetID in latestPing.keys {
             guard targetID != PingTarget.gatewayID else { continue }
-            let raw = MetricStatus.forPingResult(result, thresholds: settings.thresholds)
-            let effective = applyHysteresis(raw: raw, count: consecutiveBadCount[targetID, default: 0])
+            let effective = windowedStatus(for: targetID)
             effectiveStatuses[targetID] = effective
             if effective > worst { worst = effective }
         }

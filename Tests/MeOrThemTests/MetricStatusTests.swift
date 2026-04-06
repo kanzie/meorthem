@@ -32,6 +32,62 @@ func runMetricStatusTests() {
         expectEqual(statuses.max(), .red, "max of mixed = red")
     }
 
+    suite("AppSettings evaluation window constraints") {
+        MainActor.assumeIsolated {
+            let s = AppSettings.shared
+            let poll = s.pollIntervalSecs
+            // Windows must always be ≥ poll interval (enforced by AppSettings)
+            expect(s.latencyWindowSecs >= poll, "latency window ≥ poll interval")
+            expect(s.lossWindowSecs    >= poll, "loss window ≥ poll interval")
+            expect(s.jitterWindowSecs  >= poll, "jitter window ≥ poll interval")
+            // Windows must be positive
+            expect(s.latencyWindowSecs > 0, "latency window is positive")
+            expect(s.lossWindowSecs    > 0, "loss window is positive")
+            expect(s.jitterWindowSecs  > 0, "jitter window is positive")
+        }
+    }
+
+    suite("MetricStatus.forWindow averages samples") {
+        let t = Thresholds.default
+
+        // All good → green
+        expectEqual(MetricStatus.forWindow(loss: [0, 0], latency: [50, 60], jitter: [5, 8], thresholds: t), .green,
+                    "avg values well below thresholds → green")
+
+        // Single bad latency in window of 3 — avg stays below threshold
+        // (150 + 50 + 50) / 3 = 83 ms < 100 ms yellow
+        expectEqual(MetricStatus.forWindow(loss: [0], latency: [150, 50, 50], jitter: [5], thresholds: t), .green,
+                    "one 150 ms spike averaged with two 50 ms → 83 ms avg → green")
+
+        // Sustained bad latency → yellow
+        // avg = 150 ms >= 100 ms
+        expectEqual(MetricStatus.forWindow(loss: [0], latency: [150, 150, 150], jitter: [5], thresholds: t), .yellow,
+                    "three 150 ms samples → avg 150 ms → yellow")
+
+        // Sustained red latency
+        // avg = 250 ms >= 200 ms
+        expectEqual(MetricStatus.forWindow(loss: [0], latency: [250, 250, 250], jitter: [5], thresholds: t), .red,
+                    "three 250 ms samples → avg 250 ms → red")
+
+        // AWDL scenario: 5 good jitter + 1 spike → avg ≈ 14 ms < 30 ms yellow
+        let jitters = [Double](repeating: 5, count: 5) + [60]
+        expectEqual(MetricStatus.forWindow(loss: [0], latency: [50], jitter: jitters, thresholds: t), .green,
+                    "AWDL spike averaged over 6 samples → green")
+
+        // Loss window: one bad sample in two → avg above yellow threshold
+        // (0 + 5) / 2 = 2.5 % >= 1 % yellow
+        expectEqual(MetricStatus.forWindow(loss: [0, 5], latency: [50], jitter: [5], thresholds: t), .yellow,
+                    "avg loss 2.5 % → yellow")
+
+        // Empty latency/jitter arrays (all timeouts) still evaluated via loss
+        expectEqual(MetricStatus.forWindow(loss: [100], latency: [], jitter: [], thresholds: t), .red,
+                    "100 % loss with no RTT data → red")
+
+        // Loss takes priority over latency
+        expectEqual(MetricStatus.forWindow(loss: [5], latency: [50], jitter: [5], thresholds: t), .red,
+                    "loss 5 % >= red threshold takes priority over good latency")
+    }
+
     suite("MetricStatus respects custom thresholds") {
         // Custom thresholds: latencyYellow=150ms, latencyRed=400ms, lossYellow=2%, lossRed=8%, jitterYellow=40ms, jitterRed=100ms
         var custom = Thresholds()
