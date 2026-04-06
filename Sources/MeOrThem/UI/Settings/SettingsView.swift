@@ -26,40 +26,42 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
 
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
-    @State private var selectedTab: SettingsTab = .general
+    @State private var selectedTab: SettingsTab? = .general
 
     var body: some View {
-        NavigationSplitView(columnVisibility: .constant(.all)) {
-            List(SettingsTab.allCases, selection: $selectedTab) { tab in
-                Label {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(tab.rawValue)
-                            .font(.system(size: 13, weight: .medium))
-                        Text(tab.subtitle)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
+        NavigationSplitView {
+            List(selection: $selectedTab) {
+                ForEach(SettingsTab.allCases) { tab in
+                    Label {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(tab.rawValue)
+                                .font(.system(size: 13, weight: .medium))
+                            Text(tab.subtitle)
+                                .font(.system(size: 11))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.vertical, 2)
+                    } icon: {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(Color.accentColor)
+                            .frame(width: 20)
                     }
-                    .padding(.vertical, 2)
-                } icon: {
-                    Image(systemName: tab.icon)
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                        .frame(width: 20)
+                    .tag(tab as SettingsTab?)
                 }
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 185, ideal: 200, max: 220)
-            .navigationTitle("")
         } detail: {
             Group {
-                switch selectedTab {
+                switch selectedTab ?? .general {
                 case .general:    GeneralTab()
                 case .targets:    TargetsTab()
                 case .thresholds: ThresholdsTab()
                 }
             }
             .frame(minWidth: 380, minHeight: 440)
-            .navigationTitle(selectedTab.rawValue)
+            .navigationTitle((selectedTab ?? .general).rawValue)
         }
         .frame(width: 660, height: 520)
         .preferredColorScheme(colorScheme(for: settings.colorTheme))
