@@ -234,15 +234,47 @@ git push github main --force
 echo "==> Creating GitHub release v${VERSION}..."
 cd "$ROOT_DIR"
 
-RELEASE_NOTES="### Install
+INSTALL_NOTES="### Install
 1. Download \`MeOrThem.dmg\` below
 2. Open the DMG and drag **MeOrThem.app** to Applications
 3. First launch: right-click → Open (Gatekeeper warning expected — app is ad-hoc signed, source is open for inspection)
 
 **Requires macOS 14 Sonoma or later · Apple Silicon & Intel**"
 
+# Extract this version's changelog section from CHANGELOG.md (everything under ## vX.Y.Z
+# down to the next ## heading or end of file, excluding the heading line itself).
+CHANGELOG_SECTION=""
+CHANGELOG_FILE="$ROOT_DIR/CHANGELOG.md"
+if [ -f "$CHANGELOG_FILE" ]; then
+    CHANGELOG_SECTION=$(python3 - "$VERSION" "$CHANGELOG_FILE" <<'PYEOF'
+import sys, re
+version, path = sys.argv[1], sys.argv[2]
+text = open(path).read()
+# Match from the version heading through to (but not including) the next heading or EOF.
+# Drop the heading line itself and keep only the body.
+pattern = r'## v' + re.escape(version) + r'[^\n]*\n(.*?)(?=\n## v|\Z)'
+m = re.search(pattern, text, re.DOTALL)
+print(m.group(1).strip() if m else '')
+PYEOF
+)
+fi
+
+if [ -n "$CHANGELOG_SECTION" ]; then
+    RELEASE_NOTES="${CHANGELOG_SECTION}
+
+---
+
+${INSTALL_NOTES}"
+else
+    echo "  ⚠️  No CHANGELOG.md entry found for v${VERSION} — using install instructions only."
+    RELEASE_NOTES="$INSTALL_NOTES"
+fi
+
 if gh release view "v${VERSION}" --repo kanzie/meorthem &>/dev/null 2>&1; then
-    echo "    Release v${VERSION} exists — uploading DMG assets..."
+    echo "    Release v${VERSION} exists — updating notes and uploading DMG assets..."
+    gh release edit "v${VERSION}" \
+        --notes "$RELEASE_NOTES" \
+        --repo kanzie/meorthem
     gh release upload "v${VERSION}" \
         "$VERSIONED_DMG" \
         "$GENERIC_DMG" \
