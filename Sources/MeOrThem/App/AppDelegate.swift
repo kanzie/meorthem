@@ -306,9 +306,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menuHistoryUpdate = environment.metricStore.$connectionHistory
             .dropFirst()
             .receive(on: DispatchQueue.main)
-            .sink { [weak self, weak menu] _ in
+            .sink { [weak self, weak menu] (_: [ConnectionEvent]) in
                 guard let self, let menu else { return }
-                MenuBuilder.refreshNetworkDetails(menu, environment: self.environment)
+                MenuBuilder.refreshPreviousDisturbances(menu,
+                    store: self.environment.metricStore,
+                    clearHistory: { self.environment.metricStore.clearConnectionHistory() })
                 MenuBuilder.refreshLiveItems(menu, environment: self.environment)
             }
 
@@ -316,7 +318,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Task { @MainActor [weak self] in
                 guard let self, let menu = self.statusItem.menu else { return }
                 MenuBuilder.refreshCountdown(menu, environment: self.environment)
-                MenuBuilder.refreshNetworkDetails(menu, environment: self.environment)
             }
         }
         ct.tolerance = 0.1
