@@ -147,6 +147,33 @@ func runMetricStoreTests() {
             // Gateway ok, all external failed → ISP
             storeF.recordGatewayPing(PingResult(timestamp: .now, rtt: 2, lossPercent: 0, jitter: 0.5))
             expectEqual(storeF.networkFaultType, .isp, "gateway up + all external down → ISP fault")
+
+            // ── Trimmed mean: outlier target does not dominate (3-target scenario) ──
+            // id1=200ms (outlier bad), id2=50ms (good), id3=60ms (good).
+            // With 2 targets the threshold behaviour stays the same (plain average).
+            // We simulate 3 targets by using id1, id2, and a manual UUID for a third slot.
+            let id3 = PingTarget.defaults[2].id
+            let storeTrim = MetricStore(settings: settings)
+            // Record 3 consecutive samples for each target to fill the latency window (3 samples).
+            for _ in 0..<3 {
+                storeTrim.record(result: PingResult(timestamp: .now, rtt: 200, lossPercent: 0, jitter: 5), for: id1) // outlier
+                storeTrim.record(result: PingResult(timestamp: .now, rtt: 50,  lossPercent: 0, jitter: 5), for: id2) // good
+                storeTrim.record(result: PingResult(timestamp: .now, rtt: 60,  lossPercent: 0, jitter: 5), for: id3) // good
+            }
+            // Trimmed mean discards the worst (200ms) and best (50ms), leaving 60ms → green.
+            expectEqual(storeTrim.overallStatus, .green,
+                        "3 targets: outlier (200ms) trimmed away → trimmed mean 60ms → green")
+
+            // All 3 targets bad → trimmed mean still bad
+            let storeAllBad = MetricStore(settings: settings)
+            for _ in 0..<3 {
+                storeAllBad.record(result: PingResult(timestamp: .now, rtt: 200, lossPercent: 0, jitter: 5), for: id1)
+                storeAllBad.record(result: PingResult(timestamp: .now, rtt: 210, lossPercent: 0, jitter: 5), for: id2)
+                storeAllBad.record(result: PingResult(timestamp: .now, rtt: 190, lossPercent: 0, jitter: 5), for: id3)
+            }
+            // Trimmed mean: remove 190 and 210, remaining = 200ms → red (≥200ms red threshold)
+            expectEqual(storeAllBad.overallStatus, .red,
+                        "3 targets all bad: trimmed mean 200ms ≥ 200ms red threshold → red")
         }
     }
 }

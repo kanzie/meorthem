@@ -260,6 +260,11 @@ enum MenuBuilder {
             text  = "Ongoing"
             color = event.severity == MetricStatus.red ? .systemRed : .systemOrange
         } else {
+            // Hide "Recovered" after 3 minutes — no need to keep surfacing it indefinitely.
+            let kRecoveredTimeoutSecs: TimeInterval = 3 * 60
+            if let end = event.endTime, Date().timeIntervalSince(end) > kRecoveredTimeoutSecs {
+                return hiddenItem()
+            }
             text  = "Recovered"
             color = .secondaryLabelColor
         }

@@ -112,16 +112,17 @@ final class MetricStore: ObservableObject {
     }
 
     private func recomputeOverallStatus() {
-        var worst: MetricStatus = .green
-        // Compute and collect windowed statuses in one pass; reuse in fault-type logic
-        // to avoid re-reading the circular buffer a second time per target.
+        // Compute per-target windowed statuses for fault-type isolation logic.
         var effectiveStatuses = [UUID: MetricStatus](minimumCapacity: latestPing.count)
         for targetID in latestPing.keys {
             guard targetID != PingTarget.gatewayID else { continue }
-            let effective = windowedStatus(for: targetID)
-            effectiveStatuses[targetID] = effective
-            if effective > worst { worst = effective }
+            effectiveStatuses[targetID] = windowedStatus(for: targetID)
         }
+
+        // Use a trimmed mean of actual metric values across targets for the overall status.
+        // If ≥3 targets, the best and worst per metric are discarded before averaging,
+        // preventing a consistently-bad outlier from dominating the result.
+        let worst = trimmedMeanStatus()
 
         let prev = previousOverallStatus
         previousOverallStatus = worst
@@ -208,6 +209,62 @@ final class MetricStore: ObservableObject {
         if let idx = connectionHistory.firstIndex(where: { $0.isActive }) {
             connectionHistory[idx].endTime = Date()
         }
+    }
+
+    // MARK: - Trimmed mean across targets
+
+    /// Returns the window-averaged raw metric values for a single target.
+    private func windowedMetricAverages(for targetID: UUID) -> (avgLoss: Double, avgLatency: Double?, avgJitter: Double?) {
+        guard let history = pingHistory[targetID] else { return (100, nil, nil) }
+        let poll     = settings.pollIntervalSecs
+        let latencyN = max(1, Int(ceil(settings.latencyWindowSecs / poll)))
+        let lossN    = max(1, Int(ceil(settings.lossWindowSecs    / poll)))
+        let jitterN  = max(1, Int(ceil(settings.jitterWindowSecs  / poll)))
+        let samples  = history.last(max(latencyN, max(lossN, jitterN)))
+
+        let lossSlice    = Array(samples.suffix(lossN)).map(\.lossPercent)
+        let latencySlice = Array(samples.suffix(latencyN)).compactMap(\.rtt)
+        let jitterSlice  = Array(samples.suffix(jitterN)).compactMap(\.jitter)
+
+        let avgLoss    = lossSlice.isEmpty    ? 100.0 : lossSlice.reduce(0, +)    / Double(lossSlice.count)
+        let avgLatency = latencySlice.isEmpty ? nil   : latencySlice.reduce(0, +) / Double(latencySlice.count)
+        let avgJitter  = jitterSlice.isEmpty  ? nil   : jitterSlice.reduce(0, +)  / Double(jitterSlice.count)
+        return (avgLoss, avgLatency, avgJitter)
+    }
+
+    /// Computes overall status using a trimmed mean of metric averages across all non-gateway targets.
+    private func trimmedMeanStatus() -> MetricStatus {
+        let ids = latestPing.keys.filter { $0 != PingTarget.gatewayID }
+        guard !ids.isEmpty else { return .green }
+
+        var losses:    [Double] = []
+        var latencies: [Double] = []
+        var jitters:   [Double] = []
+
+        for id in ids {
+            let m = windowedMetricAverages(for: id)
+            losses.append(m.avgLoss)
+            if let l = m.avgLatency { latencies.append(l) }
+            if let j = m.avgJitter  { jitters.append(j) }
+        }
+
+        return MetricStatus.forWindow(
+            loss:    [trimmedMean(losses)],
+            latency: latencies.isEmpty ? [] : [trimmedMean(latencies)],
+            jitter:  jitters.isEmpty   ? [] : [trimmedMean(jitters)],
+            thresholds: settings.thresholds
+        )
+    }
+
+    /// If ≥3 values, removes the single minimum and maximum before averaging.
+    /// With 1–2 values, returns a plain average.
+    private func trimmedMean(_ values: [Double]) -> Double {
+        guard !values.isEmpty else { return 0 }
+        guard values.count >= 3 else { return values.reduce(0, +) / Double(values.count) }
+        var sorted = values.sorted()
+        sorted.removeFirst()
+        sorted.removeLast()
+        return sorted.reduce(0, +) / Double(sorted.count)
     }
 
     /// Called from recomputeOverallStatus (statuses pre-computed) or standalone from recordGatewayPing.
