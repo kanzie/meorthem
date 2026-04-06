@@ -217,7 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let showBar        = environment.settings.alwaysShowBarChart
         let recentStatuses = environment.metricStore.recentOverallStatuses(last: 5)
         let settings       = environment.settings
-        let paused         = environment.monitoringEngine.isPaused
+        let paused         = environment.monitoringEngine.isManuallyPaused
 
         // Bar is shown only when auto-bandwidth polling is configured.
         let showBandwidthBar = settings.bandwidthScheduleHours > 0
