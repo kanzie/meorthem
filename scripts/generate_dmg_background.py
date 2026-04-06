@@ -120,6 +120,12 @@ def draw_label(text, cx, y, size, alpha):
 draw_label("MeOrThem",    APP_X,  APP_Y  - 150, 26, 0.50)
 draw_label("Applications", APPL_X, APPL_Y - 150, 26, 0.50)
 
+# ── First-launch instruction ─────────────────────────────────────────────────
+hint_y = 60   # near bottom of image (Quartz coords)
+hint_cx = W / 2
+draw_label("First launch: right-click the app \u2192 Open \u2192 Open",
+           hint_cx, hint_y, 18, 0.40)
+
 img.unlockFocus()
 
 # ── Save PNG ──────────────────────────────────────────────────────────────────
