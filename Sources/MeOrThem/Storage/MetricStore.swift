@@ -28,11 +28,18 @@ final class MetricStore: ObservableObject {
     // Yellow requires ≥2 consecutive bad polls; red requires ≥3.
     private var consecutiveBadCount: [UUID: Int] = [:]
 
+    // MARK: - Connection history (last 5 degradation events, persisted)
+    @Published private(set) var connectionHistory: [ConnectionEvent] = []
+    private var previousOverallStatus: MetricStatus = .green
+    private static let kMaxConnectionEvents = 5
+    private static let kHistoryUDKey = "metricStore.connectionHistory"
+
     // MARK: - Settings reference for threshold evaluation
     private let settings: AppSettings
 
     init(settings: AppSettings) {
         self.settings = settings
+        loadConnectionHistory()
     }
 
     // MARK: - Write methods (called from MonitoringEngine)
@@ -117,9 +124,92 @@ final class MetricStore: ObservableObject {
             effectiveStatuses[targetID] = effective
             if effective > worst { worst = effective }
         }
+
+        let prev = previousOverallStatus
+        previousOverallStatus = worst
         overallStatus = worst
         statusHistory.append(worst)
+
+        // Connection history: detect green↔degraded transitions
+        if prev == .green && worst != .green {
+            openConnectionEvent(severity: worst)
+        } else if prev != .green && worst == .green {
+            closeActiveConnectionEvent()
+        } else if prev != .green && worst != .green && prev != worst {
+            updateActiveEventSeverity(worst)
+        }
+
         recomputeFaultType(using: effectiveStatuses)
+    }
+
+    // MARK: - Connection history tracking
+
+    private func openConnectionEvent(severity: MetricStatus) {
+        let cause = computeDegradationCause()
+        if let idx = connectionHistory.firstIndex(where: { $0.isActive }) {
+            connectionHistory[idx].endTime = Date()
+        }
+        connectionHistory.insert(ConnectionEvent(severity: severity, cause: cause), at: 0)
+        if connectionHistory.count > Self.kMaxConnectionEvents { connectionHistory.removeLast() }
+        saveConnectionHistory()
+    }
+
+    private func closeActiveConnectionEvent() {
+        guard let idx = connectionHistory.firstIndex(where: { $0.isActive }) else { return }
+        connectionHistory[idx].endTime = Date()
+        saveConnectionHistory()
+    }
+
+    private func updateActiveEventSeverity(_ newSeverity: MetricStatus) {
+        guard let idx = connectionHistory.firstIndex(where: { $0.isActive }),
+              newSeverity.rawValue > connectionHistory[idx].severityRaw else { return }
+        let e = connectionHistory[idx]
+        connectionHistory[idx] = ConnectionEvent(severity: newSeverity, startTime: e.startTime, cause: e.cause)
+        saveConnectionHistory()
+    }
+
+    private func computeDegradationCause() -> String {
+        let t = settings.thresholds
+        var parts: [String] = []
+        let ids = latestPing.keys.filter { $0 != PingTarget.gatewayID }
+
+        let losses = ids.map { latestPing[$0]?.lossPercent ?? 0 }
+        if !losses.isEmpty {
+            let avg = losses.reduce(0, +) / Double(losses.count)
+            if avg >= t.lossYellowPct { parts.append(String(format: "packet loss (%.1f%%)", avg)) }
+        }
+        let rtts = ids.compactMap { latestPing[$0]?.rtt }
+        if !rtts.isEmpty {
+            let avg = rtts.reduce(0, +) / Double(rtts.count)
+            if avg >= t.latencyYellowMs { parts.append(String(format: "high latency (%.0fms)", avg)) }
+        }
+        let jitters = ids.compactMap { latestPing[$0]?.jitter }
+        if !jitters.isEmpty {
+            let avg = jitters.reduce(0, +) / Double(jitters.count)
+            if avg >= t.jitterYellowMs { parts.append(String(format: "high jitter (%.0fms)", avg)) }
+        }
+        return parts.isEmpty ? "network degradation" : parts.joined(separator: ", ")
+    }
+
+    func clearConnectionHistory() {
+        connectionHistory.removeAll()
+        UserDefaults.standard.removeObject(forKey: Self.kHistoryUDKey)
+    }
+
+    private func saveConnectionHistory() {
+        if let data = try? JSONEncoder().encode(connectionHistory) {
+            UserDefaults.standard.set(data, forKey: Self.kHistoryUDKey)
+        }
+    }
+
+    private func loadConnectionHistory() {
+        guard let data = UserDefaults.standard.data(forKey: Self.kHistoryUDKey),
+              let events = try? JSONDecoder().decode([ConnectionEvent].self, from: data)
+        else { return }
+        connectionHistory = events
+        if let idx = connectionHistory.firstIndex(where: { $0.isActive }) {
+            connectionHistory[idx].endTime = Date()
+        }
     }
 
     /// Called from recomputeOverallStatus (statuses pre-computed) or standalone from recordGatewayPing.

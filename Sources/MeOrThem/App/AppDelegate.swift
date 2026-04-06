@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuLiveUpdate: AnyCancellable?
     private var menuWifiUpdate: AnyCancellable?
     private var menuSpeedtestUpdate: AnyCancellable?
+    private var menuHistoryUpdate: AnyCancellable?
     private var countdownTimer: Timer?
     private var isPulsing = false
     private var hasInitialData = false
@@ -33,6 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Detect first install before AppSettings initialises (sets launchAtLogin = true)
+        let isFirstLaunch = UserDefaults.standard.object(forKey: "launchAtLogin") == nil
+
         environment = AppEnvironment()
         setupStatusItem()
         observeStatusChanges()
@@ -41,6 +45,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         environment.alertManager.requestPermission()
         environment.monitoringEngine.start()
         UpdateChecker.shared.startPeriodicChecks()
+
+        // Register launch-at-login on first install (silently — matches user expectation)
+        if isFirstLaunch {
+            try? LaunchAtLoginHelper.set(true)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -208,7 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let showBar        = environment.settings.alwaysShowBarChart
         let recentStatuses = environment.metricStore.recentOverallStatuses(last: 5)
         let settings       = environment.settings
-        let paused         = environment.monitoringEngine.isManuallyPaused
+        let paused         = environment.monitoringEngine.isPaused
 
         // Bar is shown only when auto-bandwidth polling is configured.
         let showBandwidthBar = settings.bandwidthScheduleHours > 0
@@ -294,6 +303,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 MenuBuilder.refreshLiveItems(menu, environment: self.environment)
             }
 
+        menuHistoryUpdate = environment.metricStore.$connectionHistory
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self, weak menu] _ in
+                guard let self, let menu else { return }
+                MenuBuilder.refreshNetworkDetails(menu, environment: self.environment)
+                MenuBuilder.refreshLiveItems(menu, environment: self.environment)
+            }
+
         let ct = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self, let menu = self.statusItem.menu else { return }
@@ -310,6 +328,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menuLiveUpdate       = nil
         menuWifiUpdate       = nil
         menuSpeedtestUpdate  = nil
+        menuHistoryUpdate    = nil
         countdownTimer?.invalidate()
         countdownTimer = nil
     }

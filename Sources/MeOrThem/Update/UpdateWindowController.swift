@@ -34,8 +34,8 @@ final class UpdateWindowController: NSWindowController {
         win.title = "Update Available"
         win.styleMask = [.titled, .closable, .resizable]
         win.isReleasedWhenClosed = false
-        win.setContentSize(NSSize(width: 480, height: 400))
-        win.minSize = NSSize(width: 380, height: 300)
+        win.setContentSize(NSSize(width: 500, height: 520))
+        win.minSize = NSSize(width: 420, height: 380)
         win.center()
         self.window = win
 
@@ -51,12 +51,18 @@ private struct UpdateView: View {
     let currentVersion: String
     let onDismiss: () -> Void
 
-    @State private var isDownloading = false
+    @State private var isDownloading    = false
     @State private var downloadError: String?
+    @State private var changelog: String?
+    @State private var changelogLoading = true
+
+    // Raw content URL for CHANGELOG.md on GitHub
+    private let changelogURL = URL(string: "https://raw.githubusercontent.com/kanzie/meorthem/main/CHANGELOG.md")!
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Header
+
+            // MARK: Header
             HStack(spacing: 14) {
                 if let icon = NSImage(named: "AppIcon") {
                     Image(nsImage: icon)
@@ -75,19 +81,43 @@ private struct UpdateView: View {
 
             Divider()
 
-            // Changelog
+            // MARK: Changelog
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("What's new in \(release.version)")
+                    Text("What's changed")
                         .font(.caption).bold()
                         .foregroundStyle(.secondary)
-                    Text(release.body ?? "No release notes available.")
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if changelogLoading {
+                        ProgressView()
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 20)
+                    } else {
+                        Text(changelog ?? release.body ?? "No release notes available.")
+                            .font(.system(.body, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .padding(16)
             }
-            .frame(minHeight: 140, maxHeight: 280)
+            .frame(minHeight: 160, maxHeight: 300)
+
+            Divider()
+
+            // MARK: Install instructions
+            VStack(alignment: .leading, spacing: 4) {
+                Text("How to install:")
+                    .font(.caption).bold()
+                    .foregroundStyle(.secondary)
+                Text("1. Quit Me Or Them before installing.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("2. Open the DMG and drag Me Or Them to Applications.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("3. Click Replace when asked, then relaunch.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
 
             Divider()
 
@@ -96,10 +126,10 @@ private struct UpdateView: View {
                     .font(.caption)
                     .foregroundStyle(.red)
                     .padding(.horizontal, 20)
-                    .padding(.top, 10)
+                    .padding(.top, 8)
             }
 
-            // Buttons
+            // MARK: Buttons
             HStack {
                 Button("Skip This Version") {
                     UpdateChecker.skipVersion(release.tagName)
@@ -110,9 +140,7 @@ private struct UpdateView: View {
 
                 Spacer()
 
-                Button("Later") {
-                    onDismiss()
-                }
+                Button("Later") { onDismiss() }
 
                 if release.dmgURL != nil {
                     Button(isDownloading ? "Downloading…" : "Download & Install") {
@@ -124,8 +152,22 @@ private struct UpdateView: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 380)
+        .frame(minWidth: 420)
+        .task { await fetchChangelog() }
     }
+
+    // MARK: - Changelog fetch
+
+    private func fetchChangelog() async {
+        changelogLoading = true
+        if let (data, _) = try? await URLSession.shared.data(from: changelogURL),
+           let text = String(data: data, encoding: .utf8) {
+            changelog = text
+        }
+        changelogLoading = false
+    }
+
+    // MARK: - Download & install
 
     private func downloadAndInstall() {
         guard let urlStr = release.dmgURL, let url = URL(string: urlStr) else { return }
@@ -137,7 +179,6 @@ private struct UpdateView: View {
                 let (localURL, _) = try await URLSession.shared.download(from: url)
                 let dest = FileManager.default.temporaryDirectory
                     .appendingPathComponent(url.lastPathComponent)
-                // Overwrite if exists
                 try? FileManager.default.removeItem(at: dest)
                 try FileManager.default.moveItem(at: localURL, to: dest)
                 NSWorkspace.shared.open(dest)

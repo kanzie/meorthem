@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GeneralTab: View {
     @EnvironmentObject private var settings: AppSettings
+    @ObservedObject private var updateChecker = UpdateChecker.shared
     @State private var loginError: String?
     @State private var isUpdatingLogin = false
     private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
@@ -120,6 +121,15 @@ struct GeneralTab: View {
                     Button("Check for Updates") {
                         UpdateChecker.shared.checkManually()
                     }
+                }
+                HStack(spacing: 4) {
+                    Text("Last checked:")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(updateChecker.lastCheckDescription)
+                        .font(.caption)
+                        .foregroundStyle(updateChecker.lastCheckDescription.hasPrefix("Failed")
+                                         ? .red : .secondary)
                 }
             }
         }

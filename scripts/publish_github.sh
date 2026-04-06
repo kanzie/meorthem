@@ -120,7 +120,8 @@ cat > README.md <<README
 
 > Is it *you*, or is it *them*?
 
-A precision network monitor for macOS that lives quietly in your menubar and answers the question every remote worker, gamer, and developer asks a dozen times a day.
+A precision network monitor for macOS that lives quietly in your menubar and answers the question every remote worker, gamer, and developer asks a dozen times a day: "Is the problem on my side or their side?" Simply put, is it Me or Them!.
+Supports both WiFi and Ethernet connections. 
 
 **[Download the latest release →](https://github.com/kanzie/meorthem/releases/latest)**
 
@@ -128,12 +129,21 @@ A precision network monitor for macOS that lives quietly in your menubar and ans
 
 ## What it does
 
-MeOrThem pings multiple targets simultaneously and tells you — in real time — whether a problem is on your end (WiFi, router, local network) or upstream (ISP, internet outage). No guessing. No opening Terminal. One glance at the menubar icon.
+MeOrThem pings multiple targets (from a pre-existing list or ones the user wants) simultaneously and tells you — in real time — whether a problem is on your end (WiFi, router, local network) or upstream (ISP, internet outage). No guessing. No opening Terminal. One glance at the menubar icon.
 
 - **Green circle** — all good
 - **Orange circle** — degraded (latency, loss, or jitter above threshold)
 - **Red square** — critical outage detected
 - **Bar chart mode** — rolling history of the last five readings, visible without opening the menu
+
+Optionally the app can also show your **bandwidth quality** by testing throughput at regular intervals and indicate quality with a small bar underneath the circle. 
+Another option gives the user a average ping latency next to the circle in the taskbar.
+
+**All information you need, in one convenient place**
+
+## Optimized for tiny footprint
+The application has undergone many passes to optimize how it consumes resources on your computer. A core tenet in the design was that this application should be as lean and secure as possible. Your CPU wont notice it running, at <1% load doing all its work and at most it consumes around 50MB of memory, which is mostly shared OSX resources cached to disk. 
+Simply put, you wont know its there unless you look at your taskbar!
 
 ## Features
 
@@ -149,7 +159,7 @@ MeOrThem pings multiple targets simultaneously and tells you — in real time �
 - Reports *"local network / router"* vs *"ISP / internet outage"* — not just "something is wrong"
 
 **WiFi diagnostics**
-- SSID, BSSID, RSSI, SNR, channel, band, PHY mode, Tx rate, IP address, and router
+- RSSI, SNR, channel, band, PHY mode, Tx rate, IP address, and router
 - No Location permission required — uses CoreWLAN and SCDynamicStore
 
 **Bandwidth testing**
