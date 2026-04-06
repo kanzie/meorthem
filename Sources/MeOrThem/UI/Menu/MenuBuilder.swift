@@ -15,18 +15,18 @@ enum MenuBuilder {
     }
 
     // Tags for items updated during live refresh
-    static let tagLatency          = 1
-    static let tagPacketLoss       = 2
-    static let tagJitter           = 3
-    static let tagNetworkDetails   = 5
-    static let tagFaultType        = 6
-    static let tagSpeedtestLabel   = 7
-    static let tagSpeedtestLast    = 8
-    static let tagSpeedtestResult  = 9
-    static let tagPauseItem        = 10
-    static let tagLastEvent        = 11   // Task 2: last degradation event (cause + recovery)
-    static let tagTargetBase       = 100
-    static let tagGatewayTarget    = 200
+    static let tagLatency                = 1
+    static let tagPacketLoss             = 2
+    static let tagJitter                 = 3
+    static let tagNetworkDetails         = 5
+    static let tagSpeedtestLabel         = 7
+    static let tagSpeedtestLast          = 8
+    static let tagSpeedtestResult        = 9
+    static let tagPauseItem              = 10
+    static let tagLastEvent              = 11
+    static let tagPreviousDisturbances   = 12
+    static let tagTargetBase             = 100
+    static let tagGatewayTarget          = 200
 
     @MainActor
     static func rebuild(_ menu: NSMenu, environment env: AppEnvironment, actions: Actions) {
@@ -73,13 +73,7 @@ enum MenuBuilder {
         jitterItem.tag = tagJitter
         menu.addItem(jitterItem)
 
-        // Fault type — WHERE the fault is (ISP / local / mixed)
-        let faultItem = staticItem(store.networkFaultType.displayLabel, color: .secondaryLabelColor)
-        faultItem.tag = tagFaultType
-        faultItem.isHidden = store.networkFaultType == .none
-        menu.addItem(faultItem)
-
-        // Task 2: last event — WHAT caused the degradation, shown both during and after recovery
+        // Recovery/Ongoing indicator — shown when there is or was a recent degradation event
         let lastEventItem = lastEventMenuItem(store: store)
         lastEventItem.tag = tagLastEvent
         menu.addItem(lastEventItem)
@@ -113,9 +107,12 @@ enum MenuBuilder {
         // MARK: - Actions section
         menu.addItem(actionItem("Ping Stats Report", action: actions.copyReport))
 
-        // Task 8: Network Details moved here (under Ping Stats Report)
-        let netItem = networkDetailsSubmenu(store: store,
-                                            clearHistory: { store.clearConnectionHistory() })
+        let distItem = previousDisturbancesItem(store: store,
+                                                clearHistory: { store.clearConnectionHistory() })
+        distItem.tag = tagPreviousDisturbances
+        menu.addItem(distItem)
+
+        let netItem = networkDetailsSubmenu(store: store)
         netItem.tag = tagNetworkDetails
         menu.addItem(netItem)
 
@@ -185,13 +182,6 @@ enum MenuBuilder {
                 attributes: _labelAttrs)
         }
 
-        if let item = menu.item(withTag: tagFaultType) {
-            item.attributedTitle = NSAttributedString(
-                string: store.networkFaultType.displayLabel,
-                attributes: [.foregroundColor: NSColor.secondaryLabelColor, .font: _menuFont])
-            item.isHidden = store.networkFaultType == .none
-        }
-
         if let item = menu.item(withTag: tagLastEvent) {
             let updated = lastEventMenuItem(store: store)
             item.attributedTitle = updated.attributedTitle
@@ -235,8 +225,7 @@ enum MenuBuilder {
     @MainActor
     static func refreshNetworkDetails(_ menu: NSMenu, environment env: AppEnvironment) {
         guard let item = menu.item(withTag: tagNetworkDetails) else { return }
-        let updated = networkDetailsSubmenu(store: env.metricStore,
-                                            clearHistory: { env.metricStore.clearConnectionHistory() })
+        let updated = networkDetailsSubmenu(store: env.metricStore)
         item.submenu = updated.submenu
     }
 
@@ -268,12 +257,10 @@ enum MenuBuilder {
         let color: NSColor
 
         if event.isActive {
-            // Currently degraded — show cause and elapsed time
-            text  = "Cause: \(event.cause) · \(event.durationString())"
-            color = event.severity == .red ? .systemRed : .systemOrange
+            text  = "Ongoing"
+            color = event.severity == MetricStatus.red ? .systemRed : .systemOrange
         } else {
-            // Recovered — show what happened and how long it lasted
-            text  = "Recovered · was: \(event.cause) · lasted \(event.durationString())"
+            text  = "Recovered"
             color = .secondaryLabelColor
         }
 
@@ -285,16 +272,36 @@ enum MenuBuilder {
         return item
     }
 
-    // MARK: - Network Details submenu (now includes Connection History — tasks 3, 4, 8)
+    // MARK: - Previous Disturbances submenu
 
     @MainActor
-    private static func networkDetailsSubmenu(store: MetricStore,
-                                              clearHistory: @escaping () -> Void) -> NSMenuItem {
+    static func previousDisturbancesItem(store: MetricStore,
+                                         clearHistory: @escaping () -> Void) -> NSMenuItem {
+        let item = NSMenuItem(title: "Previous Disturbances", action: nil, keyEquivalent: "")
+        item.submenu = connectionHistorySubmenu(history: store.connectionHistory,
+                                               clearHistory: clearHistory)
+        return item
+    }
+
+    @MainActor
+    static func refreshPreviousDisturbances(_ menu: NSMenu, store: MetricStore,
+                                            clearHistory: @escaping () -> Void) {
+        guard let item = menu.item(withTag: tagPreviousDisturbances) else { return }
+        // Skip if user is currently hovering the item (submenu may be open)
+        guard menu.highlightedItem !== item else { return }
+        let updated = previousDisturbancesItem(store: store, clearHistory: clearHistory)
+        item.submenu = updated.submenu
+    }
+
+    // MARK: - Network Details submenu
+
+    @MainActor
+    private static func networkDetailsSubmenu(store: MetricStore) -> NSMenuItem {
         let parent = NSMenuItem(title: "Network Details", action: nil, keyEquivalent: "")
         let sub    = NSMenu(title: "Network Details")
 
         if let w = store.latestWifi ?? WiFiMonitor.snapshot() {
-            sub.addItem(infoItem("WiFi — \(w.ssid)", bold: true))
+            sub.addItem(infoItem("WiFi", bold: true))
             sub.addItem(.separator())
             if let ip = w.ipAddress   { sub.addItem(infoItem("IP Address:  \(ip)")) }
             if let gw = w.routerIP    { sub.addItem(infoItem("Router:      \(gw)")) }
@@ -319,24 +326,16 @@ enum MenuBuilder {
             }
         }
 
-        // Task 3: Connection History submenu
-        sub.addItem(.separator())
-        let histItem = NSMenuItem(title: "Connection History", action: nil, keyEquivalent: "")
-        let histSub  = connectionHistorySubmenu(history: store.connectionHistory,
-                                                clearHistory: clearHistory)
-        histItem.submenu = histSub
-        sub.addItem(histItem)
-
         parent.submenu = sub
         return parent
     }
 
-    // MARK: - Connection History submenu (tasks 3, 4)
+    // MARK: - Previous Disturbances submenu content
 
     @MainActor
     private static func connectionHistorySubmenu(history: [ConnectionEvent],
                                                  clearHistory: @escaping () -> Void) -> NSMenu {
-        let sub = NSMenu(title: "Connection History")
+        let sub = NSMenu(title: "Previous Disturbances")
 
         if history.isEmpty {
             sub.addItem(infoItem("No degradation events recorded"))

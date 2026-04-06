@@ -271,7 +271,6 @@ final class MetricStore: ObservableObject {
         lines.append("")
         if let w = latestWifi {
             lines.append("WI-FI")
-            lines.append("  SSID:    \(w.ssid)")
             lines.append("  RSSI:    \(w.rssi) dBm  (\(w.rssiQuality))")
             lines.append("  SNR:     \(w.snr) dB")
             lines.append("  Channel: \(w.channelNumber)  (\(w.channelBandGHz, format: "%.1f") GHz)")
