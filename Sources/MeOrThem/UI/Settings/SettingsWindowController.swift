@@ -13,7 +13,7 @@ final class SettingsWindowController: NSWindowController {
         let window = NSWindow(contentViewController: vc)
         window.title = "Me Or Them Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
-        window.setContentSize(NSSize(width: 540, height: 580))
+        window.setContentSize(NSSize(width: 660, height: 540))
         window.isReleasedWhenClosed = false
         window.center()
 
