@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.15.0 — 2026-04-07
+
+### New Features
+- **System load detection** — Me Or Them now samples CPU utilisation on every poll tick. When network quality degrades and system load is ≥75%, the dropdown shows a "⚠ High system load (X%) — readings may be affected" advisory. If the degradation event is logged in Previous Disturbances, the cause also notes the high CPU (e.g. "high latency (180ms), high system load (82%)") so you know whether a bad reading was likely a network problem or the machine being resource-constrained.
+
+---
+
 ## v1.14.0 — 2026-04-07
 
 ### New Features

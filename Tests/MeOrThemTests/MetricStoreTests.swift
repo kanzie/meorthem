@@ -164,6 +164,32 @@ func runMetricStoreTests() {
             expectEqual(storeTrim.overallStatus, .green,
                         "3 targets: outlier (200ms) trimmed away → trimmed mean 60ms → green")
 
+            // ── CPU load annotation in degradation cause ─────────────────────
+            // If system load is ≥75 % when degradation starts, the cause string
+            // should include "high system load (X%)".
+            let storeCPU = MetricStore(settings: settings)
+            // Seed 3 polls of high CPU load before triggering degradation
+            storeCPU.recordSystemLoad(0.80)
+            storeCPU.recordSystemLoad(0.85)
+            storeCPU.recordSystemLoad(0.82)
+            // Trigger degradation: 2 loss-window samples of 100 % loss → red
+            storeCPU.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1)
+            storeCPU.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1)
+            // Should have opened a connection event whose cause mentions system load
+            let cpuEvent = storeCPU.connectionHistory.first
+            expectEqual(cpuEvent != nil, true, "degradation event created when CPU high")
+            let causeContainsCPU = cpuEvent?.cause.contains("high system load") ?? false
+            expectEqual(causeContainsCPU, true, "cause annotated with high system load when CPU ≥ 75%")
+
+            // Low CPU → no annotation
+            let storeLowCPU = MetricStore(settings: settings)
+            storeLowCPU.recordSystemLoad(0.30)
+            storeLowCPU.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1)
+            storeLowCPU.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1)
+            let lowCPUEvent = storeLowCPU.connectionHistory.first
+            let causeNoCPU = lowCPUEvent?.cause.contains("high system load") ?? true
+            expectEqual(causeNoCPU, false, "cause not annotated with system load when CPU < 75%")
+
             // All 3 targets bad → trimmed mean still bad
             let storeAllBad = MetricStore(settings: settings)
             for _ in 0..<3 {

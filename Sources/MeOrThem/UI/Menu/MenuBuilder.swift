@@ -25,6 +25,7 @@ enum MenuBuilder {
     static let tagPauseItem              = 10
     static let tagLastEvent              = 11
     static let tagPreviousDisturbances   = 12
+    static let tagCPUAdvisory            = 13
     static let tagTargetBase             = 100
     static let tagGatewayTarget          = 200
 
@@ -77,6 +78,11 @@ enum MenuBuilder {
         let lastEventItem = lastEventMenuItem(store: store)
         lastEventItem.tag = tagLastEvent
         menu.addItem(lastEventItem)
+
+        // CPU advisory — shown when degraded and system is under heavy load
+        let cpuItem = cpuAdvisoryMenuItem(store: store)
+        cpuItem.tag = tagCPUAdvisory
+        menu.addItem(cpuItem)
 
         menu.addItem(.separator())
 
@@ -188,6 +194,12 @@ enum MenuBuilder {
             item.isHidden        = updated.isHidden
         }
 
+        if let item = menu.item(withTag: tagCPUAdvisory) {
+            let updated = cpuAdvisoryMenuItem(store: store)
+            item.attributedTitle = updated.attributedTitle
+            item.isHidden        = updated.isHidden
+        }
+
         for (i, target) in targets.enumerated() {
             guard let item = menu.item(withTag: tagTargetBase + i) else { continue }
             let result = paused ? nil : store.latestPing[target.id]
@@ -274,6 +286,25 @@ enum MenuBuilder {
         item.attributedTitle = NSAttributedString(
             string: text,
             attributes: [.foregroundColor: color, .font: _menuFont])
+        return item
+    }
+
+    // MARK: - CPU advisory
+
+    @MainActor
+    private static func cpuAdvisoryMenuItem(store: MetricStore) -> NSMenuItem {
+        // Only show when the network is actively degraded and system load is high.
+        // High CPU can delay ping process scheduling and inflate RTT/loss readings.
+        guard store.overallStatus != .green,
+              store.currentSystemLoad >= 0.75 else {
+            return hiddenItem()
+        }
+        let pct = Int((store.currentSystemLoad * 100).rounded())
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.attributedTitle = NSAttributedString(
+            string: "⚠ High system load (\(pct)%) — readings may be affected",
+            attributes: [.foregroundColor: NSColor.systemOrange, .font: _menuFont])
         return item
     }
 
