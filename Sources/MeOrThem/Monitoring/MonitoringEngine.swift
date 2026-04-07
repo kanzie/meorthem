@@ -7,6 +7,7 @@ final class MonitoringEngine {
     private let store: MetricStore
     private var timer: Timer?
     private var isRunning = false
+    private let cpuSampler = CPUSampler()
 
     /// Fires once at the start of every poll tick — used to drive the heartbeat dot.
     let tickStarted = PassthroughSubject<Void, Never>()
@@ -116,6 +117,9 @@ final class MonitoringEngine {
 
     private func tick() async {
         tickStarted.send()
+
+        // Sample CPU before pings run — captures the load level that could affect timing.
+        store.recordSystemLoad(cpuSampler.sample())
 
         // WiFi snapshot first — must run on main thread (CWWiFiClient requirement).
         let wifi = WiFiMonitor.snapshot()
