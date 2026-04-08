@@ -106,6 +106,7 @@ git filter-repo \
     --path FIXES.md \
     --path index.html \
     --path images \
+    --path scripts/deploy_website.sh \
     --message-callback '
 import re
 msg = re.sub(rb"[ \t]*Co-Authored-By: Claude[^\n]*\n?", b"", message)
@@ -302,3 +303,6 @@ echo "  Source:   https://github.com/kanzie/meorthem"
 echo "  Release:  https://github.com/kanzie/meorthem/releases/tag/v${VERSION}"
 echo "  Download: https://github.com/kanzie/meorthem/releases/latest/download/MeOrThem.dmg"
 echo ""
+
+# ── Deploy website ─────────────────────────────────────────────────────────────
+bash "$SCRIPT_DIR/deploy_website.sh"
