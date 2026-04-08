@@ -29,7 +29,6 @@ enum JSONExporter {
         for w in store.wifiHistory.toArray() {
             var entry: [String: Any] = [
                 "timestamp":       iso.string(from: w.timestamp),
-                "ssid":            w.ssid,
                 "rssi":            w.rssi,
                 "noise":           w.noise,
                 "snr":             w.snr,

@@ -2,7 +2,6 @@ import Foundation
 
 struct WiFiSnapshot {
     let timestamp: Date
-    let ssid: String
     let bssid: String
     /// Signal strength in dBm (typically -40 to -90)
     let rssi: Int
