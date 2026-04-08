@@ -83,7 +83,7 @@ enum PDFExporter {
         if let w = store.latestWifi {
             if !page.hasRoom(70) { pages.append(page.finish()); page = PageCanvas(w: pageW, h: pageH, margin: margin, scale: scale) }
             page.sectionHeader("WI-FI")
-            page.bodyLine("SSID: \(w.ssid)  |  BSSID: \(w.bssid)")
+            page.bodyLine("BSSID: \(w.bssid)")
             page.bodyLine("RSSI: \(w.rssi) dBm (\(w.rssiQuality))  |  SNR: \(w.snr) dB")
             page.bodyLine("Channel: \(w.channelNumber) (\(String(format: "%.1f", w.channelBandGHz)) GHz)  |  TX Rate: \(String(format: "%.0f Mbps", w.txRateMbps))")
             page.gap(6); page.hline(); page.gap(10)
@@ -94,7 +94,6 @@ enum PDFExporter {
         if !wifiHistory.isEmpty {
             let wifiCols: [Col] = [
                 Col("Timestamp", 140),
-                Col("SSID",       90),
                 Col("RSSI",       45),
                 Col("SNR",        40),
                 Col("Ch",         30),
@@ -108,7 +107,6 @@ enum PDFExporter {
                 if !page.hasRoom(PageCanvas.rowH) { pages.append(page.finish()); page = PageCanvas(w: pageW, h: pageH, margin: margin, scale: scale) }
                 page.tableRow([
                     iso.string(from: w.timestamp),
-                    w.ssid,
                     "\(w.rssi)",
                     "\(w.snr)",
                     "\(w.channelNumber)",

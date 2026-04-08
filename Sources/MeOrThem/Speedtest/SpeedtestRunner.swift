@@ -89,7 +89,9 @@ final class SpeedtestRunner: ObservableObject {
     // MARK: - Private
 
     private func executeSpeedtest() async -> SpeedtestState {
-        guard let binaryPath = Bundle.main.path(forResource: "speedtest", ofType: nil) else {
+        let binaryPath = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/MacOS/speedtest").path
+        guard FileManager.default.fileExists(atPath: binaryPath) else {
             return .unavailable("Speedtest binary not found")
         }
 

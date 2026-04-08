@@ -25,12 +25,12 @@ enum CSVExporter {
         // WiFi section
         lines.append("")
         lines.append("# Wi-Fi History")
-        lines.append("Timestamp,SSID,RSSI_dBm,SNR_dB,Channel,Band_GHz,TxRate_Mbps")
+        lines.append("Timestamp,RSSI_dBm,SNR_dB,Channel,Band_GHz,TxRate_Mbps")
 
         let wifiHistory = store.wifiHistory.toArray()
         for w in wifiHistory {
             let ts = isoFormatter.string(from: w.timestamp)
-            lines.append("\(ts),\(csvQuote(w.ssid)),\(w.rssi),\(w.snr),\(w.channelNumber),\(String(format:"%.1f",w.channelBandGHz)),\(String(format:"%.0f",w.txRateMbps))")
+            lines.append("\(ts),\(w.rssi),\(w.snr),\(w.channelNumber),\(String(format:"%.1f",w.channelBandGHz)),\(String(format:"%.0f",w.txRateMbps))")
         }
 
         return lines.joined(separator: "\n")

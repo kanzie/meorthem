@@ -50,27 +50,41 @@ enum MenuBuilder {
         // MARK: - Overall summary
         let remaining = max(0, Int(env.monitoringEngine.nextTickAt.timeIntervalSinceNow))
 
+        let rtts = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.rtt }
+        let avgRtt = rtts.isEmpty ? 0.0 : rtts.reduce(0, +) / Double(rtts.count)
+        let latencyColor: NSColor = (!paused && !rtts.isEmpty)
+            ? metricColor(value: avgRtt, yellow: threshold.latencyYellowMs, red: threshold.latencyRedMs)
+            : .labelColor
         let latencyItem = staticItem(latencyString(targets: targets, store: store,
                                                    threshold: threshold,
                                                    pollSecs: settings.pollIntervalSecs,
                                                    countdown: remaining,
-                                                   paused: paused))
+                                                   paused: paused),
+                                     color: latencyColor)
         latencyItem.tag = tagLatency
         menu.addItem(latencyItem)
 
         let lossValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.lossPercent }
         let avgLoss: Double? = lossValues.isEmpty ? nil : lossValues.reduce(0, +) / Double(lossValues.count)
+        let lossColor: NSColor = avgLoss.map {
+            metricColor(value: $0, yellow: threshold.lossYellowPct, red: threshold.lossRedPct)
+        } ?? .labelColor
         let lossItem = staticItem(paused ? "Packet Loss: Paused"
-                                         : String(format: "Packet Loss: %.1f%%", avgLoss ?? 0))
+                                         : String(format: "Packet Loss: %.1f%%", avgLoss ?? 0),
+                                  color: lossColor)
         lossItem.tag = tagPacketLoss
         menu.addItem(lossItem)
 
         let jitterValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.jitter }
         let avgJitter    = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
+        let jitterColor: NSColor = (!paused && !jitterValues.isEmpty)
+            ? metricColor(value: avgJitter, yellow: threshold.jitterYellowMs, red: threshold.jitterRedMs)
+            : .labelColor
         let jitterItem   = staticItem(paused ? "Jitter: Paused" :
                                      (jitterValues.isEmpty
                                          ? "Jitter: —"
-                                         : String(format: "Jitter: %.1fms avg", avgJitter)))
+                                         : String(format: "Jitter: %.1fms avg", avgJitter)),
+                                      color: jitterColor)
         jitterItem.tag = tagJitter
         menu.addItem(jitterItem)
 
@@ -86,7 +100,20 @@ enum MenuBuilder {
 
         menu.addItem(.separator())
 
-        // MARK: - Per-target rows (user targets)
+        // MARK: - Per-target rows (Gateway first, then user targets)
+
+        // Gateway is always shown first for quick local-network diagnostics
+        let gatewayIP     = env.monitoringEngine.lastGatewayIP ?? "—"
+        let gatewayTarget = PingTarget(id: PingTarget.gatewayID, label: "Gateway",
+                                       host: gatewayIP, isSystem: true)
+        let gwResult  = paused ? nil : store.latestPing[PingTarget.gatewayID]
+        let gwStatus  = store.effectiveStatus(for: PingTarget.gatewayID)
+        let gwSpark   = store.sparklineData(for: PingTarget.gatewayID)
+        let gwItem    = TargetMenuItemView.menuItem(target: gatewayTarget, result: gwResult,
+                                                    status: gwStatus, sparkline: gwSpark)
+        gwItem.tag = tagGatewayTarget
+        menu.addItem(gwItem)
+
         for (i, target) in targets.enumerated() {
             let result = paused ? nil : store.latestPing[target.id]
             let status = store.effectiveStatus(for: target.id)
@@ -97,17 +124,6 @@ enum MenuBuilder {
             menu.addItem(item)
         }
 
-        // Gateway system target row
-        let gatewayIP    = env.monitoringEngine.lastGatewayIP ?? "—"
-        let gatewayTarget = PingTarget(id: PingTarget.gatewayID, label: "Gateway",
-                                       host: gatewayIP, isSystem: true)
-        let gwResult  = paused ? nil : store.latestPing[PingTarget.gatewayID]
-        let gwStatus  = store.effectiveStatus(for: PingTarget.gatewayID)
-        let gwSpark   = store.sparklineData(for: PingTarget.gatewayID)
-        let gwItem    = TargetMenuItemView.menuItem(target: gatewayTarget, result: gwResult,
-                                                    status: gwStatus, sparkline: gwSpark)
-        gwItem.tag = tagGatewayTarget
-        menu.addItem(gwItem)
         menu.addItem(.separator())
 
         // MARK: - Actions section
@@ -161,31 +177,42 @@ enum MenuBuilder {
 
         let remaining = max(0, Int(env.monitoringEngine.nextTickAt.timeIntervalSinceNow))
 
+        let rtts = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.rtt }
+        let avgRtt = rtts.isEmpty ? 0.0 : rtts.reduce(0, +) / Double(rtts.count)
+        let latencyColor: NSColor = (!paused && !rtts.isEmpty)
+            ? metricColor(value: avgRtt, yellow: threshold.latencyYellowMs, red: threshold.latencyRedMs)
+            : .labelColor
         if let item = menu.item(withTag: tagLatency) {
             item.attributedTitle = NSAttributedString(
                 string: latencyString(targets: targets, store: store, threshold: threshold,
                                       pollSecs: settings.pollIntervalSecs, countdown: remaining,
                                       paused: paused),
-                attributes: _labelAttrs)
+                attributes: [.foregroundColor: latencyColor, .font: _menuFont])
         }
 
         let lossValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.lossPercent }
         let avgLoss: Double? = lossValues.isEmpty ? nil : lossValues.reduce(0, +) / Double(lossValues.count)
+        let lossColor: NSColor = avgLoss.map {
+            metricColor(value: $0, yellow: threshold.lossYellowPct, red: threshold.lossRedPct)
+        } ?? .labelColor
         if let item = menu.item(withTag: tagPacketLoss) {
             item.attributedTitle = NSAttributedString(
                 string: paused ? "Packet Loss: Paused"
                                : String(format: "Packet Loss: %.1f%%", avgLoss ?? 0),
-                attributes: _labelAttrs)
+                attributes: [.foregroundColor: lossColor, .font: _menuFont])
         }
 
         let jitterValues = paused ? [] : targets.compactMap { store.latestPing[$0.id]?.jitter }
         let avgJitter    = jitterValues.reduce(0.0, +) / Double(max(jitterValues.count, 1))
+        let jitterColor: NSColor = (!paused && !jitterValues.isEmpty)
+            ? metricColor(value: avgJitter, yellow: threshold.jitterYellowMs, red: threshold.jitterRedMs)
+            : .labelColor
         if let item = menu.item(withTag: tagJitter) {
             item.attributedTitle = NSAttributedString(
                 string: paused ? "Jitter: Paused" :
                         (jitterValues.isEmpty ? "Jitter: —"
                          : String(format: "Jitter: %.1fms avg", avgJitter)),
-                attributes: _labelAttrs)
+                attributes: [.foregroundColor: jitterColor, .font: _menuFont])
         }
 
         if let item = menu.item(withTag: tagLastEvent) {
@@ -323,10 +350,18 @@ enum MenuBuilder {
     static func refreshPreviousDisturbances(_ menu: NSMenu, store: MetricStore,
                                             clearHistory: @escaping () -> Void) {
         guard let item = menu.item(withTag: tagPreviousDisturbances) else { return }
-        // Skip if user is currently hovering the item (submenu may be open)
-        guard menu.highlightedItem !== item else { return }
-        let updated = previousDisturbancesItem(store: store, clearHistory: clearHistory)
-        item.submenu = updated.submenu
+        // Update the existing submenu's items in place so it stays open if currently displayed.
+        // Replacing item.submenu closes the popup; modifying its contents preserves the object.
+        if item.submenu == nil { item.submenu = NSMenu(title: "Previous Disturbances") }
+        let sub = item.submenu!
+        sub.removeAllItems()
+        let fresh = connectionHistorySubmenu(history: store.connectionHistory,
+                                             clearHistory: clearHistory)
+        while fresh.numberOfItems > 0 {
+            guard let moved = fresh.item(at: 0) else { break }
+            fresh.removeItem(at: 0)
+            sub.addItem(moved)
+        }
     }
 
     // MARK: - Network Details submenu
@@ -495,6 +530,15 @@ enum MenuBuilder {
     private static func isSpeedtestRunning(_ runner: SpeedtestRunner) -> Bool {
         if case .running = runner.state { return true }
         return false
+    }
+
+    /// Returns the appropriate text color for a metric value relative to its thresholds.
+    /// Used to color latency, loss, and jitter rows in the menu.
+    @MainActor
+    private static func metricColor(value: Double, yellow: Double, red: Double) -> NSColor {
+        if value >= red    { return .systemRed }
+        if value >= yellow { return .systemOrange }
+        return .labelColor
     }
 }
 

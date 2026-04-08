@@ -104,25 +104,25 @@ func runMetricStoreTests() {
             expectEqual(storeRec.overallStatus, .green, "2 good polls in 3-sample latency window → avg below threshold → green")
 
             // ── rssiQuality labels ──────────────────────────────────────────
-            let great = WiFiSnapshot(timestamp: .now, ssid: "T", bssid: "", rssi: -50, noise: -95, snr: 45,
+            let great = WiFiSnapshot(timestamp: .now, bssid: "", rssi: -50, noise: -95, snr: 45,
                                      channelNumber: 6, channelBandGHz: 2.4, txRateMbps: 300,
                                      interfaceName: "en0", macAddress: "aa:bb:cc:dd:ee:ff",
                                      phyMode: "802.11ax", ipAddress: nil, routerIP: nil)
             expectEqual(great.rssiQuality, "Great",  "rssi -50 → Great")
 
-            let good = WiFiSnapshot(timestamp: .now, ssid: "T", bssid: "", rssi: -60, noise: -95, snr: 35,
+            let good = WiFiSnapshot(timestamp: .now, bssid: "", rssi: -60, noise: -95, snr: 35,
                                     channelNumber: 6, channelBandGHz: 2.4, txRateMbps: 300,
                                     interfaceName: "en0", macAddress: "aa:bb:cc:dd:ee:ff",
                                     phyMode: "802.11ax", ipAddress: nil, routerIP: nil)
             expectEqual(good.rssiQuality, "Good",    "rssi -60 → Good")
 
-            let poor = WiFiSnapshot(timestamp: .now, ssid: "T", bssid: "", rssi: -72, noise: -95, snr: 23,
+            let poor = WiFiSnapshot(timestamp: .now, bssid: "", rssi: -72, noise: -95, snr: 23,
                                     channelNumber: 6, channelBandGHz: 2.4, txRateMbps: 300,
                                     interfaceName: "en0", macAddress: "aa:bb:cc:dd:ee:ff",
                                     phyMode: "802.11ax", ipAddress: nil, routerIP: nil)
             expectEqual(poor.rssiQuality, "Poor",    "rssi -72 → Poor")
 
-            let trash = WiFiSnapshot(timestamp: .now, ssid: "T", bssid: "", rssi: -85, noise: -95, snr: 10,
+            let trash = WiFiSnapshot(timestamp: .now, bssid: "", rssi: -85, noise: -95, snr: 10,
                                      channelNumber: 6, channelBandGHz: 2.4, txRateMbps: 300,
                                      interfaceName: "en0", macAddress: "aa:bb:cc:dd:ee:ff",
                                      phyMode: "802.11ax", ipAddress: nil, routerIP: nil)

@@ -7,7 +7,7 @@ import CoreWLAN
 enum WiFiMonitor {
     static func snapshot() -> WiFiSnapshot? {
         let client = CWWiFiClient.shared()
-        guard let iface = client.interface(), iface.ssid() != nil else {
+        guard let iface = client.interface(), iface.wlanChannel() != nil else {
             return nil
         }
 
@@ -29,7 +29,6 @@ enum WiFiMonitor {
 
         return WiFiSnapshot(
             timestamp:      Date(),
-            ssid:           iface.ssid() ?? "—",
             bssid:          iface.bssid() ?? "—",
             rssi:           rssi,
             noise:          noise,
@@ -54,6 +53,7 @@ enum WiFiMonitor {
         case .mode11n:  return "802.11n"
         case .mode11ac: return "802.11ac"
         case .mode11ax: return "802.11ax"
+        case .mode11be: return "802.11be"
         @unknown default: return "Unknown"
         }
     }

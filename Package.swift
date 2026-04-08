@@ -35,9 +35,9 @@ let package = Package(
             exclude: [
                 "Resources/Info.plist",
                 "Resources/MeOrThem.entitlements",
+                "Resources/speedtest",
             ],
             resources: [
-                .copy("Resources/speedtest"),
                 .copy("Resources/author.jpg"),
                 .copy("Resources/AppIcon.icns"),
             ],

@@ -5,11 +5,19 @@
 
 # Xcode
 *.xcodeproj/
+*.xcworkspace
+*.xcarchive
+*.xccheckout
+*.moved-aside
+DerivedData/
 xcuserdata/
 .swiftpm/
 
 # Build artifacts (local)
 build/
+
+#security
+.env
 
 # macOS
 .DS_Store
@@ -21,6 +29,9 @@ build/
 
 # Internal / AI tooling
 .claude/
-CLAUDE.md.old
-FIXES.md
-HARDENING.md
+# CLAUDE.md
+# FIXES.md
+# HARDENING.md
+# OPTIMIZATION.md
+# REFACTOR-SPLIT-APP-ARCHITECTURE.md
+# PROGRESS.md

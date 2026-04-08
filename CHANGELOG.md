@@ -5,6 +5,21 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.15.1 — 2026-04-09
+
+### Bug Fixes
+- **Gateway always first** — The Gateway target row is now always displayed at the top of the target list in the dropdown, above user-configured targets.
+- **Previous Disturbances updates while open** — The submenu now refreshes in real-time when a disturbance resolves, even if it is already open. Previously it required closing and reopening the menu.
+- **Metric row alarm colors** — Latency, Packet Loss, and Jitter rows in the dropdown now turn orange when values exceed the yellow threshold and red when they exceed the red threshold, matching the user-configured limits. Default color is unchanged.
+
+### Changes
+- **Bandwidth bar threshold range extended** — Slider range for the bandwidth bar thresholds is now 10 Mbps – 2 Gbps (previously capped at 500 / 200 Mbps).
+- **SSID removed from exports** — WiFi history in CSV and PDF exports no longer includes an SSID column; the field was always "—" since reliable SSID extraction is unavailable without Location permissions.
+- **Build without Apple Developer account** — `build.sh` and `make_dmg.sh` now fall back to ad-hoc (self) signing when no Apple Developer credentials are found, with verbose logging at each decision point. Allows building from source without an Apple Developer Program subscription.
+- **Speedtest binary location** — The bundled speedtest CLI is now placed in `Contents/MacOS/` (previously `Contents/Resources/`) to align with Apple's recommended layout for signed helper executables in notarized apps.
+
+---
+
 ## v1.15.0 — 2026-04-07
 
 ### New Features
