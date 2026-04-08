@@ -175,7 +175,9 @@ Simply put, you wont know its there unless you look at your taskbar!
 
 1. Download **MeOrThem.dmg** from the [latest release](https://github.com/kanzie/meorthem/releases/latest)
 2. Open the DMG and drag **MeOrThem.app** to Applications
-3. First launch: **right-click → Open** (Gatekeeper warning expected — the app is ad-hoc signed, not notarised; source is open for your inspection)
+3. First launch: macOS will inform you that this Application is downloaded from the Internet, 
+and then might ask if you want this added to your startup - it is recommended that you accept this. 
+MeOrThem has been built with resource efficiency in its core and you will not notice it running on your machine.
 
 **Requires macOS 14 Sonoma or later · Apple Silicon & Intel**
 
@@ -195,7 +197,8 @@ bash scripts/make_dmg.sh     # → build/MeOrThem-x.y.z.dmg
 swift run MeOrThemTests
 \`\`\`
 
-105 unit tests covering core monitoring logic, metric status, fault isolation, CSV export, jitter calculation, and more. Uses a custom test runner — no XCTest dependency.
+115 unit tests covering core monitoring logic, metric status, fault isolation, CSV export, jitter calculation, and more. Uses a custom test runner — no XCTest dependency. 
+This is why the application uses Dual Module Pattern for its architecture.
 
 ## Architecture
 
@@ -237,7 +240,10 @@ cd "$ROOT_DIR"
 INSTALL_NOTES="### Install
 1. Download \`MeOrThem.dmg\` below
 2. Open the DMG and drag **MeOrThem.app** to Applications
-3. First launch: right-click → Open (Gatekeeper warning expected — app is ad-hoc signed, source is open for inspection)
+3. First launch: macOS will inform you that this Application is downloaded from the Internet, 
+and then might ask if you want this added to your startup - it is recommended that you accept this. 
+MeOrThem has been built with resource efficiency in its core and you will not notice it running on your machine.
+
 
 **Requires macOS 14 Sonoma or later · Apple Silicon & Intel**"
 
