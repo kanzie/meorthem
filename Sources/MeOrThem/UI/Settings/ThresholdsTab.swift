@@ -47,11 +47,11 @@ struct ThresholdsTab: View {
                 thresholdRow("Yellow below",
                              value: bwYellow($settings.bandwidthBarYellowMbps,
                                              red: $settings.bandwidthBarRedMbps),
-                             unit: "Mbps", range: 5...500)
+                             unit: "Mbps", range: 10...2000)
                 thresholdRow("Red below",
                              value: bwRed($settings.bandwidthBarRedMbps,
                                           yellow: $settings.bandwidthBarYellowMbps),
-                             unit: "Mbps", range: 1...200)
+                             unit: "Mbps", range: 10...2000)
             }
 
             Section {

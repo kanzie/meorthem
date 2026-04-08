@@ -40,7 +40,7 @@ final class AppEnvironment {
             }
             .store(in: &cancellables)
 
-        // React to OS WiFi events immediately (RSSI, SSID, link changes)
+        // React to OS WiFi events immediately (RSSI, link changes)
         WiFiObserver.shared.wifiChanged
             .receive(on: DispatchQueue.main)
             .sink { [weak self] snapshot in
