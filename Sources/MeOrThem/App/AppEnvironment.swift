@@ -25,7 +25,7 @@ final class AppEnvironment {
         alertManager      = AlertManager(settings: settings)
         speedtestRunner   = SpeedtestRunner()
         monitoringEngine  = MonitoringEngine(settings: settings, metricStore: metricStore)
-        exportCoordinator = ExportCoordinator(metricStore: metricStore, settings: settings)
+        exportCoordinator = ExportCoordinator(metricStore: metricStore, settings: settings, sqliteStore: sqliteStore)
         logExporter       = LogExporter(settings: settings)
 
         // Wire status changes → notification alerts

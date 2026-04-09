@@ -7,8 +7,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
     private var environment: AppEnvironment!
-    private var settingsController: SettingsWindowController?
-    private var pingReportController: PingReportWindowController?
+    private var settingsController:     SettingsWindowController?
+    private var pingReportController:   PingReportWindowController?
+    private var chartsWindowController: MetricsChartsWindowController?
     private var cancellables = Set<AnyCancellable>()
     private var menuLiveUpdate: AnyCancellable?
     private var menuWifiUpdate: AnyCancellable?
@@ -268,13 +269,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ActionTarget.shared.clear()
 
         MenuBuilder.rebuild(menu, environment: environment, actions: MenuBuilder.Actions(
-            showAbout:    { AboutWindowController.shared.showAndFocus() },
-            openSettings: { [weak self] in self?.showSettings() },
-            copyReport:   { [weak self] in self?.showPingReport() },
-            runSpeedtest: { [weak self] in self?.environment.speedtestRunner.run() },
-            showHelp:     { HelpWindowController.shared.showAndFocus() },
-            togglePause:  { [weak self] in self?.toggleManualPause() },
-            quit:         { NSApp.terminate(nil) }
+            showAbout:          { AboutWindowController.shared.showAndFocus() },
+            openSettings:       { [weak self] in self?.showSettings() },
+            copyReport:         { [weak self] in self?.showPingReport() },
+            showNetworkHistory: { [weak self] in self?.showNetworkHistory() },
+            runSpeedtest:       { [weak self] in self?.environment.speedtestRunner.run() },
+            showHelp:           { HelpWindowController.shared.showAndFocus() },
+            togglePause:        { [weak self] in self?.toggleManualPause() },
+            quit:               { NSApp.terminate(nil) }
         ))
 
         menuLiveUpdate = environment.metricStore.$latestPing
@@ -348,10 +350,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             pingReportController = PingReportWindowController(
                 store: environment.metricStore,
                 settings: environment.settings,
-                exporter: environment.exportCoordinator
+                exporter: environment.exportCoordinator,
+                onShowCharts: { [weak self] in self?.showNetworkHistory() }
             )
         }
         pingReportController?.showAndFocus()
+    }
+
+    private func showNetworkHistory() {
+        if chartsWindowController == nil {
+            chartsWindowController = MetricsChartsWindowController(
+                db:         environment.sqliteStore,
+                targets:    environment.settings.pingTargets,
+                thresholds: environment.settings.thresholds
+            )
+        }
+        chartsWindowController?.showAndFocus()
     }
 
     private func toggleManualPause() {
@@ -364,13 +378,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let menu = statusItem.menu {
             ActionTarget.shared.clear()
             MenuBuilder.rebuild(menu, environment: environment, actions: MenuBuilder.Actions(
-                showAbout:    { AboutWindowController.shared.showAndFocus() },
-                openSettings: { [weak self] in self?.showSettings() },
-                copyReport:   { [weak self] in self?.showPingReport() },
-                runSpeedtest: { [weak self] in self?.environment.speedtestRunner.run() },
-                showHelp:     { HelpWindowController.shared.showAndFocus() },
-                togglePause:  { [weak self] in self?.toggleManualPause() },
-                quit:         { NSApp.terminate(nil) }
+                showAbout:          { AboutWindowController.shared.showAndFocus() },
+                openSettings:       { [weak self] in self?.showSettings() },
+                copyReport:         { [weak self] in self?.showPingReport() },
+                showNetworkHistory: { [weak self] in self?.showNetworkHistory() },
+                runSpeedtest:       { [weak self] in self?.environment.speedtestRunner.run() },
+                showHelp:           { HelpWindowController.shared.showAndFocus() },
+                togglePause:        { [weak self] in self?.toggleManualPause() },
+                quit:               { NSApp.terminate(nil) }
             ))
         }
         updateIcon(status: environment.metricStore.overallStatus)

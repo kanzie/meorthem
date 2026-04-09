@@ -5,13 +5,14 @@ import AppKit
 enum MenuBuilder {
 
     struct Actions {
-        let showAbout:     () -> Void
-        let openSettings:  () -> Void
-        let copyReport:    () -> Void
-        let runSpeedtest:  () -> Void
-        let showHelp:      () -> Void
-        let togglePause:   () -> Void
-        let quit:          () -> Void
+        let showAbout:          () -> Void
+        let openSettings:       () -> Void
+        let copyReport:         () -> Void
+        let showNetworkHistory: () -> Void
+        let runSpeedtest:       () -> Void
+        let showHelp:           () -> Void
+        let togglePause:        () -> Void
+        let quit:               () -> Void
     }
 
     // Tags for items updated during live refresh
@@ -127,7 +128,8 @@ enum MenuBuilder {
         menu.addItem(.separator())
 
         // MARK: - Actions section
-        menu.addItem(actionItem("Export Reports", action: actions.copyReport))
+        menu.addItem(actionItem("Export Reports",   action: actions.copyReport))
+        menu.addItem(actionItem("Network History…", action: actions.showNetworkHistory))
 
         let distItem = previousDisturbancesItem(store: store,
                                                 clearHistory: { store.clearConnectionHistory() })
