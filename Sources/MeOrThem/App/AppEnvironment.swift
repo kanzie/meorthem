@@ -22,7 +22,7 @@ final class AppEnvironment {
         settings          = AppSettings.shared
         sqliteStore       = SQLiteStore.makeDefault()
         metricStore       = MetricStore(settings: settings, sqliteStore: sqliteStore)
-        alertManager      = AlertManager()
+        alertManager      = AlertManager(settings: settings)
         speedtestRunner   = SpeedtestRunner()
         monitoringEngine  = MonitoringEngine(settings: settings, metricStore: metricStore)
         exportCoordinator = ExportCoordinator(metricStore: metricStore, settings: settings)

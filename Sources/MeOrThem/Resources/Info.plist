@@ -13,9 +13,9 @@
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.21.0</string>
+    <string>1.22.0</string>
     <key>CFBundleVersion</key>
-    <string>29</string>
+    <string>30</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>NSPrincipalClass</key>
