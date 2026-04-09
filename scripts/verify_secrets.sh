@@ -27,7 +27,7 @@ if [ -f "$ENV_FILE" ]; then
         if [ -z "$SECRET" ]; then continue; fi
         
         # Search all tracked files for this secret, excluding the .env file itself
-        FOUND=$(git grep -lF "$SECRET" -- :/ | grep -v ".env" || true)
+        FOUND=$(git grep -lF "$SECRET" -- :/ | grep -Ev "\.env|env\.example" || true)
         
         if [ -n "$FOUND" ]; then
             echo "  ❌ LEAK DETECTED: A secret from your .env was found hardcoded in:"
