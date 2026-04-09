@@ -301,9 +301,12 @@ public final class SQLiteStore: @unchecked Sendable {
         }
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX
         if sqlite3_open_v2(path, &db, flags, nil) != SQLITE_OK {
-            // Corrupted DB: wipe and reopen
+            // Corrupted on-disk DB: wipe and retry
             if path != ":memory:" { try? FileManager.default.removeItem(atPath: path) }
-            sqlite3_open_v2(path, &db, flags, nil)
+            if sqlite3_open_v2(path, &db, flags, nil) != SQLITE_OK {
+                // Last resort: fall back to an in-memory database
+                sqlite3_open_v2(":memory:", &db, flags, nil)
+            }
         }
         _exec("PRAGMA journal_mode = WAL;")
         _exec("PRAGMA synchronous = NORMAL;")
@@ -582,8 +585,10 @@ public final class SQLiteStore: @unchecked Sendable {
     }
 
     /// Bind a Swift String as UTF-8 text, instructing SQLite to copy it immediately.
+    /// Passing the exact byte length handles strings containing embedded NUL characters.
     private func _bindText(_ stmt: OpaquePointer, _ col: Int32, _ value: String) {
-        sqlite3_bind_text(stmt, col, value, -1, _SQLITE_TRANSIENT)
+        let utf8 = value.utf8
+        sqlite3_bind_text(stmt, col, value, Int32(utf8.count), _SQLITE_TRANSIENT)
     }
 
     @discardableResult

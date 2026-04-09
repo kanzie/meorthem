@@ -58,7 +58,7 @@ final class LogExporter {
         let loss   = String(format: "%.1f", result.lossPercent)
         let jitter = result.jitter.map { String(format: "%.3f", $0) } ?? ""
         let row    = "\(ts),ping,\(csvQuote(target.host)),\(csvQuote(target.label)),\(rtt),\(loss),\(jitter)\n"
-        fh.write(Data(row.utf8))
+        writeRow(row, to: fh)
     }
 
     func appendWiFi(_ snapshot: WiFiSnapshot) {
@@ -67,7 +67,15 @@ final class LogExporter {
         let row  = "\(ts),wifi,,,\(snapshot.rssi),\(snapshot.snr),\(snapshot.channelNumber)," +
                    "\(String(format: "%.1f", snapshot.channelBandGHz))," +
                    "\(String(format: "%.0f", snapshot.txRateMbps))\n"
-        fh.write(Data(row.utf8))
+        writeRow(row, to: fh)
+    }
+
+    private func writeRow(_ row: String, to fh: FileHandle) {
+        do {
+            try fh.write(contentsOf: Data(row.utf8))
+        } catch {
+            log.error("LogExporter: write failed — \(error.localizedDescription)")
+        }
     }
 
     // MARK: - Called by AppEnvironment when the setting changes

@@ -265,10 +265,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - NSMenuDelegate
 
-    func menuWillOpen(_ menu: NSMenu) {
-        ActionTarget.shared.clear()
-
-        MenuBuilder.rebuild(menu, environment: environment, actions: MenuBuilder.Actions(
+    private func makeMenuActions() -> MenuBuilder.Actions {
+        MenuBuilder.Actions(
             showAbout:          { AboutWindowController.shared.showAndFocus() },
             openSettings:       { [weak self] in self?.showSettings() },
             copyReport:         { [weak self] in self?.showPingReport() },
@@ -277,7 +275,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             showHelp:           { HelpWindowController.shared.showAndFocus() },
             togglePause:        { [weak self] in self?.toggleManualPause() },
             quit:               { NSApp.terminate(nil) }
-        ))
+        )
+    }
+
+    func menuWillOpen(_ menu: NSMenu) {
+        ActionTarget.shared.clear()
+        MenuBuilder.rebuild(menu, environment: environment, actions: makeMenuActions())
 
         menuLiveUpdate = environment.metricStore.$latestPing
             .dropFirst()
@@ -377,16 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Rebuild menu to update pause item label
         if let menu = statusItem.menu {
             ActionTarget.shared.clear()
-            MenuBuilder.rebuild(menu, environment: environment, actions: MenuBuilder.Actions(
-                showAbout:          { AboutWindowController.shared.showAndFocus() },
-                openSettings:       { [weak self] in self?.showSettings() },
-                copyReport:         { [weak self] in self?.showPingReport() },
-                showNetworkHistory: { [weak self] in self?.showNetworkHistory() },
-                runSpeedtest:       { [weak self] in self?.environment.speedtestRunner.run() },
-                showHelp:           { HelpWindowController.shared.showAndFocus() },
-                togglePause:        { [weak self] in self?.toggleManualPause() },
-                quit:               { NSApp.terminate(nil) }
-            ))
+            MenuBuilder.rebuild(menu, environment: environment, actions: makeMenuActions())
         }
         updateIcon(status: environment.metricStore.overallStatus)
     }

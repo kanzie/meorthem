@@ -77,8 +77,6 @@ final class MetricsDataLoader: ObservableObject {
 
         let now  = Date()
         let from = now.addingTimeInterval(-window.duration)
-        rangeStart = from
-        rangeEnd   = now
 
         let db        = self.db
         let targets   = self.targets
@@ -130,6 +128,8 @@ final class MetricsDataLoader: ObservableObject {
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                self.rangeStart    = from
+                self.rangeEnd      = now
                 self.latencyPoints = finalLatency
                 self.lossPoints    = finalLoss
                 self.jitterPoints  = finalJitter

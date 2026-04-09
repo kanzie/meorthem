@@ -21,8 +21,10 @@ enum PingParser {
         let range = NSRange(text.startIndex..., in: text)
         let matches = rttPattern.matches(in: text, range: range)
         return matches.compactMap { match -> Double? in
-            guard let r = Range(match.range(at: 1), in: text) else { return nil }
-            return Double(text[r])
+            guard let r = Range(match.range(at: 1), in: text),
+                  let v = Double(text[r]),
+                  v > 0 else { return nil }
+            return v
         }
     }
 
