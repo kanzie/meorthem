@@ -57,6 +57,9 @@ struct MetricsChartsView: View {
     @StateObject private var loader: MetricsDataLoader
     @State private var selectedWindow: TimeWindow = .hour1
     @State private var selectedTargetIndex: Int = 0
+    /// Stores the exact timestamp of the nearest snapped data point.
+    /// Only changes when the cursor crosses into a new point's territory,
+    /// so the chart bodies (which have no dependency on this) never re-render on hover.
     @State private var hoveredDate: Date? = nil
 
     private let thresholds: Thresholds
@@ -138,9 +141,11 @@ struct MetricsChartsView: View {
                 .help("Refresh")
             }
         }
-        .onAppear { loader.load(window: selectedWindow) }
+        .onAppear {
+            loader.load(window: selectedWindow)
+            loader.checkAvailableWindows()
+        }
         .onChange(of: selectedWindow) { _, w in loader.load(window: w) }
-        .onChange(of: selectedTargetIndex) { _, _ in /* filter is derived */ }
     }
 
     // MARK: - Toolbar items
@@ -161,14 +166,38 @@ struct MetricsChartsView: View {
         .fixedSize()
     }
 
+    /// Custom segmented-style picker that can disable individual time windows.
+    /// SwiftUI's .pickerStyle(.segmented) has no per-item disabled state.
     private var windowPicker: some View {
-        Picker("Window", selection: $selectedWindow) {
+        HStack(spacing: 0) {
             ForEach(TimeWindow.allCases) { w in
-                Text(w.label).tag(w)
+                let isSelected = selectedWindow == w
+                let hasData   = loader.windowsWithData.contains(w)
+                Button { selectedWindow = w } label: {
+                    Text(w.label)
+                        .font(.caption)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4)
+                        .background(
+                            isSelected
+                                ? RoundedRectangle(cornerRadius: 5)
+                                    .fill(Color(nsColor: .controlColor))
+                                    .shadow(color: .black.opacity(0.08), radius: 1, y: 0.5)
+                                : nil
+                        )
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(
+                    hasData
+                        ? (isSelected ? Color.primary : Color.secondary)
+                        : Color.secondary.opacity(0.3)
+                )
+                .disabled(!hasData)
             }
         }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 380)
+        .padding(2)
+        .background(RoundedRectangle(cornerRadius: 7).fill(Color.secondary.opacity(0.12)))
     }
 
     // MARK: - Loading / Empty
@@ -196,6 +225,9 @@ struct MetricsChartsView: View {
 
     // MARK: - Hover helpers
 
+    /// Finds the nearest data point per target to `date` using a linear scan.
+    /// The result is used to snap hoveredDate — after snapping, subsequent lookups
+    /// use exact timestamp matching which is much cheaper.
     private func nearestPoints(to date: Date, in points: [ChartPoint]) -> [ChartPoint] {
         let labels = Set(points.map(\.targetLabel))
         return labels.compactMap { label in
@@ -206,8 +238,15 @@ struct MetricsChartsView: View {
         .sorted { $0.targetLabel < $1.targetLabel }
     }
 
-    private func tooltipEntries(for date: Date, in points: [ChartPoint]) -> [(label: String, value: Double, color: Color)] {
-        nearestPoints(to: date, in: points).compactMap { p in
+    /// Returns the points that exactly match the snapped timestamp (O(n), but n is
+    /// small per target and snappedDate only changes at data-point boundaries).
+    private func snappedPoints(in points: [ChartPoint]) -> [ChartPoint] {
+        guard let date = hoveredDate else { return [] }
+        return points.filter { $0.timestamp == date }
+    }
+
+    private func tooltipEntries(points: [ChartPoint]) -> [(label: String, value: Double, color: Color)] {
+        snappedPoints(in: points).compactMap { p in
             guard let color = colorMap[p.targetLabel] else { return nil }
             return (p.targetLabel, p.value, color)
         }
@@ -219,59 +258,83 @@ struct MetricsChartsView: View {
         HStack(spacing: 12) {
             ForEach(Array(zip(labels, colors)), id: \.0) { label, color in
                 HStack(spacing: 4) {
-                    Circle()
-                        .fill(color)
-                        .frame(width: 8, height: 8)
-                    Text(label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Circle().fill(color).frame(width: 8, height: 8)
+                    Text(label).font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
     }
 
-    // MARK: - Hover overlay builder
+    // MARK: - Hover overlay
+    //
+    // Performance design:
+    //   • Chart bodies have NO dependency on hoveredDate — they never re-render on hover.
+    //   • hoveredDate snaps to exact data-point timestamps, so state only changes when
+    //     the cursor crosses into a new point's territory (not on every pixel move).
+    //   • Markers and tooltip are drawn here, in the lightweight overlay layer only.
 
     @ViewBuilder
-    private func hoverOverlay(proxy: ChartProxy, geometry: GeometryProxy, points: [ChartPoint], unit: String) -> some View {
-        Rectangle()
-            .fill(.clear)
-            .contentShape(Rectangle())
+    private func hoverOverlay(
+        proxy: ChartProxy,
+        geometry: GeometryProxy,
+        points: [ChartPoint],
+        unit: String
+    ) -> some View {
+        let origin = proxy.plotFrame.map { geometry[$0].origin } ?? .zero
+
+        // Transparent hit-test surface for hover detection
+        Rectangle().fill(.clear).contentShape(Rectangle())
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let loc):
-                    let origin = proxy.plotFrame.map { geometry[$0].origin } ?? .zero
-                    if let date: Date = proxy.value(atX: loc.x - origin.x) {
-                        hoveredDate = date
-                    }
+                    guard let rawDate: Date = proxy.value(atX: loc.x - origin.x) else { break }
+                    // Snap to the nearest actual data timestamp; only trigger a state
+                    // update when the snapped point changes (not every cursor pixel).
+                    let snapped = nearestPoints(to: rawDate, in: points).first?.timestamp
+                    if snapped != hoveredDate { hoveredDate = snapped }
                 case .ended:
                     hoveredDate = nil
                 }
             }
 
         if let date = hoveredDate {
-            let snapped = nearestPoints(to: date, in: points)
+            let snapped = snappedPoints(in: points)
+
             if let first = snapped.first, let xPos = proxy.position(forX: first.timestamp) {
-                let origin = proxy.plotFrame.map { geometry[$0].origin } ?? .zero
                 let xInView = xPos + origin.x
 
                 // Vertical cursor line
-                Rectangle()
-                    .fill(Color.secondary.opacity(0.25))
-                    .frame(width: 1)
-                    .frame(maxHeight: .infinity)
-                    .offset(x: xInView - geometry.size.width / 2)
+                Path { p in
+                    p.move(to: CGPoint(x: xInView, y: 0))
+                    p.addLine(to: CGPoint(x: xInView, y: geometry.size.height))
+                }
+                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+
+                // Per-target snap markers
+                ForEach(snapped) { p in
+                    if let px = proxy.position(forX: p.timestamp),
+                       let py = proxy.position(forY: p.value) {
+                        Circle()
+                            .fill(colorMap[p.targetLabel] ?? .primary)
+                            .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
+                            .frame(width: 10, height: 10)
+                            .shadow(color: .black.opacity(0.15), radius: 2)
+                            .position(x: px + origin.x, y: py + origin.y)
+                    }
+                }
 
                 // Tooltip card
-                let entries = tooltipEntries(for: date, in: points)
-                HoverTooltip(date: first.timestamp, entries: entries, unit: unit)
-                    .fixedSize()
-                    .position(
-                        x: xInView < geometry.size.width / 2
-                            ? min(xInView + 100, geometry.size.width - 80)
-                            : max(xInView - 100, 80),
-                        y: origin.y + 28
-                    )
+                let entries = tooltipEntries(points: points)
+                if !entries.isEmpty {
+                    HoverTooltip(date: date, entries: entries, unit: unit)
+                        .fixedSize()
+                        .position(
+                            x: xInView < geometry.size.width / 2
+                                ? min(xInView + 100, geometry.size.width - 80)
+                                : max(xInView - 100, 80),
+                            y: origin.y + 28
+                        )
+                }
             }
         }
     }
@@ -285,21 +348,12 @@ struct MetricsChartsView: View {
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Chart {
-                        RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                      yStart: .value("Y0", 0),                yEnd: .value("YG", thresholds.latencyYellowMs))
-                            .foregroundStyle(Color.green.opacity(0.06))
-                        RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                      yStart: .value("YG", thresholds.latencyYellowMs), yEnd: .value("YR", thresholds.latencyRedMs))
-                            .foregroundStyle(Color.orange.opacity(0.06))
-                        RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                      yStart: .value("YR", thresholds.latencyRedMs), yEnd: .value("YMax", maxLatencyY))
-                            .foregroundStyle(Color.red.opacity(0.06))
-
+                        // Threshold reference lines (dashed, subtle)
                         RuleMark(y: .value("Yellow", thresholds.latencyYellowMs))
-                            .foregroundStyle(Color.orange.opacity(0.5))
+                            .foregroundStyle(Color.orange.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         RuleMark(y: .value("Red", thresholds.latencyRedMs))
-                            .foregroundStyle(Color.red.opacity(0.5))
+                            .foregroundStyle(Color.red.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
 
                         ForEach(loader.incidents) { inc in
@@ -308,21 +362,25 @@ struct MetricsChartsView: View {
                                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
                         }
 
+                        // Area fills + lines per target
                         ForEach(filteredLatency) { p in
+                            AreaMark(
+                                x: .value("Time", p.timestamp),
+                                yStart: .value("Zero", 0),
+                                yEnd:   .value("RTT ms", p.value)
+                            )
+                            .foregroundStyle(by: .value("Target", p.targetLabel))
+                            .opacity(0.18)
+                            .interpolationMethod(.catmullRom)
+
                             LineMark(x: .value("Time", p.timestamp), y: .value("RTT ms", p.value))
                                 .foregroundStyle(by: .value("Target", p.targetLabel))
+                                .lineStyle(StrokeStyle(lineWidth: 2))
                                 .interpolationMethod(.catmullRom)
-                        }
-
-                        if let date = hoveredDate {
-                            ForEach(nearestPoints(to: date, in: filteredLatency)) { p in
-                                PointMark(x: .value("Time", p.timestamp), y: .value("RTT ms", p.value))
-                                    .symbolSize(72)
-                                    .foregroundStyle(colorMap[p.targetLabel] ?? .primary)
-                            }
                         }
                     }
                     .chartForegroundStyleScale(domain: visibleTargetLabels, range: visibleTargetColors)
+                    .chartLegend(.hidden)
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 6)) { _ in
                             AxisValueLabel().font(.caption).foregroundStyle(.secondary)
@@ -339,7 +397,8 @@ struct MetricsChartsView: View {
                     .frame(height: 200)
                     .chartOverlay { proxy in
                         GeometryReader { geo in
-                            hoverOverlay(proxy: proxy, geometry: geo, points: filteredLatency, unit: "ms")
+                            hoverOverlay(proxy: proxy, geometry: geo,
+                                         points: filteredLatency, unit: "ms")
                         }
                     }
 
@@ -365,21 +424,11 @@ struct MetricsChartsView: View {
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Chart {
-                        RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                      yStart: .value("Y0", 0),                yEnd: .value("YG", thresholds.lossYellowPct))
-                            .foregroundStyle(Color.green.opacity(0.06))
-                        RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                      yStart: .value("YG", thresholds.lossYellowPct), yEnd: .value("YR", thresholds.lossRedPct))
-                            .foregroundStyle(Color.orange.opacity(0.06))
-                        RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                      yStart: .value("YR", thresholds.lossRedPct), yEnd: .value("YMax", maxLossY))
-                            .foregroundStyle(Color.red.opacity(0.06))
-
                         RuleMark(y: .value("Yellow", thresholds.lossYellowPct))
-                            .foregroundStyle(Color.orange.opacity(0.5))
+                            .foregroundStyle(Color.orange.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         RuleMark(y: .value("Red", thresholds.lossRedPct))
-                            .foregroundStyle(Color.red.opacity(0.5))
+                            .foregroundStyle(Color.red.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
 
                         ForEach(loader.incidents) { inc in
@@ -389,22 +438,19 @@ struct MetricsChartsView: View {
                         }
 
                         ForEach(filteredLoss) { p in
-                            AreaMark(x: .value("Time", p.timestamp), yStart: .value("Zero", 0), yEnd: .value("Loss %", p.value))
+                            AreaMark(x: .value("Time", p.timestamp),
+                                     yStart: .value("Zero", 0),
+                                     yEnd:   .value("Loss %", p.value))
                                 .foregroundStyle(by: .value("Target", p.targetLabel))
-                                .opacity(0.25)
-                            LineMark(x: .value("Time", p.timestamp), y: .value("Loss %", p.value))
+                                .opacity(0.18)
+                            LineMark(x: .value("Time", p.timestamp),
+                                     y: .value("Loss %", p.value))
                                 .foregroundStyle(by: .value("Target", p.targetLabel))
-                        }
-
-                        if let date = hoveredDate {
-                            ForEach(nearestPoints(to: date, in: filteredLoss)) { p in
-                                PointMark(x: .value("Time", p.timestamp), y: .value("Loss %", p.value))
-                                    .symbolSize(72)
-                                    .foregroundStyle(colorMap[p.targetLabel] ?? .primary)
-                            }
+                                .lineStyle(StrokeStyle(lineWidth: 2))
                         }
                     }
                     .chartForegroundStyleScale(domain: visibleTargetLabels, range: visibleTargetColors)
+                    .chartLegend(.hidden)
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 6)) { _ in
                             AxisValueLabel().font(.caption).foregroundStyle(.secondary)
@@ -421,7 +467,8 @@ struct MetricsChartsView: View {
                     .frame(height: 160)
                     .chartOverlay { proxy in
                         GeometryReader { geo in
-                            hoverOverlay(proxy: proxy, geometry: geo, points: filteredLoss, unit: "%")
+                            hoverOverlay(proxy: proxy, geometry: geo,
+                                         points: filteredLoss, unit: "%")
                         }
                     }
 
@@ -447,21 +494,11 @@ struct MetricsChartsView: View {
             } else {
                 VStack(alignment: .leading, spacing: 6) {
                     Chart {
-                        RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                      yStart: .value("Y0", 0),                yEnd: .value("YG", thresholds.jitterYellowMs))
-                            .foregroundStyle(Color.green.opacity(0.06))
-                        RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                      yStart: .value("YG", thresholds.jitterYellowMs), yEnd: .value("YR", thresholds.jitterRedMs))
-                            .foregroundStyle(Color.orange.opacity(0.06))
-                        RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                      yStart: .value("YR", thresholds.jitterRedMs), yEnd: .value("YMax", maxJitterY))
-                            .foregroundStyle(Color.red.opacity(0.06))
-
                         RuleMark(y: .value("Yellow", thresholds.jitterYellowMs))
-                            .foregroundStyle(Color.orange.opacity(0.5))
+                            .foregroundStyle(Color.orange.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                         RuleMark(y: .value("Red", thresholds.jitterRedMs))
-                            .foregroundStyle(Color.red.opacity(0.5))
+                            .foregroundStyle(Color.red.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
 
                         ForEach(loader.incidents) { inc in
@@ -471,22 +508,19 @@ struct MetricsChartsView: View {
                         }
 
                         ForEach(filteredJitter) { p in
-                            AreaMark(x: .value("Time", p.timestamp), yStart: .value("Zero", 0), yEnd: .value("Jitter ms", p.value))
+                            AreaMark(x: .value("Time", p.timestamp),
+                                     yStart: .value("Zero", 0),
+                                     yEnd:   .value("Jitter ms", p.value))
                                 .foregroundStyle(by: .value("Target", p.targetLabel))
-                                .opacity(0.25)
-                            LineMark(x: .value("Time", p.timestamp), y: .value("Jitter ms", p.value))
+                                .opacity(0.18)
+                            LineMark(x: .value("Time", p.timestamp),
+                                     y: .value("Jitter ms", p.value))
                                 .foregroundStyle(by: .value("Target", p.targetLabel))
-                        }
-
-                        if let date = hoveredDate {
-                            ForEach(nearestPoints(to: date, in: filteredJitter)) { p in
-                                PointMark(x: .value("Time", p.timestamp), y: .value("Jitter ms", p.value))
-                                    .symbolSize(72)
-                                    .foregroundStyle(colorMap[p.targetLabel] ?? .primary)
-                            }
+                                .lineStyle(StrokeStyle(lineWidth: 2))
                         }
                     }
                     .chartForegroundStyleScale(domain: visibleTargetLabels, range: visibleTargetColors)
+                    .chartLegend(.hidden)
                     .chartXAxis {
                         AxisMarks(values: .automatic(desiredCount: 6)) { _ in
                             AxisValueLabel().font(.caption).foregroundStyle(.secondary)
@@ -503,7 +537,8 @@ struct MetricsChartsView: View {
                     .frame(height: 160)
                     .chartOverlay { proxy in
                         GeometryReader { geo in
-                            hoverOverlay(proxy: proxy, geometry: geo, points: filteredJitter, unit: "ms")
+                            hoverOverlay(proxy: proxy, geometry: geo,
+                                         points: filteredJitter, unit: "ms")
                         }
                     }
 
@@ -526,38 +561,25 @@ struct MetricsChartsView: View {
         ChartCard(title: "WiFi Signal", subtitle: "RSSI in dBm — higher (less negative) is better") {
             VStack(alignment: .leading, spacing: 6) {
                 Chart {
-                    RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                  yStart: .value("Y0", -67), yEnd: .value("YTop", 0))
-                        .foregroundStyle(Color.green.opacity(0.06))
-                    RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                  yStart: .value("Y1", -80), yEnd: .value("Y2", -67))
-                        .foregroundStyle(Color.orange.opacity(0.06))
-                    RectangleMark(xStart: .value("S", loader.rangeStart), xEnd: .value("E", loader.rangeEnd),
-                                  yStart: .value("YBot", -100), yEnd: .value("Y3", -80))
-                        .foregroundStyle(Color.red.opacity(0.06))
-
                     RuleMark(y: .value("Good", -67))
-                        .foregroundStyle(Color.green.opacity(0.5))
+                        .foregroundStyle(Color.green.opacity(0.4))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
                     RuleMark(y: .value("Poor", -80))
-                        .foregroundStyle(Color.orange.opacity(0.5))
+                        .foregroundStyle(Color.orange.opacity(0.4))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
 
                     ForEach(loader.wifiRSSI) { p in
-                        AreaMark(x: .value("Time", p.timestamp), yStart: .value("Base", -100), yEnd: .value("RSSI", p.value))
+                        AreaMark(x: .value("Time", p.timestamp),
+                                 yStart: .value("Base", -100),
+                                 yEnd:   .value("RSSI", p.value))
                             .foregroundStyle(Color.cyan.opacity(0.20))
-                        LineMark(x: .value("Time", p.timestamp), y: .value("RSSI", p.value))
+                        LineMark(x: .value("Time", p.timestamp),
+                                 y: .value("RSSI", p.value))
                             .foregroundStyle(Color.cyan)
-                    }
-
-                    if let date = hoveredDate {
-                        ForEach(nearestPoints(to: date, in: loader.wifiRSSI)) { p in
-                            PointMark(x: .value("Time", p.timestamp), y: .value("RSSI", p.value))
-                                .symbolSize(72)
-                                .foregroundStyle(Color.cyan)
-                        }
+                            .lineStyle(StrokeStyle(lineWidth: 2))
                     }
                 }
+                .chartLegend(.hidden)
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 6)) { _ in
                         AxisValueLabel().font(.caption).foregroundStyle(.secondary)
@@ -574,7 +596,8 @@ struct MetricsChartsView: View {
                 .frame(height: 160)
                 .chartOverlay { proxy in
                     GeometryReader { geo in
-                        hoverOverlay(proxy: proxy, geometry: geo, points: loader.wifiRSSI, unit: "dBm")
+                        hoverOverlay(proxy: proxy, geometry: geo,
+                                     points: loader.wifiRSSI, unit: "dBm")
                     }
                 }
             }
@@ -588,17 +611,13 @@ struct MetricsChartsView: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(loader.incidents) { inc in
                     HStack(spacing: 8) {
-                        Circle()
-                            .fill(incidentColor(inc))
-                            .frame(width: 8, height: 8)
+                        Circle().fill(incidentColor(inc)).frame(width: 8, height: 8)
                         Text(incidentDescription(inc))
                             .font(.system(.caption, design: .monospaced))
                             .foregroundStyle(.primary)
                         Spacer()
                         if inc.isActive {
-                            Text("Active")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
+                            Text("Active").font(.caption2).foregroundStyle(.orange)
                         }
                     }
                 }

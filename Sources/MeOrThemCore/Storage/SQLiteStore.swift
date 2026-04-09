@@ -221,6 +221,17 @@ public final class SQLiteStore: @unchecked Sendable {
         queue.sync { _incidents(limit: limit) }
     }
 
+    /// Returns true if any ping data (raw or aggregated) exists in the given time range.
+    /// Uses a LIMIT 1 query so it short-circuits immediately on the first matching row.
+    public func hasPingData(from: Date, to: Date) -> Bool {
+        let f = from.timeIntervalSince1970
+        let t = to.timeIntervalSince1970
+        return queue.sync {
+            _scalar("SELECT 1 FROM ping_samples    WHERE timestamp         >= \(f) AND timestamp         <= \(t) LIMIT 1;") > 0
+         || _scalar("SELECT 1 FROM ping_aggregates WHERE timestamp_minute  >= \(f) AND timestamp_minute  <= \(t) LIMIT 1;") > 0
+        }
+    }
+
     /// Count of raw ping samples across all targets (useful for diagnostics).
     public func rawPingCount() -> Int {
         queue.sync { _scalar("SELECT COUNT(*) FROM ping_samples;") }
