@@ -26,7 +26,7 @@ final class AppEnvironment {
         speedtestRunner   = SpeedtestRunner()
         monitoringEngine  = MonitoringEngine(settings: settings, metricStore: metricStore)
         exportCoordinator = ExportCoordinator(metricStore: metricStore, settings: settings)
-        logExporter       = LogExporter(metricStore: metricStore, settings: settings)
+        logExporter       = LogExporter(settings: settings)
 
         // Wire status changes → notification alerts
         metricStore.$overallStatus
@@ -94,25 +94,37 @@ final class AppEnvironment {
             }
         }
 
-        // Log rotation scheduling (daily check)
-        if settings.enableLogRotation {
-            logExporter.scheduleDaily()
-        }
+        // Continuous CSV append log — start on launch, react to setting changes.
+        logExporter.start()
         settings.$enableLogRotation
             .dropFirst()
             .sink { [weak self] enabled in
-                if enabled {
-                    self?.logExporter.scheduleDaily()
-                } else {
-                    self?.logExporter.cancelSchedule()
-                }
+                self?.logExporter.enabledDidChange(enabled)
             }
             .store(in: &cancellables)
+
+        // Feed new ping samples to the log exporter.
+        metricStore.onPingRecorded = { [weak self] result, targetID in
+            guard let self else { return }
+            guard let target = self.settings.pingTargets.first(where: { $0.id == targetID })
+                           ?? (targetID == PingTarget.gatewayID
+                               ? PingTarget(id: PingTarget.gatewayID, label: "Gateway",
+                                            host: self.metricStore.latestGatewayIP ?? "gateway",
+                                            isSystem: true)
+                               : nil)
+            else { return }
+            self.logExporter.appendPing(result, target: target)
+        }
+
+        // Feed WiFi snapshots to the log exporter.
+        metricStore.onWiFiRecorded = { [weak self] snapshot in
+            self?.logExporter.appendWiFi(snapshot)
+        }
 
         // SQLite maintenance: aggregate + prune on launch, then every hour.
         runSQLiteMaintenance()
         let mt = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
-            self?.runSQLiteMaintenance()
+            Task { @MainActor [weak self] in self?.runSQLiteMaintenance() }
         }
         mt.tolerance = 300   // ±5 min jitter is fine for housekeeping
         RunLoop.main.add(mt, forMode: .common)

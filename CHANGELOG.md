@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.18.0 — 2026-04-09
+
+### Changes
+- **Continuous append CSV logging** — The daily log file is now an unbroken append-mode record written on every poll tick, replacing the previous midnight snapshot. Data is no longer lost between restarts or between midnight runs. Existing daily CSV files are re-opened on launch and appended to; a new file is created at midnight. File retention now follows the same configurable window as the SQLite raw tier (default 7 days).
+
+---
+
 ## v1.17.0 — 2026-04-09
 
 ### New Features
