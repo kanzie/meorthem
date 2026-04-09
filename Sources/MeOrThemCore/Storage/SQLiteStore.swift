@@ -124,6 +124,19 @@ public final class SQLiteStore: @unchecked Sendable {
         }
     }
 
+    /// Returns the raw ping rows surrounding an incident for diagnostic use.
+    /// Fetches `preSeconds` of data before `startedAt` and `postSeconds` after `endedAt`
+    /// (or after `startedAt` if the incident is still active).
+    public func diagnosticPingRows(for targetID: UUID,
+                                   incidentStart: Date,
+                                   incidentEnd: Date?,
+                                   preSeconds: Double = 300,
+                                   postSeconds: Double = 300) -> [PingRow] {
+        let from = incidentStart.addingTimeInterval(-preSeconds)
+        let to   = (incidentEnd ?? incidentStart).addingTimeInterval(postSeconds)
+        return pingRows(for: targetID, from: from, to: to)
+    }
+
     /// Deletes all incident rows. Called when the user clears connection history.
     public func clearAllIncidents() {
         queue.async { [weak self] in
