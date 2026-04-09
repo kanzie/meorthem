@@ -5,6 +5,18 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.26.0 — 2026-04-10
+
+### Changes
+- **Network History graph style** — Charts now use area fills under each line (matching the reference design), removed background threshold zone bands, and increased line weight to 2pt for better readability.
+- **Duplicate chart legend removed** — Labels no longer appear twice; the chart's auto-generated legend is suppressed and only the manual legend below each chart is shown.
+- **Hover tooltip performance** — Tooltip and markers are now drawn in the lightweight overlay layer rather than inside the chart body, so charts do not re-render on every cursor pixel. `hoveredDate` snaps to actual data-point timestamps so state only updates when the cursor crosses into a new point's territory, eliminating the sluggishness.
+
+### Bug Fixes
+- **Time window buttons disabled when empty** — Time range segments in the Network History toolbar are now disabled (grayed out) when no data exists for that window, replacing the segmented picker with a custom implementation that supports per-item disabled state.
+
+---
+
 ## v1.25.0 — 2026-04-10
 
 ### New Features

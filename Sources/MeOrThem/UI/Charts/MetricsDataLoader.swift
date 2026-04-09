@@ -52,14 +52,17 @@ struct ChartPoint: Identifiable {
 
 @MainActor
 final class MetricsDataLoader: ObservableObject {
-    @Published private(set) var latencyPoints: [ChartPoint] = []
-    @Published private(set) var lossPoints:    [ChartPoint] = []
-    @Published private(set) var jitterPoints:  [ChartPoint] = []
-    @Published private(set) var wifiRSSI:      [ChartPoint] = []
-    @Published private(set) var incidents:     [SQLiteStore.IncidentRow] = []
-    @Published private(set) var isLoading      = false
-    @Published private(set) var rangeStart     = Date()
-    @Published private(set) var rangeEnd       = Date()
+    @Published private(set) var latencyPoints:   [ChartPoint] = []
+    @Published private(set) var lossPoints:      [ChartPoint] = []
+    @Published private(set) var jitterPoints:    [ChartPoint] = []
+    @Published private(set) var wifiRSSI:        [ChartPoint] = []
+    @Published private(set) var incidents:       [SQLiteStore.IncidentRow] = []
+    @Published private(set) var isLoading        = false
+    @Published private(set) var rangeStart       = Date()
+    @Published private(set) var rangeEnd         = Date()
+    /// Windows that have at least one data point; defaults to all so the picker looks
+    /// enabled on first render and disables only after the async check finishes.
+    @Published private(set) var windowsWithData: Set<TimeWindow> = Set(TimeWindow.allCases)
 
     let targets: [PingTarget]
     private let db: SQLiteStore
@@ -69,6 +72,25 @@ final class MetricsDataLoader: ObservableObject {
     init(db: SQLiteStore, targets: [PingTarget]) {
         self.db      = db
         self.targets = targets
+    }
+
+    /// Probes every time window with a LIMIT-1 query and updates windowsWithData.
+    /// Runs off the main thread so it doesn't block the UI.
+    func checkAvailableWindows() {
+        let db = self.db
+        Task.detached(priority: .utility) { [weak self] in
+            let now = Date()
+            var available = Set<TimeWindow>()
+            for window in TimeWindow.allCases {
+                let from = now.addingTimeInterval(-window.duration)
+                if db.hasPingData(from: from, to: now) {
+                    available.insert(window)
+                }
+            }
+            await MainActor.run { [weak self] in
+                self?.windowsWithData = available
+            }
+        }
     }
 
     func load(window: TimeWindow) {
