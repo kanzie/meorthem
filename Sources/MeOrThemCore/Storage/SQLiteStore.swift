@@ -124,6 +124,13 @@ public final class SQLiteStore: @unchecked Sendable {
         }
     }
 
+    /// Deletes all incident rows. Called when the user clears connection history.
+    public func clearAllIncidents() {
+        queue.async { [weak self] in
+            self?._exec("DELETE FROM incidents;")
+        }
+    }
+
     // MARK: - Maintenance (fire-and-forget)
 
     /// Aggregates raw samples older than `rawRetentionDays` into per-minute rows,
