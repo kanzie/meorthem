@@ -5,6 +5,15 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.23.0 — 2026-04-09
+
+### New Features
+- **Network History window** — A new "Network History…" menu item (and "View Charts" button in Export Reports) opens a full visualisation window with four live charts: Latency, Packet Loss, Jitter, and WiFi Signal. Charts use colour-coded threshold bands so healthy, degraded, and poor zones are immediately obvious. Vertical markers show where disturbances occurred. A disturbance log is shown beneath the charts.
+- **Time window selector** — The chart window lets you switch between 1h, 6h, 24h, 7d, 30d, and 90d views. Short windows use raw poll data; longer windows switch automatically to per-minute aggregates from the database. A per-target filter is available when multiple ping targets are configured.
+- **Full-history CSV and JSON exports** — Export Reports now reads directly from the SQLite database, covering the full raw-data retention window (default 7 days) instead of the last few hours in RAM.
+
+---
+
 ## v1.22.0 — 2026-04-09
 
 ### Changes

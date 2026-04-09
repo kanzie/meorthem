@@ -3,14 +3,17 @@ import SwiftUI
 
 final class PingReportWindowController: NSWindowController {
 
-    private let store:      MetricStore
-    private let settings:   AppSettings
-    private let exporter:   ExportCoordinator
+    private let store:          MetricStore
+    private let settings:       AppSettings
+    private let exporter:       ExportCoordinator
+    var onShowCharts: (() -> Void)?
 
-    init(store: MetricStore, settings: AppSettings, exporter: ExportCoordinator) {
-        self.store    = store
-        self.settings = settings
-        self.exporter = exporter
+    init(store: MetricStore, settings: AppSettings, exporter: ExportCoordinator,
+         onShowCharts: (() -> Void)? = nil) {
+        self.store        = store
+        self.settings     = settings
+        self.exporter     = exporter
+        self.onShowCharts = onShowCharts
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 780, height: 480),
@@ -29,7 +32,8 @@ final class PingReportWindowController: NSWindowController {
 
     func showAndFocus() {
         let reportText = store.summaryText(targets: settings.pingTargets)
-        let view = PingReportView(reportText: reportText, exporter: exporter)
+        let view = PingReportView(reportText: reportText, exporter: exporter,
+                                  onShowCharts: onShowCharts)
         let vc = NSHostingController(rootView: view)
         window?.contentViewController = vc
         showWindow(nil)
@@ -39,8 +43,9 @@ final class PingReportWindowController: NSWindowController {
 }
 
 private struct PingReportView: View {
-    let reportText: String
-    let exporter:   ExportCoordinator
+    let reportText:   String
+    let exporter:     ExportCoordinator
+    var onShowCharts: (() -> Void)?
     @State private var copied = false
 
     var body: some View {
@@ -62,6 +67,10 @@ private struct PingReportView: View {
                 Button("Export CSV")  { exporter.exportCSV() }
                 Button("Export PDF")  { exporter.exportPDF() }
                 Button("Export JSON") { exporter.exportJSON() }
+                if let showCharts = onShowCharts {
+                    Button("View Charts") { showCharts() }
+                        .buttonStyle(.borderedProminent)
+                }
                 Spacer()
                 Button(copied ? "Copied!" : "Copy to Clipboard") {
                     NSPasteboard.general.clearContents()
