@@ -20,6 +20,15 @@ struct ConnectionEvent: Codable, Identifiable {
         self.endTime    = nil
     }
 
+    /// Reconstruct from persistent storage (SQLite or UserDefaults) with a known ID.
+    init(id: UUID, severityRaw: Int, startTime: Date, cause: String, endTime: Date?) {
+        self.id          = id
+        self.severityRaw = severityRaw
+        self.startTime   = startTime
+        self.cause       = cause
+        self.endTime     = endTime
+    }
+
     var severity: MetricStatus { MetricStatus(rawValue: severityRaw) ?? .yellow }
     var isActive: Bool { endTime == nil }
 

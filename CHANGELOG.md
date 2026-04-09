@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.19.0 — 2026-04-09
+
+### Changes
+- **Unlimited incident journal** — Previous Disturbances now loads from the SQLite database on launch instead of a 5-event UserDefaults cap. The in-memory menu list shows the last 20 events; the full history is retained in the database for up to one year (configurable). Clearing the history now removes records from the database as well.
+
+---
+
 ## v1.18.0 — 2026-04-09
 
 ### Changes
