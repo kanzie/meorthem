@@ -1,9 +1,11 @@
 import Foundation
 import Combine
+import MeOrThemCore
 
 @MainActor
 final class AppEnvironment {
     let settings:          AppSettings
+    let sqliteStore:       SQLiteStore
     let metricStore:       MetricStore
     let monitoringEngine:  MonitoringEngine
     let alertManager:      AlertManager
@@ -13,11 +15,13 @@ final class AppEnvironment {
 
     private var cancellables = Set<AnyCancellable>()
     private var bandwidthScheduleTimer: Timer?
+    private var maintenanceTimer: Timer?
     private var lastBandwidthScheduleHours: Double = 0
 
     init() {
         settings          = AppSettings.shared
-        metricStore       = MetricStore(settings: settings)
+        sqliteStore       = SQLiteStore.makeDefault()
+        metricStore       = MetricStore(settings: settings, sqliteStore: sqliteStore)
         alertManager      = AlertManager()
         speedtestRunner   = SpeedtestRunner()
         monitoringEngine  = MonitoringEngine(settings: settings, metricStore: metricStore)
@@ -104,6 +108,23 @@ final class AppEnvironment {
                 }
             }
             .store(in: &cancellables)
+
+        // SQLite maintenance: aggregate + prune on launch, then every hour.
+        runSQLiteMaintenance()
+        let mt = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+            self?.runSQLiteMaintenance()
+        }
+        mt.tolerance = 300   // ±5 min jitter is fine for housekeeping
+        RunLoop.main.add(mt, forMode: .common)
+        maintenanceTimer = mt
+    }
+
+    private func runSQLiteMaintenance() {
+        sqliteStore.aggregateAndPrune(
+            rawRetentionDays:       settings.rawRetentionDays,
+            aggregateRetentionDays: settings.aggregateRetentionDays,
+            incidentRetentionDays:  settings.incidentRetentionDays
+        )
     }
 
     // MARK: - Bandwidth scheduling

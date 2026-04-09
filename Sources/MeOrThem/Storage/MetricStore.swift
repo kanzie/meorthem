@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import MeOrThemCore
 
 // 6h at 5s poll = 4,320 samples per target — enough for export/reports
 private let kPingHistoryCapacity = 4_320
@@ -32,9 +33,11 @@ final class MetricStore: ObservableObject {
 
     // MARK: - Settings reference for threshold evaluation
     private let settings: AppSettings
+    private let sqliteStore: SQLiteStore?
 
-    init(settings: AppSettings) {
+    init(settings: AppSettings, sqliteStore: SQLiteStore? = nil) {
         self.settings = settings
+        self.sqliteStore = sqliteStore
         loadConnectionHistory()
     }
 
@@ -47,12 +50,37 @@ final class MetricStore: ObservableObject {
         }
         pingHistory[targetID]!.append(result)
         recomputeOverallStatus()
+
+        // Persist to SQLite — look up label/host from settings or fall back to the ID string.
+        if let db = sqliteStore {
+            let target = settings.pingTargets.first(where: { $0.id == targetID })
+            let label  = target?.label ?? (targetID == PingTarget.gatewayID ? "Gateway" : targetID.uuidString)
+            let host   = target?.host  ?? ""
+            db.insertPing(timestamp:   result.timestamp,
+                          rtt:         result.rtt,
+                          lossPercent: result.lossPercent,
+                          jitter:      result.jitter,
+                          targetID:    targetID,
+                          targetLabel: label,
+                          host:        host)
+        }
     }
 
     func recordWiFi(_ snapshot: WiFiSnapshot?) {
         latestWifi = snapshot
         if let s = snapshot {
             wifiHistory.append(s)
+            sqliteStore?.insertWiFi(timestamp:     s.timestamp,
+                                    rssi:          s.rssi,
+                                    noise:         s.noise,
+                                    snr:           s.snr,
+                                    channel:       s.channelNumber,
+                                    bandGHz:       s.channelBandGHz,
+                                    txRateMbps:    s.txRateMbps,
+                                    phyMode:       s.phyMode,
+                                    interfaceName: s.interfaceName,
+                                    ipAddress:     s.ipAddress,
+                                    routerIP:      s.routerIP)
         }
     }
 
@@ -167,15 +195,21 @@ final class MetricStore: ObservableObject {
         if let idx = connectionHistory.firstIndex(where: { $0.isActive }) {
             connectionHistory[idx].endTime = Date()
         }
-        connectionHistory.insert(ConnectionEvent(severity: severity, cause: cause), at: 0)
+        let event = ConnectionEvent(severity: severity, cause: cause)
+        connectionHistory.insert(event, at: 0)
         if connectionHistory.count > Self.kMaxConnectionEvents { connectionHistory.removeLast() }
         saveConnectionHistory()
+        sqliteStore?.openIncident(id: event.id, severityRaw: severity.rawValue,
+                                  cause: cause, startTime: event.startTime)
     }
 
     private func closeActiveConnectionEvent() {
         guard let idx = connectionHistory.firstIndex(where: { $0.isActive }) else { return }
+        let event = connectionHistory[idx]
         connectionHistory[idx].endTime = Date()
         saveConnectionHistory()
+        sqliteStore?.closeIncident(id: event.id, endTime: Date(),
+                                   peakSeverityRaw: event.severityRaw)
     }
 
     private func updateActiveEventSeverity(_ newSeverity: MetricStatus) {
@@ -184,6 +218,7 @@ final class MetricStore: ObservableObject {
         let e = connectionHistory[idx]
         connectionHistory[idx] = ConnectionEvent(severity: newSeverity, startTime: e.startTime, cause: e.cause)
         saveConnectionHistory()
+        sqliteStore?.updateIncidentSeverity(id: e.id, peakSeverityRaw: newSeverity.rawValue)
     }
 
     private func computeDegradationCause() -> String {

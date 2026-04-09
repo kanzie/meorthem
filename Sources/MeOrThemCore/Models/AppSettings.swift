@@ -70,6 +70,17 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(enableLogRotation, forKey: "enableLogRotation") }
     }
 
+    // MARK: - SQLite data retention (days)
+    @Published var rawRetentionDays: Int {
+        didSet { UserDefaults.standard.set(rawRetentionDays, forKey: "rawRetentionDays") }
+    }
+    @Published var aggregateRetentionDays: Int {
+        didSet { UserDefaults.standard.set(aggregateRetentionDays, forKey: "aggregateRetentionDays") }
+    }
+    @Published var incidentRetentionDays: Int {
+        didSet { UserDefaults.standard.set(incidentRetentionDays, forKey: "incidentRetentionDays") }
+    }
+
     @Published var bandwidthBarRedMbps: Double {
         didSet { UserDefaults.standard.set(bandwidthBarRedMbps, forKey: "bandwidthBarRedMbps") }
     }
@@ -90,7 +101,10 @@ final class AppSettings: ObservableObject {
         pollIntervalSecs       = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
         showLatencyInMenubar   = ud.bool(forKey: "showLatencyInMenubar")
         bandwidthScheduleHours = ud.double(forKey: "bandwidthScheduleHours")
-        enableLogRotation      = ud.bool(forKey: "enableLogRotation")
+        enableLogRotation         = ud.bool(forKey: "enableLogRotation")
+        rawRetentionDays          = ud.object(forKey: "rawRetentionDays")       as? Int ?? 7
+        aggregateRetentionDays    = ud.object(forKey: "aggregateRetentionDays") as? Int ?? 90
+        incidentRetentionDays     = ud.object(forKey: "incidentRetentionDays")  as? Int ?? 365
         bandwidthBarRedMbps    = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
         bandwidthBarYellowMbps = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
 
