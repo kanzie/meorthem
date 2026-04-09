@@ -96,6 +96,14 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(bandwidthBarYellowMbps, forKey: "bandwidthBarYellowMbps") }
     }
 
+    // MARK: - Notifications
+    @Published var enableNotificationBanner: Bool {
+        didSet { UserDefaults.standard.set(enableNotificationBanner, forKey: "enableNotificationBanner") }
+    }
+    @Published var enableNotificationSound: Bool {
+        didSet { UserDefaults.standard.set(enableNotificationSound, forKey: "enableNotificationSound") }
+    }
+
     private init() {
         let ud = UserDefaults.standard
 
@@ -111,6 +119,8 @@ final class AppSettings: ObservableObject {
         enableLogRotation         = ud.bool(forKey: "enableLogRotation")
         bandwidthBarRedMbps       = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
         bandwidthBarYellowMbps    = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
+        enableNotificationBanner  = ud.object(forKey: "enableNotificationBanner") as? Bool ?? true
+        enableNotificationSound   = ud.object(forKey: "enableNotificationSound")  as? Bool ?? false
         rawRetentionDays          = ud.object(forKey: "rawRetentionDays")       as? Int ?? 7
         aggregateRetentionDays    = ud.object(forKey: "aggregateRetentionDays") as? Int ?? 90
         incidentRetentionDays     = ud.object(forKey: "incidentRetentionDays")  as? Int ?? 365
