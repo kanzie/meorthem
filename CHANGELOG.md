@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.16.0 — 2026-04-09
+
+### New Features
+- **Persistent SQLite storage layer** — Network metrics are now written to a local SQLite database (`~/Library/Application Support/MeOrThem/metrics.db`). Raw samples are kept for 7 days at full poll resolution, then automatically rolled up into per-minute aggregates retained for 90 days. A dedicated incident journal replaces the previous 5-event cap, retaining degradation events for 1 year by default.
+
+---
+
 ## v1.15.1 — 2026-04-09
 
 ### Bug Fixes
