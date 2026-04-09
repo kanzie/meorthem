@@ -5,7 +5,13 @@ struct GeneralTab: View {
     @ObservedObject private var updateChecker = UpdateChecker.shared
     @State private var loginError: String?
     @State private var isUpdatingLogin = false
+    @State private var showAdvancedData = false
     private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+
+    private static let logDirURL: URL = {
+        let lib = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0]
+        return lib.appendingPathComponent("Logs/MeOrThem", isDirectory: true)
+    }()
 
     var body: some View {
         Form {
@@ -104,11 +110,74 @@ struct GeneralTab: View {
             }
 
             Section("Data") {
-                Toggle("Daily log rotation", isOn: $settings.enableLogRotation)
-                    .help("Saves a daily CSV snapshot to ~/Library/Logs/MeOrThem/. Keeps the last 30 days.")
+                Toggle("Save CSV log files", isOn: $settings.enableLogRotation)
+                    .help("Appends one row per poll tick to a dated CSV file in ~/Library/Logs/MeOrThem/. Useful for importing into spreadsheets or external monitoring tools.")
+
                 if settings.enableLogRotation {
-                    Text("Saved to ~/Library/Logs/MeOrThem/")
+                    HStack {
+                        Text("~/Library/Logs/MeOrThem/")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.open(Self.logDirURL)
+                        }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                    }
+                }
+
+                Text("Network data is always stored locally in a database regardless of this setting.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                DisclosureGroup(isExpanded: $showAdvancedData) {
+                    LabeledContent("Raw data") {
+                        HStack(spacing: 4) {
+                            TextField("", value: $settings.rawRetentionDays, format: .number)
+                                .frame(width: 48)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                            Text("days")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Full-resolution samples (one per poll, per target).")
                         .font(.caption).foregroundStyle(.secondary)
+
+                    LabeledContent("Summaries") {
+                        HStack(spacing: 4) {
+                            TextField("", value: $settings.aggregateRetentionDays, format: .number)
+                                .frame(width: 48)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                            Text("days")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Per-minute averages, created automatically from aged-out raw data.")
+                        .font(.caption).foregroundStyle(.secondary)
+
+                    LabeledContent("Incident archive") {
+                        HStack(spacing: 4) {
+                            TextField("", value: $settings.incidentRetentionDays, format: .number)
+                                .frame(width: 48)
+                                .textFieldStyle(.roundedBorder)
+                                .multilineTextAlignment(.trailing)
+                            Text("days")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Text("Degradation events shown in Previous Disturbances.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } label: {
+                    HStack {
+                        Text("Advanced")
+                            .font(.callout)
+                        if !showAdvancedData {
+                            Text("· \(settings.rawRetentionDays)d raw · \(settings.aggregateRetentionDays)d summaries · \(settings.incidentRetentionDays)d incidents")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
 
