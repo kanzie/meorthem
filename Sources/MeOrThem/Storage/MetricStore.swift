@@ -25,10 +25,11 @@ final class MetricStore: ObservableObject {
     private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)
     private var statusHistory: CircularBuffer<MetricStatus> = CircularBuffer(capacity: 5)
 
-    // MARK: - Connection history (last 5 degradation events, persisted)
+    // MARK: - Connection history (last 20 degradation events, backed by SQLite)
     @Published private(set) var connectionHistory: [ConnectionEvent] = []
     private var previousOverallStatus: MetricStatus = .green
-    private static let kMaxConnectionEvents = 5
+    // In-memory cap for menu display; SQLite retains full history per incidentRetentionDays.
+    private static let kMaxConnectionEvents = 20
     private static let kHistoryUDKey = "metricStore.connectionHistory"
 
     // MARK: - Settings reference for threshold evaluation
@@ -262,15 +263,33 @@ final class MetricStore: ObservableObject {
     func clearConnectionHistory() {
         connectionHistory.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.kHistoryUDKey)
+        sqliteStore?.clearAllIncidents()
     }
 
+    /// Write-through to UserDefaults as a fast-load cache; SQLite is the authoritative store.
     private func saveConnectionHistory() {
-        if let data = try? JSONEncoder().encode(connectionHistory) {
+        if let data = try? JSONEncoder().encode(Array(connectionHistory.prefix(Self.kMaxConnectionEvents))) {
             UserDefaults.standard.set(data, forKey: Self.kHistoryUDKey)
         }
     }
 
+    /// Load on launch: prefer SQLite (full fidelity); fall back to UserDefaults cache.
     private func loadConnectionHistory() {
+        if let db = sqliteStore {
+            let rows = db.recentIncidents(limit: Self.kMaxConnectionEvents)
+            connectionHistory = rows.map { row in
+                var event = ConnectionEvent(id: row.id,
+                                            severityRaw: row.peakSeverityRaw,
+                                            startTime: row.startedAt,
+                                            cause: row.cause,
+                                            endTime: row.endedAt)
+                // Close any event left open from a previous session
+                if event.isActive { event.endTime = Date() }
+                return event
+            }
+            return
+        }
+        // No SQLite available — fall back to UserDefaults cache
         guard let data = UserDefaults.standard.data(forKey: Self.kHistoryUDKey),
               let events = try? JSONDecoder().decode([ConnectionEvent].self, from: data)
         else { return }
