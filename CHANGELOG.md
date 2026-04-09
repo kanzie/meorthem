@@ -5,6 +5,22 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.24.0 — 2026-04-09
+
+### Bug Fixes
+- **SQLite fallback on corrupt database** — If the on-disk database cannot be reopened after a corruption wipe, the app now falls back to an in-memory database instead of silently operating on a null handle.
+- **Chart time-range race condition** — The displayed start/end dates in the Network History window now update atomically with chart data, eliminating a brief window where the header showed stale dates for newly loaded data.
+- **Process timeout** — External subprocesses (speedtest, route) are now forcibly terminated after 30 seconds if they do not exit cleanly, preventing the app from hanging indefinitely.
+- **Adaptive polling state clobbered on restart** — Switching to faster polling during a degradation event no longer accidentally resets `isAdaptiveMode`, which previously caused the engine to enter an accelerated-polling loop without ever restoring the original interval.
+- **NetworkInfo cache data race** — The gateway and IP-address caches shared across threads are now protected by a lock, eliminating a potential data race under concurrent access.
+- **Non-finite jitter values** — Jitter calculation now filters out non-finite RTT samples and returns nil if the result is NaN or Inf, preventing corrupt values from reaching the threshold evaluator.
+- **Non-positive RTT values** — Ping output parser now discards RTT values of zero or less, which can appear in malformed or synthetic ping output.
+- **SQLite string binding with embedded NULs** — Text values are now bound with their exact UTF-8 byte length instead of relying on null-terminator scanning, correctly handling any string that contains embedded NUL characters.
+- **CSV log write errors silently ignored** — Write failures in the append-mode log are now caught and logged via `os_log` instead of silently dropping data.
+- **Concurrent ping cap** — The per-tick ping task group is now capped at 5 concurrent pings, preventing resource exhaustion when many custom targets are configured.
+
+---
+
 ## v1.23.0 — 2026-04-09
 
 ### New Features
