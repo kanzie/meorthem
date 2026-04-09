@@ -229,8 +229,10 @@ final class MetricStore: ObservableObject {
         UserDefaults.standard.removeObject(forKey: Self.kHistoryUDKey)
     }
 
+    private static let _historyEncoder = JSONEncoder()
+
     private func saveConnectionHistory() {
-        if let data = try? JSONEncoder().encode(connectionHistory) {
+        if let data = try? Self._historyEncoder.encode(connectionHistory) {
             UserDefaults.standard.set(data, forKey: Self.kHistoryUDKey)
         }
     }
