@@ -35,6 +35,11 @@ final class MetricStore: ObservableObject {
     private let settings: AppSettings
     private let sqliteStore: SQLiteStore?
 
+    /// Called on every successful ping record — used by LogExporter for append-mode CSV.
+    var onPingRecorded: ((PingResult, UUID) -> Void)?
+    /// Called on every WiFi snapshot — used by LogExporter for append-mode CSV.
+    var onWiFiRecorded: ((WiFiSnapshot) -> Void)?
+
     init(settings: AppSettings, sqliteStore: SQLiteStore? = nil) {
         self.settings = settings
         self.sqliteStore = sqliteStore
@@ -50,6 +55,9 @@ final class MetricStore: ObservableObject {
         }
         pingHistory[targetID]!.append(result)
         recomputeOverallStatus()
+
+        // Notify observers (e.g. LogExporter for append-mode CSV).
+        onPingRecorded?(result, targetID)
 
         // Persist to SQLite — look up label/host from settings or fall back to the ID string.
         if let db = sqliteStore {
@@ -70,6 +78,7 @@ final class MetricStore: ObservableObject {
         latestWifi = snapshot
         if let s = snapshot {
             wifiHistory.append(s)
+            onWiFiRecorded?(s)
             sqliteStore?.insertWiFi(timestamp:     s.timestamp,
                                     rssi:          s.rssi,
                                     noise:         s.noise,
