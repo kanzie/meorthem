@@ -11,8 +11,10 @@ public enum InputValidator {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.count <= 253 else { return false }
 
-        // Reject any shell metacharacter that could enable command injection
-        let forbidden = CharacterSet(charactersIn: ";|&$`(){}[]<>!#\\\n\r\t\"' ")
+        // Reject shell metacharacters that could enable command injection.
+        // Spaces are not included here — they are rejected by the IP and hostname
+        // validators below, which is the correct layer for structural validation.
+        let forbidden = CharacterSet(charactersIn: ";|&$`(){}[]<>!#\\\n\r\t\"'")
         guard trimmed.unicodeScalars.allSatisfy({ !forbidden.contains($0) }) else { return false }
 
         return isIPv4(trimmed) || isIPv6(trimmed) || isHostname(trimmed)

@@ -78,16 +78,20 @@ final class MonitoringEngine {
     }
 
     /// Call when poll interval setting changes — does not fire an immediate tick.
+    /// Resets adaptive-polling state so the new interval takes effect cleanly.
     func restart(interval: Double? = nil) {
         guard !isPaused else { return }
-        // Reset adaptive mode when restarted externally
-        if interval != nil {
-            isAdaptiveMode = false
-            consecutiveNonGreenPolls = 0
-            adaptiveResetGreenCount = 0
-        }
+        isAdaptiveMode = false
+        consecutiveNonGreenPolls = 0
+        adaptiveResetGreenCount = 0
         stop()
         startEngine(interval: interval ?? settings.pollIntervalSecs, fireImmediately: false)
+    }
+
+    /// Internal restart used by adaptive polling — preserves adaptive state.
+    private func restartAdaptive(interval: Double) {
+        stop()
+        startEngine(interval: interval, fireImmediately: false)
     }
 
     // MARK: - Private
@@ -127,9 +131,13 @@ final class MonitoringEngine {
 
         let targets = settings.pingTargets
 
-        // Run all pings concurrently
+        // Run pings concurrently, capped at 5 simultaneous tasks to avoid process exhaustion.
+        let concurrencyCap = min(targets.count, 5)
         await withTaskGroup(of: (UUID, PingResult).self) { group in
-            for target in targets {
+            var pending = targets[...]
+            // Seed up to the cap
+            for _ in 0..<concurrencyCap {
+                guard let target = pending.popFirst() else { break }
                 group.addTask {
                     let result = await Self.pingTarget(target)
                     return (target.id, result)
@@ -137,6 +145,13 @@ final class MonitoringEngine {
             }
             for await (id, result) in group {
                 store.record(result: result, for: id)
+                // Start next pending target as a slot becomes free
+                if let target = pending.popFirst() {
+                    group.addTask {
+                        let result = await Self.pingTarget(target)
+                        return (target.id, result)
+                    }
+                }
             }
         }
 
@@ -186,9 +201,7 @@ final class MonitoringEngine {
             if !isAdaptiveMode && consecutiveNonGreenPolls >= 2 {
                 isAdaptiveMode = true
                 let faster = max(2, baseInterval / 2)
-                restart(interval: faster)   // switch to faster polling; also resets adaptive state
-                // Re-enable adaptive mode after restart() cleared it
-                isAdaptiveMode = true
+                restartAdaptive(interval: faster)
             }
         }
     }

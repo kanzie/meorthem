@@ -8,6 +8,7 @@ public enum NetworkInfo {
     // MARK: - Cache (results rarely change; refresh at most every 30s)
 
     private static let kCacheTTL: TimeInterval = 30
+    private static let cacheLock = NSLock()
 
     nonisolated(unsafe) private static var _cachedGateway: String?  = nil
     nonisolated(unsafe) private static var _gatewayFetchedAt: Date  = .distantPast
@@ -18,26 +19,39 @@ public enum NetworkInfo {
 
     /// Returns the IPv4 address of the named interface (e.g. "en0"), or nil.
     public static func ipAddress(for interfaceName: String) -> String? {
+        cacheLock.lock()
         let now = Date()
         if let cached = _lastIPQuery,
            cached.interface == interfaceName,
            now.timeIntervalSince(cached.fetchedAt) < kCacheTTL {
-            return cached.ip
+            let ip = cached.ip
+            cacheLock.unlock()
+            return ip
         }
+        cacheLock.unlock()
         let result = fetchIPAddress(for: interfaceName)
+        cacheLock.lock()
         _lastIPQuery = (interfaceName, result, now)
+        cacheLock.unlock()
         return result
     }
 
     /// Returns the IPv4 default gateway address, or nil.
     public static func defaultGateway() -> String? {
+        cacheLock.lock()
         let now = Date()
         if now.timeIntervalSince(_gatewayFetchedAt) < kCacheTTL {
-            return _cachedGateway
+            let gw = _cachedGateway
+            cacheLock.unlock()
+            return gw
         }
+        cacheLock.unlock()
+        let result = fetchDefaultGateway()
+        cacheLock.lock()
         _gatewayFetchedAt = now
-        _cachedGateway = fetchDefaultGateway()
-        return _cachedGateway
+        _cachedGateway = result
+        cacheLock.unlock()
+        return result
     }
 
     /// Returns info for the primary active ethernet interface, if any.
