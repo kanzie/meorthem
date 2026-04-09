@@ -12,6 +12,7 @@ let sharedLinkerSettings: [LinkerSetting] = [
     .linkedFramework("UserNotifications"),
     .linkedFramework("ServiceManagement"),
     .linkedFramework("SystemConfiguration"),
+    .linkedLibrary("sqlite3"),
 ]
 
 let package = Package(
