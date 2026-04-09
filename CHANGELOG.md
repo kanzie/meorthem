@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.20.0 — 2026-04-09
+
+### New Features
+- **Diagnostic burst query API** — The SQLite store now exposes a `diagnosticPingRows(for:incidentStart:incidentEnd:preSeconds:postSeconds:)` method that returns the raw ping samples surrounding a degradation event (default: 5 minutes before and after). Because all samples are written continuously, no extra capture overhead is needed — the surrounding data is always present.
+
+---
+
 ## v1.19.0 — 2026-04-09
 
 ### Changes
