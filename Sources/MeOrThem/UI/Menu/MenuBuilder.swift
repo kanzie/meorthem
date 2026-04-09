@@ -127,7 +127,7 @@ enum MenuBuilder {
         menu.addItem(.separator())
 
         // MARK: - Actions section
-        menu.addItem(actionItem("Ping Stats Report", action: actions.copyReport))
+        menu.addItem(actionItem("Export Reports", action: actions.copyReport))
 
         let distItem = previousDisturbancesItem(store: store,
                                                 clearHistory: { store.clearConnectionHistory() })

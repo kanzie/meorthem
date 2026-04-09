@@ -89,6 +89,14 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(bandwidthBarYellowMbps, forKey: "bandwidthBarYellowMbps") }
     }
 
+    // MARK: - Notifications
+    @Published var enableNotificationBanner: Bool {
+        didSet { UserDefaults.standard.set(enableNotificationBanner, forKey: "enableNotificationBanner") }
+    }
+    @Published var enableNotificationSound: Bool {
+        didSet { UserDefaults.standard.set(enableNotificationSound, forKey: "enableNotificationSound") }
+    }
+
     private init() {
         let ud = UserDefaults.standard
 
@@ -107,6 +115,8 @@ final class AppSettings: ObservableObject {
         incidentRetentionDays     = ud.object(forKey: "incidentRetentionDays")  as? Int ?? 365
         bandwidthBarRedMbps    = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
         bandwidthBarYellowMbps = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
+        enableNotificationBanner = ud.object(forKey: "enableNotificationBanner") as? Bool ?? true
+        enableNotificationSound  = ud.object(forKey: "enableNotificationSound")  as? Bool ?? false
 
         let poll = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
         latencyWindowSecs = Swift.max(ud.double(forKey: "latencyWindowSecs").nonZero ?? 15, poll)

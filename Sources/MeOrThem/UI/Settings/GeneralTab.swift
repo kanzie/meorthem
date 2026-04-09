@@ -181,6 +181,14 @@ struct GeneralTab: View {
                 }
             }
 
+            Section("Notifications") {
+                Toggle("Show banner on connection degradation", isOn: $settings.enableNotificationBanner)
+                    .help("Displays a notification banner when your connection degrades to yellow or red.")
+                Toggle("Play sound with notifications", isOn: $settings.enableNotificationSound)
+                    .help("Plays the default notification sound alongside the banner. Disabled by default.")
+                    .disabled(!settings.enableNotificationBanner)
+            }
+
             Section("Updates") {
                 HStack {
                     Text("Current version: \(appVersion)")

@@ -44,20 +44,20 @@ func runConnectionHistoryTests() {
 
             // Default latency window = ceil(15/5) = 3 samples.
             // Seed 2 good polls so the first bad poll is diluted by the window average:
-            // window = [50, 50, 150] → avg 83 ms < 100 ms yellow threshold → still green.
-            let good50 = PingResult(timestamp: .now, rtt: 50,  lossPercent: 0, jitter: 5)
-            let bad    = PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5)
-            let good   = PingResult(timestamp: .now, rtt: 30,  lossPercent: 0, jitter: 2)
+            // window = [30, 30, 90] → avg 50 ms < 60 ms yellow threshold → still green.
+            let good50 = PingResult(timestamp: .now, rtt: 30,  lossPercent: 0, jitter: 5)
+            let bad    = PingResult(timestamp: .now, rtt: 90,  lossPercent: 0, jitter: 5)
+            let good   = PingResult(timestamp: .now, rtt: 20,  lossPercent: 0, jitter: 2)
 
             store.record(result: good50, for: id1)
             store.record(result: good50, for: id1)
             expectEqual(store.connectionHistory.count, 0, "green baseline → no events")
 
-            // 1st bad poll: window = [50, 50, 150] → avg 83 ms → still green
+            // 1st bad poll: window = [30, 30, 90] → avg 50 ms → still green
             store.record(result: bad, for: id1)
             expectEqual(store.connectionHistory.count, 0, "single bad poll diluted by window → still green, no event")
 
-            // 2nd bad poll: window = [50, 150, 150] → avg 116 ms ≥ 100 ms → yellow
+            // 2nd bad poll: window = [30, 90, 90] → avg 70 ms ≥ 60 ms → yellow
             store.record(result: bad, for: id1)
             expectEqual(store.overallStatus, .yellow, "2nd consecutive bad poll → window avg exceeds threshold → yellow")
             expectEqual(store.connectionHistory.count, 1, "degradation → 1 event opened")
@@ -65,11 +65,11 @@ func runConnectionHistoryTests() {
             expectEqual(store.connectionHistory[0].severity, .yellow, "severity = yellow")
 
             // Recovery: window needs to refill with good values.
-            // After 1 good: window = [150, 150, 30] → avg 110 ms → still yellow
+            // After 1 good: window = [90, 90, 20] → avg 66.7 ms → still yellow
             store.record(result: good, for: id1)
             expectEqual(store.overallStatus, .yellow, "1 good poll not yet enough to recover — window still above threshold")
 
-            // After 2 good: window = [150, 30, 30] → avg 70 ms → green
+            // After 2 good: window = [90, 20, 20] → avg 43.3 ms → green
             store.record(result: good, for: id1)
             expectEqual(store.overallStatus, .green, "window refills with good samples → green")
             expectEqual(store.connectionHistory[0].isActive, false, "event closed on recovery")
@@ -79,8 +79,8 @@ func runConnectionHistoryTests() {
             // Re-seed window with 2 good polls, then drive bad.
             store.record(result: good50, for: id1)
             store.record(result: good50, for: id1)
-            store.record(result: bad, for: id1)   // window [50, 50, 150] → avg 83 ms → green
-            store.record(result: bad, for: id1)   // window [50, 150, 150] → avg 116 ms → yellow
+            store.record(result: bad, for: id1)   // window [30, 30, 90] → avg 50 ms → green
+            store.record(result: bad, for: id1)   // window [30, 90, 90] → avg 70 ms → yellow
             expectEqual(store.connectionHistory.count, 2, "second degradation → 2 events total")
             expectEqual(store.connectionHistory[0].isActive, true, "newest event is active")
             expectEqual(store.connectionHistory[1].isActive, false, "older event is closed")

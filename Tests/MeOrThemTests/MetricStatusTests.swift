@@ -2,13 +2,13 @@
 
 func runMetricStatusTests() {
     suite("MetricStatus") {
-        let t = Thresholds.default  // latencyYellow=100, latencyRed=300, lossYellow=1, lossRed=5
+        let t = Thresholds.default  // latencyYellow=60, latencyRed=150, lossYellow=1, lossRed=3
 
         let green = PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5)
         expectEqual(MetricStatus.forPingResult(green, thresholds: t), .green, "50ms → green")
 
-        let yellow = PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5)
-        expectEqual(MetricStatus.forPingResult(yellow, thresholds: t), .yellow, "150ms → yellow")
+        let yellow = PingResult(timestamp: .now, rtt: 80, lossPercent: 0, jitter: 5)
+        expectEqual(MetricStatus.forPingResult(yellow, thresholds: t), .yellow, "80ms → yellow")
 
         let red = PingResult(timestamp: .now, rtt: 400, lossPercent: 0, jitter: 5)
         expectEqual(MetricStatus.forPingResult(red, thresholds: t), .red, "400ms → red")
@@ -54,18 +54,18 @@ func runMetricStatusTests() {
         expectEqual(MetricStatus.forWindow(loss: [0, 0], latency: [50, 60], jitter: [5, 8], thresholds: t), .green,
                     "avg values well below thresholds → green")
 
-        // Single bad latency in window of 3 — avg stays below threshold
-        // (150 + 50 + 50) / 3 = 83 ms < 100 ms yellow
-        expectEqual(MetricStatus.forWindow(loss: [0], latency: [150, 50, 50], jitter: [5], thresholds: t), .green,
-                    "one 150 ms spike averaged with two 50 ms → 83 ms avg → green")
+        // Single bad latency in window of 3 — avg stays below red but crosses yellow
+        // (150 + 50 + 50) / 3 = 83 ms >= 60 ms yellow
+        expectEqual(MetricStatus.forWindow(loss: [0], latency: [150, 50, 50], jitter: [5], thresholds: t), .yellow,
+                    "one 150 ms spike averaged with two 50 ms → 83 ms avg → yellow")
 
-        // Sustained bad latency → yellow
-        // avg = 150 ms >= 100 ms
-        expectEqual(MetricStatus.forWindow(loss: [0], latency: [150, 150, 150], jitter: [5], thresholds: t), .yellow,
-                    "three 150 ms samples → avg 150 ms → yellow")
+        // Sustained yellow-band latency at the red boundary
+        // avg = 150 ms >= 150 ms red
+        expectEqual(MetricStatus.forWindow(loss: [0], latency: [150, 150, 150], jitter: [5], thresholds: t), .red,
+                    "three 150 ms samples → avg 150 ms → red")
 
         // Sustained red latency
-        // avg = 250 ms >= 200 ms
+        // avg = 250 ms >= 150 ms red
         expectEqual(MetricStatus.forWindow(loss: [0], latency: [250, 250, 250], jitter: [5], thresholds: t), .red,
                     "three 250 ms samples → avg 250 ms → red")
 

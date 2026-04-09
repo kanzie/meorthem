@@ -46,27 +46,27 @@ func runMetricStoreTests() {
             expectEqual(storeJR.overallStatus, .red, "6 consecutive red-level jitter samples → red")
 
             // ── Latency window absorbs a brief spike ─────────────────────────
-            // 2 good (50 ms) + 1 spike (150 ms) → avg = 250/3 ≈ 83 ms < 100 ms yellow
+            // 2 good (30 ms) + 1 spike (90 ms) → avg = 150/3 = 50 ms < 60 ms yellow
             let storeLS = MetricStore(settings: settings)
-            storeLS.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
-            storeLS.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
-            storeLS.record(result: PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5), for: id1)
+            storeLS.record(result: PingResult(timestamp: .now, rtt: 30, lossPercent: 0, jitter: 5), for: id1)
+            storeLS.record(result: PingResult(timestamp: .now, rtt: 30, lossPercent: 0, jitter: 5), for: id1)
+            storeLS.record(result: PingResult(timestamp: .now, rtt: 90, lossPercent: 0, jitter: 5), for: id1)
             expectEqual(storeLS.overallStatus, .green, "brief latency spike in 3-sample window → averaged out → green")
 
             // ── Sustained latency escalates ──────────────────────────────────
             let storeL = MetricStore(settings: settings)
             for _ in 0..<3 {
-                storeL.record(result: PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5), for: id1)
+                storeL.record(result: PingResult(timestamp: .now, rtt: 80, lossPercent: 0, jitter: 5), for: id1)
             }
-            // avg latency = 150 ms >= 100 ms yellow threshold
-            expectEqual(storeL.overallStatus, .yellow, "3 consecutive 150 ms latency samples → yellow")
+            // avg latency = 80 ms >= 60 ms yellow threshold
+            expectEqual(storeL.overallStatus, .yellow, "3 consecutive 80 ms latency samples → yellow")
 
             let storeLR = MetricStore(settings: settings)
             for _ in 0..<3 {
-                storeLR.record(result: PingResult(timestamp: .now, rtt: 250, lossPercent: 0, jitter: 5), for: id1)
+                storeLR.record(result: PingResult(timestamp: .now, rtt: 200, lossPercent: 0, jitter: 5), for: id1)
             }
-            // avg latency = 250 ms >= 200 ms red threshold
-            expectEqual(storeLR.overallStatus, .red, "3 consecutive 250 ms latency samples → red")
+            // avg latency = 200 ms >= 150 ms red threshold
+            expectEqual(storeLR.overallStatus, .red, "3 consecutive 200 ms latency samples → red")
 
             // ── Loss window (2 samples) ──────────────────────────────────────
             // Loss window is the tightest: 2 samples. Two bad polls → alarm.
@@ -91,16 +91,16 @@ func runMetricStoreTests() {
 
             // ── Recovery requires window to refill with good samples ─────────
             let storeRec = MetricStore(settings: settings)
-            // Fill with 3 bad latency samples (avg 150 ms → yellow)
+            // Fill with 3 bad latency samples (avg 80 ms → yellow)
             for _ in 0..<3 {
-                storeRec.record(result: PingResult(timestamp: .now, rtt: 150, lossPercent: 0, jitter: 5), for: id1)
+                storeRec.record(result: PingResult(timestamp: .now, rtt: 80, lossPercent: 0, jitter: 5), for: id1)
             }
             expectEqual(storeRec.overallStatus, .yellow, "sustained bad latency → yellow before recovery")
-            // Add 1 good poll: window = [150, 150, 50] → avg ≈ 116 ms → still yellow
-            storeRec.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
+            // Add 1 good poll: window = [80, 80, 40] → avg ≈ 66.7 ms → still yellow
+            storeRec.record(result: PingResult(timestamp: .now, rtt: 40, lossPercent: 0, jitter: 5), for: id1)
             expectEqual(storeRec.overallStatus, .yellow, "1 good poll out of 3 still above threshold → yellow")
-            // Add 2nd good poll: window = [150, 50, 50] → avg ≈ 83 ms → green
-            storeRec.record(result: PingResult(timestamp: .now, rtt: 50, lossPercent: 0, jitter: 5), for: id1)
+            // Add 2nd good poll: window = [80, 40, 40] → avg ≈ 53.3 ms → green
+            storeRec.record(result: PingResult(timestamp: .now, rtt: 40, lossPercent: 0, jitter: 5), for: id1)
             expectEqual(storeRec.overallStatus, .green, "2 good polls in 3-sample latency window → avg below threshold → green")
 
             // ── rssiQuality labels ──────────────────────────────────────────
@@ -157,12 +157,12 @@ func runMetricStoreTests() {
             // Record 3 consecutive samples for each target to fill the latency window (3 samples).
             for _ in 0..<3 {
                 storeTrim.record(result: PingResult(timestamp: .now, rtt: 200, lossPercent: 0, jitter: 5), for: id1) // outlier
-                storeTrim.record(result: PingResult(timestamp: .now, rtt: 50,  lossPercent: 0, jitter: 5), for: id2) // good
-                storeTrim.record(result: PingResult(timestamp: .now, rtt: 60,  lossPercent: 0, jitter: 5), for: id3) // good
+                storeTrim.record(result: PingResult(timestamp: .now, rtt: 40,  lossPercent: 0, jitter: 5), for: id2) // good
+                storeTrim.record(result: PingResult(timestamp: .now, rtt: 50,  lossPercent: 0, jitter: 5), for: id3) // good
             }
-            // Trimmed mean discards the worst (200ms) and best (50ms), leaving 60ms → green.
+            // Trimmed mean discards the worst (200ms) and best (40ms), leaving 50ms → green.
             expectEqual(storeTrim.overallStatus, .green,
-                        "3 targets: outlier (200ms) trimmed away → trimmed mean 60ms → green")
+                        "3 targets: outlier (200ms) trimmed away → trimmed mean 50ms → green")
 
             // ── CPU load annotation in degradation cause ─────────────────────
             // If system load is ≥75 % when degradation starts, the cause string
@@ -197,9 +197,9 @@ func runMetricStoreTests() {
                 storeAllBad.record(result: PingResult(timestamp: .now, rtt: 210, lossPercent: 0, jitter: 5), for: id2)
                 storeAllBad.record(result: PingResult(timestamp: .now, rtt: 190, lossPercent: 0, jitter: 5), for: id3)
             }
-            // Trimmed mean: remove 190 and 210, remaining = 200ms → red (≥200ms red threshold)
+            // Trimmed mean: remove 190 and 210, remaining = 200ms → red (≥150ms red threshold)
             expectEqual(storeAllBad.overallStatus, .red,
-                        "3 targets all bad: trimmed mean 200ms ≥ 200ms red threshold → red")
+                        "3 targets all bad: trimmed mean 200ms ≥ 150ms red threshold → red")
         }
     }
 }

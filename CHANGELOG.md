@@ -5,6 +5,17 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.22.0 — 2026-04-09
+
+### Changes
+- **Lower default latency thresholds** — Yellow now triggers at >60 ms (was 100 ms) and red at >150 ms (was 200 ms), giving earlier warnings on connections that affect video calls and real-time audio.
+- **Export Reports** — The "Ping Stats Report" menu item is renamed to "Export Reports".
+
+### New Features
+- **Notification settings** — A new Notifications section in Settings lets you independently control the banner and sound for connection degradation alerts. Banners are on by default; the notification sound is off by default.
+
+---
+
 ## v1.21.0 — 2026-04-09
 
 ### Changes

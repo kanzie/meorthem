@@ -6,6 +6,11 @@ final class AlertManager {
     private var previousStatus: MetricStatus = .green
     private var lastFiredAt: Date = .distantPast
     private let cooldownSeconds: TimeInterval = 60
+    private let settings: AppSettings
+
+    init(settings: AppSettings) {
+        self.settings = settings
+    }
 
     func requestPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
@@ -16,6 +21,7 @@ final class AlertManager {
 
         // Only notify on degradation (green→yellow or yellow→red)
         guard newStatus > previousStatus else { return }
+        guard settings.enableNotificationBanner else { return }
 
         let now = Date()
         guard now.timeIntervalSince(lastFiredAt) >= cooldownSeconds else { return }
@@ -30,7 +36,9 @@ final class AlertManager {
         content.body  = status == .red
             ? "Your connection is poor. Video calls may be affected."
             : "Your connection quality has degraded."
-        content.sound = .default
+        if settings.enableNotificationSound {
+            content.sound = .default
+        }
 
         let request = UNNotificationRequest(
             identifier: "com.meorthem.status.\(UUID().uuidString)",
