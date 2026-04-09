@@ -76,6 +76,18 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(enableLogRotation, forKey: "enableLogRotation") }
     }
 
+    // MARK: - SQLite data retention (days)
+    // Defaults: 7 days raw, 90 days per-minute aggregates, 1 year incident journal.
+    @Published var rawRetentionDays: Int {
+        didSet { UserDefaults.standard.set(rawRetentionDays, forKey: "rawRetentionDays") }
+    }
+    @Published var aggregateRetentionDays: Int {
+        didSet { UserDefaults.standard.set(aggregateRetentionDays, forKey: "aggregateRetentionDays") }
+    }
+    @Published var incidentRetentionDays: Int {
+        didSet { UserDefaults.standard.set(incidentRetentionDays, forKey: "incidentRetentionDays") }
+    }
+
     @Published var bandwidthBarRedMbps: Double {
         didSet { UserDefaults.standard.set(bandwidthBarRedMbps, forKey: "bandwidthBarRedMbps") }
     }
@@ -99,6 +111,9 @@ final class AppSettings: ObservableObject {
         enableLogRotation         = ud.bool(forKey: "enableLogRotation")
         bandwidthBarRedMbps       = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
         bandwidthBarYellowMbps    = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
+        rawRetentionDays          = ud.object(forKey: "rawRetentionDays")       as? Int ?? 7
+        aggregateRetentionDays    = ud.object(forKey: "aggregateRetentionDays") as? Int ?? 90
+        incidentRetentionDays     = ud.object(forKey: "incidentRetentionDays")  as? Int ?? 365
 
         let poll = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
         latencyWindowSecs = Swift.max(ud.double(forKey: "latencyWindowSecs").nonZero ?? 15, poll)

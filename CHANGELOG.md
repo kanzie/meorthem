@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.17.0 — 2026-04-09
+
+### New Features
+- **Live SQLite persistence** — Every poll tick now writes to the on-disk database in real time. Ping samples, WiFi snapshots, and degradation incidents are all persisted across app restarts. A maintenance job runs on launch and every hour to roll up and prune old data according to configurable retention windows (default: 7 days raw, 90 days aggregated, 1 year incidents).
+
+---
+
 ## v1.16.0 — 2026-04-09
 
 ### New Features
