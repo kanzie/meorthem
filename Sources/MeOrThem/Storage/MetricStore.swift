@@ -266,9 +266,11 @@ final class MetricStore: ObservableObject {
         sqliteStore?.clearAllIncidents()
     }
 
+    private static let _historyEncoder = JSONEncoder()
+
     /// Write-through to UserDefaults as a fast-load cache; SQLite is the authoritative store.
     private func saveConnectionHistory() {
-        if let data = try? JSONEncoder().encode(Array(connectionHistory.prefix(Self.kMaxConnectionEvents))) {
+        if let data = try? Self._historyEncoder.encode(Array(connectionHistory.prefix(Self.kMaxConnectionEvents))) {
             UserDefaults.standard.set(data, forKey: Self.kHistoryUDKey)
         }
     }
