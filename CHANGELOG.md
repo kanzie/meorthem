@@ -5,6 +5,23 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.25.0 — 2026-04-10
+
+### New Features
+- **Hover markers in Network History** — Hovering over any chart snaps a marker to the nearest data point per target, with a floating tooltip showing timestamp and color-coded values for all visible targets.
+- **Inline chart legend** — When multiple targets are visible, a color-coded legend appears below each chart.
+
+### Changes
+- **Network History redesigned for macOS 26** — Window now uses a native unified toolbar with the target picker in the leading area, segmented time-range control in the center, and refresh button trailing. Charts use `.regularMaterial` card backgrounds, `.ultraThinMaterial` window background, reduced zone opacity (6%), caption-weight axis labels, and subtle grid lines.
+- **Network History default time range** — The window now opens on the 1-hour view instead of 24 hours.
+- **Network History stays visible** — The window no longer hides when the app loses focus; it must be closed manually.
+
+### Bug Fixes
+- **Status bar icon could disappear** — All Combine publishers that update the status bar icon and menu items now explicitly deliver on the main queue. Without this guarantee, AppKit UI updates could be called off the main thread, silently corrupting or hiding the icon.
+- **App freeze and keyboard lockup on GCD thread exhaustion** — Each `runAsync` subprocess call was blocking a GCD worker thread on `readDataToEndOfFile()` for the full subprocess lifetime. Under repeated polling with many simultaneous subprocesses (e.g. after opening the Network History window), this saturated the GCD thread pool at 512 threads, deadlocking the async runtime and trapping the keyboard inside NSMenu's modal event loop. Replaced with event-driven `readabilityHandler` I/O that holds no GCD thread while waiting for output.
+
+---
+
 ## v1.24.0 — 2026-04-09
 
 ### Bug Fixes

@@ -43,22 +43,17 @@ struct ConnectionEvent: Codable, Identifiable {
 
     /// Short timestamp string for menu display: "HH:mm" today, "Apr 6 14:23" otherwise.
     var timestampString: String {
-        let cal = Calendar.current
-        let f   = DateFormatter()
-        if cal.isDateInToday(startTime) {
-            f.dateFormat = "HH:mm"
-        } else {
-            f.dateFormat = "MMM d HH:mm"
+        if Calendar.current.isDateInToday(startTime) {
+            return ConnectionEvent._timeFormatter.string(from: startTime)
         }
-        return f.string(from: startTime)
+        return ConnectionEvent._dateTimeFormatter.string(from: startTime)
     }
 
-    /// Menu row prefix indicating severity: orange for yellow, red for red.
-    var severityDot: String {
-        switch severity {
-        case .yellow: return "●"   // drawn in orange by caller
-        case .red:    return "●"   // drawn in red by caller
-        default:      return "●"
-        }
-    }
+    // Static formatters — DateFormatter is expensive to allocate; reuse across all events.
+    private static let _timeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
+    private static let _dateTimeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "MMM d HH:mm"; return f
+    }()
 }
