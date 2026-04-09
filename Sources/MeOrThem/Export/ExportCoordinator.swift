@@ -1,18 +1,21 @@
 import AppKit
 import PDFKit
 import UniformTypeIdentifiers
+import MeOrThemCore
 import os.log
 
 private let exportLog = Logger(subsystem: "com.meorthem", category: "Export")
 
 @MainActor
 final class ExportCoordinator {
-    private let store: MetricStore
-    private let settings: AppSettings
+    private let store:       MetricStore
+    private let settings:    AppSettings
+    private let sqliteStore: SQLiteStore
 
-    init(metricStore: MetricStore, settings: AppSettings) {
-        self.store = metricStore
-        self.settings = settings
+    init(metricStore: MetricStore, settings: AppSettings, sqliteStore: SQLiteStore) {
+        self.store       = metricStore
+        self.settings    = settings
+        self.sqliteStore = sqliteStore
     }
 
     func exportCSV() {
@@ -21,7 +24,11 @@ final class ExportCoordinator {
         exportLog.info("exportCSV: panel created, calling showPanel")
         showPanel(panel) { [self] url in
             exportLog.info("exportCSV: panel OK, writing to \(url.path)")
-            let csv = CSVExporter.export(store: self.store, targets: self.settings.pingTargets)
+            let csv = CSVExporter.exportFromDB(
+                sqliteStore: self.sqliteStore,
+                targets: self.settings.pingTargets,
+                rawDays: self.settings.rawRetentionDays
+            )
             do {
                 try csv.write(to: url, atomically: true, encoding: .utf8)
                 exportLog.info("exportCSV: write succeeded (\(csv.count) bytes)")
@@ -37,7 +44,11 @@ final class ExportCoordinator {
         showPanel(panel) { [self] url in
             exportLog.info("exportJSON: writing to \(url.path)")
             do {
-                let data = try JSONExporter.export(store: self.store, targets: self.settings.pingTargets)
+                let data = try JSONExporter.exportFromDB(
+                    sqliteStore: self.sqliteStore,
+                    targets: self.settings.pingTargets,
+                    rawDays: self.settings.rawRetentionDays
+                )
                 try data.write(to: url)
                 exportLog.info("exportJSON: write succeeded (\(data.count) bytes)")
             } catch {
