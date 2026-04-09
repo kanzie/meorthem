@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.21.0 — 2026-04-09
+
+### Changes
+- **Settings: Data section redesigned** — The "Daily log rotation" toggle is renamed "Save CSV log files" with an updated description reflecting the new append-mode behaviour. A "Show in Finder" button opens the log directory directly. An "Advanced" disclosure group reveals configurable retention windows for raw data (default 7 days), per-minute summaries (default 90 days), and the incident archive (default 365 days). When collapsed, the current retention values are shown inline as a summary.
+
+---
+
 ## v1.20.0 — 2026-04-09
 
 ### New Features
