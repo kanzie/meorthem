@@ -13,23 +13,26 @@ private let _SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.se
 /// (queue.async). Public `query*` methods are synchronous (queue.sync) and
 /// intended to be called from a background context (e.g. an export task).
 ///
+/// The public API is primitive-based so it can be called from any module
+/// without creating a dependency on internal Core domain types.
+///
 /// Data tiers managed automatically:
-///   • `ping_samples`   — one row per poll per target; raw retention configurable (default 7 days)
-///   • `wifi_samples`   — one row per WiFi snapshot; same raw retention
-///   • `ping_aggregates`— per-minute roll-ups created from aged-out raw rows (default 90 days)
-///   • `incidents`      — degradation event journal (default 1 year)
+///   • `ping_samples`    — one row per poll per target; raw retention configurable (default 7 days)
+///   • `wifi_samples`    — one row per WiFi snapshot; same raw retention
+///   • `ping_aggregates` — per-minute roll-ups created from aged-out raw rows (default 90 days)
+///   • `incidents`       — degradation event journal (default 1 year)
 // Thread safety is managed entirely via `queue` — all mutable state (`db`) is only
 // ever accessed on that serial queue. The @unchecked annotation opts out of the
 // compiler's automatic Sendable checking, which cannot see through DispatchQueue.
-final class SQLiteStore: @unchecked Sendable {
+public final class SQLiteStore: @unchecked Sendable {
 
     // MARK: - Public factory
 
-    static func makeDefault() -> SQLiteStore {
+    public static func makeDefault() -> SQLiteStore {
         SQLiteStore(path: Self.defaultDBPath)
     }
 
-    static var defaultDBPath: String {
+    public static var defaultDBPath: String {
         let dir = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MeOrThem", isDirectory: true)
@@ -38,9 +41,9 @@ final class SQLiteStore: @unchecked Sendable {
 
     // MARK: - Init / deinit
 
-    let path: String
+    public let path: String
 
-    init(path: String) {
+    public init(path: String) {
         self.path = path
         queue.sync {
             self._open()
@@ -59,67 +62,65 @@ final class SQLiteStore: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.meorthem.sqlite", qos: .utility)
     private var db: OpaquePointer?
 
-    // MARK: - Insert (fire-and-forget, async)
+    // MARK: - Public insert API (primitive-based, fire-and-forget)
 
-    func insertPing(_ result: PingResult,
-                    targetID: UUID,
-                    targetLabel: String,
-                    host: String) {
-        let ts    = result.timestamp.timeIntervalSince1970
+    public func insertPing(timestamp: Date,
+                           rtt: Double?,
+                           lossPercent: Double,
+                           jitter: Double?,
+                           targetID: UUID,
+                           targetLabel: String,
+                           host: String) {
+        let ts    = timestamp.timeIntervalSince1970
         let idStr = targetID.uuidString
-        let rtt   = result.rtt
-        let loss  = result.lossPercent
-        let jit   = result.jitter
         queue.async { [weak self] in
             self?._insertPing(ts: ts, targetID: idStr, label: targetLabel,
-                              host: host, rtt: rtt, loss: loss, jitter: jit)
+                              host: host, rtt: rtt, loss: lossPercent, jitter: jitter)
         }
     }
 
-    func insertWiFi(_ snapshot: WiFiSnapshot) {
-        let ts   = snapshot.timestamp.timeIntervalSince1970
-        let rssi = snapshot.rssi
-        let noise = snapshot.noise
-        let snr  = snapshot.snr
-        let ch   = snapshot.channelNumber
-        let band = snapshot.channelBandGHz
-        let tx   = snapshot.txRateMbps
-        let phy  = snapshot.phyMode
-        let iface = snapshot.interfaceName
-        let ip   = snapshot.ipAddress
-        let gw   = snapshot.routerIP
+    public func insertWiFi(timestamp: Date,
+                           rssi: Int,
+                           noise: Int,
+                           snr: Int,
+                           channel: Int,
+                           bandGHz: Double,
+                           txRateMbps: Double,
+                           phyMode: String,
+                           interfaceName: String,
+                           ipAddress: String?,
+                           routerIP: String?) {
+        let ts = timestamp.timeIntervalSince1970
         queue.async { [weak self] in
             self?._insertWiFi(ts: ts, rssi: rssi, noise: noise, snr: snr,
-                              channel: ch, bandGHz: band, txRate: tx,
-                              phyMode: phy, iface: iface, ip: ip, gw: gw)
+                              channel: channel, bandGHz: bandGHz, txRate: txRateMbps,
+                              phyMode: phyMode, iface: interfaceName,
+                              ip: ipAddress, gw: routerIP)
         }
     }
 
-    // MARK: - Incident journal (fire-and-forget)
+    // MARK: - Public incident API (primitive-based, fire-and-forget)
 
-    func openIncident(id: UUID, severity: MetricStatus, cause: String, startTime: Date = .init()) {
+    public func openIncident(id: UUID, severityRaw: Int, cause: String, startTime: Date = .init()) {
         let idStr = id.uuidString
         let ts    = startTime.timeIntervalSince1970
-        let sev   = severity.rawValue
         queue.async { [weak self] in
-            self?._openIncident(id: idStr, ts: ts, severity: sev, cause: cause)
+            self?._openIncident(id: idStr, ts: ts, severity: severityRaw, cause: cause)
         }
     }
 
-    func closeIncident(id: UUID, endTime: Date = .init(), peakSeverity: MetricStatus) {
+    public func closeIncident(id: UUID, endTime: Date = .init(), peakSeverityRaw: Int) {
         let idStr = id.uuidString
         let ts    = endTime.timeIntervalSince1970
-        let peak  = peakSeverity.rawValue
         queue.async { [weak self] in
-            self?._closeIncident(id: idStr, endTs: ts, peak: peak)
+            self?._closeIncident(id: idStr, endTs: ts, peak: peakSeverityRaw)
         }
     }
 
-    func updateIncidentSeverity(id: UUID, peakSeverity: MetricStatus) {
+    public func updateIncidentSeverity(id: UUID, peakSeverityRaw: Int) {
         let idStr = id.uuidString
-        let peak  = peakSeverity.rawValue
         queue.async { [weak self] in
-            self?._updateIncidentSeverity(id: idStr, peak: peak)
+            self?._updateIncidentSeverity(id: idStr, peak: peakSeverityRaw)
         }
     }
 
@@ -128,91 +129,139 @@ final class SQLiteStore: @unchecked Sendable {
     /// Aggregates raw samples older than `rawRetentionDays` into per-minute rows,
     /// then prunes all tiers according to their configured retention windows.
     /// Call on app launch and once per hour thereafter.
-    func aggregateAndPrune(rawRetentionDays: Int,
-                           aggregateRetentionDays: Int,
-                           incidentRetentionDays: Int) {
+    public func aggregateAndPrune(rawRetentionDays: Int,
+                                  aggregateRetentionDays: Int,
+                                  incidentRetentionDays: Int) {
         let now        = Date().timeIntervalSince1970
         let rawCutoff  = now - Double(rawRetentionDays)       * 86_400
         let aggCutoff  = now - Double(aggregateRetentionDays) * 86_400
         let incCutoff  = now - Double(incidentRetentionDays)  * 86_400
         queue.async { [weak self] in
             self?._aggregate(before: rawCutoff)
-            self?._exec("DELETE FROM ping_samples  WHERE timestamp < \(rawCutoff);")
-            self?._exec("DELETE FROM wifi_samples  WHERE timestamp < \(rawCutoff);")
+            self?._exec("DELETE FROM ping_samples    WHERE timestamp < \(rawCutoff);")
+            self?._exec("DELETE FROM wifi_samples    WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM ping_aggregates WHERE timestamp_minute < \(aggCutoff);")
             self?._exec("DELETE FROM incidents WHERE ended_at IS NOT NULL AND ended_at < \(incCutoff);")
             self?._exec("PRAGMA wal_checkpoint(PASSIVE);")
         }
     }
 
-    // MARK: - Queries (synchronous; call from a background context for export)
+    // MARK: - Public queries (synchronous; call from a background context for export)
 
-    struct PingRow {
-        let timestamp: Date
-        let targetID: UUID
-        let rttMs: Double?
-        let lossPct: Double
-        let jitterMs: Double?
+    public struct PingRow {
+        public let timestamp: Date
+        public let targetID: UUID
+        public let rttMs: Double?
+        public let lossPct: Double
+        public let jitterMs: Double?
     }
 
-    struct WiFiRow {
-        let timestamp: Date
-        let rssi: Int
-        let snr: Int
-        let channelNumber: Int
-        let bandGHz: Double
-        let txRateMbps: Double
+    public struct WiFiRow {
+        public let timestamp: Date
+        public let rssi: Int
+        public let snr: Int
+        public let channelNumber: Int
+        public let bandGHz: Double
+        public let txRateMbps: Double
     }
 
-    struct IncidentRow: Identifiable {
-        let id: UUID
-        let startedAt: Date
-        let endedAt: Date?
-        let severityRaw: Int
-        let peakSeverityRaw: Int
-        let cause: String
+    public struct IncidentRow: Identifiable {
+        public let id: UUID
+        public let startedAt: Date
+        public let endedAt: Date?
+        public let severityRaw: Int
+        public let peakSeverityRaw: Int
+        public let cause: String
 
-        var isActive: Bool { endedAt == nil }
+        public var isActive: Bool { endedAt == nil }
     }
 
-    /// Raw ping samples in the given time range (ascending). Pulls from `ping_samples` only;
-    /// for older data use `aggregatedPingRows(for:from:to:)`.
-    func pingRows(for targetID: UUID, from: Date, to: Date) -> [PingRow] {
-        queue.sync { _pingRows(targetID: targetID.uuidString, from: from.timeIntervalSince1970,
-                                to: to.timeIntervalSince1970) }
+    /// Raw ping samples in the given time range (ascending).
+    public func pingRows(for targetID: UUID, from: Date, to: Date) -> [PingRow] {
+        queue.sync { _pingRows(targetID: targetID.uuidString,
+                               from: from.timeIntervalSince1970,
+                               to:   to.timeIntervalSince1970) }
     }
 
     /// Per-minute aggregated ping rows in the given time range (ascending).
-    func aggregatedPingRows(for targetID: UUID, from: Date, to: Date) -> [PingRow] {
-        queue.sync { _aggRows(targetID: targetID.uuidString, from: from.timeIntervalSince1970,
-                               to: to.timeIntervalSince1970) }
+    public func aggregatedPingRows(for targetID: UUID, from: Date, to: Date) -> [PingRow] {
+        queue.sync { _aggRows(targetID: targetID.uuidString,
+                              from: from.timeIntervalSince1970,
+                              to:   to.timeIntervalSince1970) }
     }
 
     /// WiFi samples in the given time range (ascending).
-    func wifiRows(from: Date, to: Date) -> [WiFiRow] {
-        queue.sync { _wifiRows(from: from.timeIntervalSince1970, to: to.timeIntervalSince1970) }
+    public func wifiRows(from: Date, to: Date) -> [WiFiRow] {
+        queue.sync { _wifiRows(from: from.timeIntervalSince1970,
+                               to:   to.timeIntervalSince1970) }
     }
 
     /// Most-recent incidents, newest first. Queries both open and resolved events.
-    func recentIncidents(limit: Int = 100) -> [IncidentRow] {
+    public func recentIncidents(limit: Int = 100) -> [IncidentRow] {
         queue.sync { _incidents(limit: limit) }
     }
 
-    /// Count of raw ping samples across all targets (useful for tests and diagnostics).
-    func rawPingCount() -> Int {
+    /// Count of raw ping samples across all targets (useful for diagnostics).
+    public func rawPingCount() -> Int {
         queue.sync { _scalar("SELECT COUNT(*) FROM ping_samples;") }
     }
 
     /// Count of per-minute aggregate rows across all targets.
-    func aggregateCount() -> Int {
+    public func aggregateCount() -> Int {
         queue.sync { _scalar("SELECT COUNT(*) FROM ping_aggregates;") }
     }
 
     /// Estimated database file size in bytes (0 for in-memory databases).
-    var databaseSizeBytes: Int64 {
+    public var databaseSizeBytes: Int64 {
         guard path != ":memory:" else { return 0 }
         let attrs = try? FileManager.default.attributesOfItem(atPath: path)
         return (attrs?[.size] as? Int64) ?? 0
+    }
+
+    // MARK: - Internal convenience wrappers (used by tests via @testable import)
+
+    /// Convenience wrapper for tests — extracts primitives from a Core PingResult.
+    func insertPing(_ result: PingResult,
+                    targetID: UUID,
+                    targetLabel: String,
+                    host: String) {
+        insertPing(timestamp: result.timestamp,
+                   rtt: result.rtt,
+                   lossPercent: result.lossPercent,
+                   jitter: result.jitter,
+                   targetID: targetID,
+                   targetLabel: targetLabel,
+                   host: host)
+    }
+
+    /// Convenience wrapper for tests — extracts primitives from a Core WiFiSnapshot.
+    func insertWiFi(_ snapshot: WiFiSnapshot) {
+        insertWiFi(timestamp:      snapshot.timestamp,
+                   rssi:           snapshot.rssi,
+                   noise:          snapshot.noise,
+                   snr:            snapshot.snr,
+                   channel:        snapshot.channelNumber,
+                   bandGHz:        snapshot.channelBandGHz,
+                   txRateMbps:     snapshot.txRateMbps,
+                   phyMode:        snapshot.phyMode,
+                   interfaceName:  snapshot.interfaceName,
+                   ipAddress:      snapshot.ipAddress,
+                   routerIP:       snapshot.routerIP)
+    }
+
+    /// Convenience wrapper for tests — takes Core MetricStatus instead of raw Int.
+    func openIncident(id: UUID, severity: MetricStatus, cause: String, startTime: Date = .init()) {
+        openIncident(id: id, severityRaw: severity.rawValue, cause: cause, startTime: startTime)
+    }
+
+    /// Convenience wrapper for tests — takes Core MetricStatus instead of raw Int.
+    func closeIncident(id: UUID, endTime: Date = .init(), peakSeverity: MetricStatus) {
+        closeIncident(id: id, endTime: endTime, peakSeverityRaw: peakSeverity.rawValue)
+    }
+
+    /// Convenience wrapper for tests — takes Core MetricStatus instead of raw Int.
+    func updateIncidentSeverity(id: UUID, peakSeverity: MetricStatus) {
+        updateIncidentSeverity(id: id, peakSeverityRaw: peakSeverity.rawValue)
     }
 
     // MARK: - Test helper
