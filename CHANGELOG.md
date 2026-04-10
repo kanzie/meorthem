@@ -5,6 +5,21 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.27.0 — 2026-04-10
+
+### New Features
+- **Update notification in menu** — When a newer release is available on GitHub, a notification item appears at the top of the dropdown with a link to Settings where the update can be downloaded.
+
+### Bug Fixes
+- **Network History CPU spike** — Opening the Network History window no longer causes 46–50% CPU usage. Root cause was `.ultraThinMaterial`/`.regularMaterial` backgrounds forcing the macOS compositor to continuously re-sample and blend vibrancy layers on every cursor movement. Replaced with solid system colors.
+- **Background CPU elevated after first open** — The charts window controller was retained after closing, keeping a vibrancy-backed `NSHostingController` alive in the compositor indefinitely. The controller is now released when the window closes, dropping background CPU back to baseline.
+- **Network History graphs appeared dark** — The overlapping translucent material backgrounds created a dark, murky appearance, especially in dark mode. Charts now use `controlBackgroundColor` cards on a `windowBackgroundColor` base for a bright, clear appearance.
+
+### Changes
+- **Network History hover performance** — Hover snap computation now uses binary search instead of linear scan, and is throttled to ≤60 FPS (down from the display refresh rate of up to 120 Hz). Data point cap reduced from 1500 to 600, which is more than sufficient for chart resolution.
+
+---
+
 ## v1.26.0 — 2026-04-10
 
 ### Changes

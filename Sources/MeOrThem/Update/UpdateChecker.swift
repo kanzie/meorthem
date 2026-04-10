@@ -55,6 +55,9 @@ final class UpdateChecker: ObservableObject {
     }
 
     @Published private(set) var lastCheckDescription: String
+    /// Set to the available release when a newer version is found (and not skipped).
+    /// Drives the update notification item at the top of the menu.
+    @Published private(set) var availableRelease: GitHubRelease?
 
     private init() {
         lastCheckDescription = Self.buildDescription()
@@ -132,6 +135,7 @@ final class UpdateChecker: ObservableObject {
         let skipped = UserDefaults.standard.string(forKey: UDKey.skippedTag)
 
         guard isNewer(latest, than: current) else {
+            availableRelease = nil  // user is on latest — clear any stale notification
             if manual { showAlreadyUpToDate(current: current) }
             return true
         }
@@ -143,6 +147,7 @@ final class UpdateChecker: ObservableObject {
             return true
         }
 
+        availableRelease = release  // surface in menu notification
         UpdateWindowController.shared.show(release: release, currentVersion: current)
         return true
     }
@@ -207,5 +212,6 @@ final class UpdateChecker: ObservableObject {
 
     static func skipVersion(_ tagName: String) {
         UserDefaults.standard.set(tagName, forKey: UDKey.skippedTag)
+        shared.availableRelease = nil  // clear menu notification for skipped version
     }
 }
