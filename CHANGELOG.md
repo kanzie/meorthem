@@ -5,6 +5,16 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.28.0 — 2026-04-10
+
+### Bug Fixes
+- **Time range tabs enabled for empty windows** — The 1h/6h/24h/… buttons in Network History are now disabled per-target. Previously the availability check was global (any target has data), so switching to a specific target could show buttons as active even when that target had no data for that range. The check now filters to the selected target and re-runs whenever the target picker changes.
+- **Tooltip showing only one target on hover** — The hover tooltip now shows all visible targets. The bug was that concurrent pings for different targets complete at slightly different timestamps; the tooltip was filtering for an exact timestamp match so only the target whose timestamp was used as the snap anchor appeared. Now uses nearest-per-target matching.
+- **Incidents stuck as "Active" in Network History** — An incident left open from a crashed or force-quit session was closed in the in-memory history on startup, but the SQLite row was never updated. Since Network History reads directly from SQLite, it continued showing the incident as active. The `ended_at` column is now written on startup when orphaned incidents are found.
+- **Background CPU not dropping after closing Network History** — The `NSWindow.willCloseNotification` observer token returned by `NotificationCenter.addObserver(forName:object:queue:using:)` was discarded, causing ARC to remove the observer before it ever fired. The window controller was therefore never released after closing, keeping a vibrancy-backed `NSHostingController` alive in the compositor indefinitely. The token is now retained and the window controller is correctly released on close, restoring background CPU to baseline.
+
+---
+
 ## v1.27.1 — 2026-04-10
 
 ### Changes

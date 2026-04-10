@@ -145,9 +145,13 @@ struct MetricsChartsView: View {
         }
         .onAppear {
             loader.load(window: selectedWindow)
-            loader.checkAvailableWindows()
+            loader.checkAvailableWindows(for: visibleTargets.map(\.id))
         }
         .onChange(of: selectedWindow) { _, w in loader.load(window: w) }
+        .onChange(of: selectedTargetIndex) { _, _ in
+            // Re-check which windows have data for the newly selected target.
+            loader.checkAvailableWindows(for: visibleTargets.map(\.id))
+        }
     }
 
     // MARK: - Toolbar items
@@ -248,11 +252,16 @@ struct MetricsChartsView: View {
         .sorted { $0.targetLabel < $1.targetLabel }
     }
 
-    /// Returns the points that exactly match the snapped timestamp (O(n), but n is
-    /// small per target and snappedDate only changes at data-point boundaries).
+    /// Returns the nearest point per target to hoveredDate.
+    /// Uses nearest-match (not exact timestamp) because concurrent pings for different
+    /// targets complete at slightly different times within the same poll tick.
     private func snappedPoints(in points: [ChartPoint]) -> [ChartPoint] {
         guard let date = hoveredDate else { return [] }
-        return points.filter { $0.timestamp == date }
+        let byTarget = Dictionary(grouping: points, by: \.targetLabel)
+        return byTarget.compactMap { _, pts -> ChartPoint? in
+            pts.min(by: { abs($0.timestamp.timeIntervalSince(date)) < abs($1.timestamp.timeIntervalSince(date)) })
+        }
+        .sorted { $0.targetLabel < $1.targetLabel }
     }
 
     private func tooltipEntries(points: [ChartPoint]) -> [(label: String, value: Double, color: Color)] {

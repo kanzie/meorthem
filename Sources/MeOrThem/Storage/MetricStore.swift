@@ -285,8 +285,14 @@ final class MetricStore: ObservableObject {
                                             startTime: row.startedAt,
                                             cause: row.cause,
                                             endTime: row.endedAt)
-                // Close any event left open from a previous session
-                if event.isActive { event.endTime = Date() }
+                // Close any event left open from a previous session, and persist the closure
+                // to SQLite so Network History (which reads SQLite directly) shows it as ended.
+                if event.isActive {
+                    let closeTime = Date()
+                    event.endTime = closeTime
+                    db.closeIncident(id: event.id, endTime: closeTime,
+                                     peakSeverityRaw: row.peakSeverityRaw)
+                }
                 return event
             }
             return
