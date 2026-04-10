@@ -29,6 +29,7 @@ enum MenuBuilder {
     static let tagCPUAdvisory            = 13
     static let tagTargetBase             = 100
     static let tagGatewayTarget          = 200
+    static let tagUpdateAvailable        = 14
 
     @MainActor
     static func rebuild(_ menu: NSMenu, environment env: AppEnvironment, actions: Actions) {
@@ -40,6 +41,20 @@ enum MenuBuilder {
         let targets   = settings.pingTargets
         let threshold = settings.thresholds
         let paused    = env.monitoringEngine.isPaused
+
+        // MARK: - Update notification (shown when a newer GitHub release is available)
+        if let release = UpdateChecker.shared.availableRelease {
+            let updateItem = actionItem(
+                "New version available: v\(release.version) — open Settings to download",
+                action: actions.openSettings
+            )
+            updateItem.attributedTitle = NSAttributedString(
+                string: "New version available: v\(release.version) — open Settings to download",
+                attributes: [.foregroundColor: NSColor.systemOrange, .font: _menuFont])
+            updateItem.tag = tagUpdateAvailable
+            menu.addItem(updateItem)
+            menu.addItem(.separator())
+        }
 
         // MARK: - Pause / Resume (top of menu — task 7)
         let pauseLabel = env.monitoringEngine.isManuallyPaused ? "Resume Monitoring" : "Pause Monitoring"

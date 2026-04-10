@@ -66,7 +66,7 @@ final class MetricsDataLoader: ObservableObject {
 
     let targets: [PingTarget]
     private let db: SQLiteStore
-    private static let maxPoints = 1500
+    private static let maxPoints = 600
     private var loadTask: Task<Void, Never>?
 
     init(db: SQLiteStore, targets: [PingTarget]) {
