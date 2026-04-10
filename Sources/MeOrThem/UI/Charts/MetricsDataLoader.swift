@@ -10,6 +10,7 @@ enum TimeWindow: String, CaseIterable, Identifiable {
     case day7   = "7d"
     case day30  = "30d"
     case day90  = "90d"
+    case year1  = "1y"
 
     var id: String { rawValue }
 
@@ -21,6 +22,7 @@ enum TimeWindow: String, CaseIterable, Identifiable {
         case .day7:   return "7 Days"
         case .day30:  return "30 Days"
         case .day90:  return "90 Days"
+        case .year1:  return "1 Year"
         }
     }
 
@@ -32,6 +34,7 @@ enum TimeWindow: String, CaseIterable, Identifiable {
         case .day7:   return 7 * 86400
         case .day30:  return 30 * 86400
         case .day90:  return 90 * 86400
+        case .year1:  return 366 * 86400
         }
     }
 

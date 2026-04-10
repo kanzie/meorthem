@@ -27,10 +27,11 @@ os.makedirs(OUT_DIR, exist_ok=True)
 # Target window size: ~1270×686 (measured from actual Finder window).
 W, H = 1270, 686
 
-# Icon positions match AppleScript set position {320,300} and {950,300}.
+# Icon positions match AppleScript set position {320,236} and {950,236}.
 # Quartz origin is bottom-left, so y_img = H - y_finder
-APP_X, APP_Y   = 320, 386   # H - 300 = 386
-APPL_X, APPL_Y = 950, 386
+# Finder y=236 = original 300 minus half icon height (128/2=64), pushing icons up.
+APP_X, APP_Y   = 320, 450   # H - 236 = 450
+APPL_X, APPL_Y = 950, 450
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def srgb(r, g, b, a=1.0):
