@@ -61,6 +61,8 @@ struct MetricsChartsView: View {
     /// Only changes when the cursor crosses into a new point's territory,
     /// so the chart bodies (which have no dependency on this) never re-render on hover.
     @State private var hoveredDate: Date? = nil
+    /// Throttles hover computation to ≤60 FPS across all charts.
+    @State private var lastHoverCompute: Date = .distantPast
 
     private let thresholds: Thresholds
 
@@ -123,7 +125,7 @@ struct MetricsChartsView: View {
                 }
             }
         }
-        .background(.ultraThinMaterial)
+        .background(Color(NSColor.windowBackgroundColor))
         .frame(minWidth: 780, minHeight: 500)
         .toolbar {
             if loader.targets.count > 1 {
@@ -209,7 +211,7 @@ struct MetricsChartsView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.ultraThinMaterial)
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     private func emptyView(icon: String, message: String) -> some View {
@@ -225,15 +227,23 @@ struct MetricsChartsView: View {
 
     // MARK: - Hover helpers
 
-    /// Finds the nearest data point per target to `date` using a linear scan.
-    /// The result is used to snap hoveredDate — after snapping, subsequent lookups
-    /// use exact timestamp matching which is much cheaper.
+    /// Finds the nearest data point per target using binary search.
+    /// Points within each target group are sorted by timestamp (guaranteed by DB ORDER BY).
     private func nearestPoints(to date: Date, in points: [ChartPoint]) -> [ChartPoint] {
-        let labels = Set(points.map(\.targetLabel))
-        return labels.compactMap { label in
-            points
-                .filter { $0.targetLabel == label }
-                .min(by: { abs($0.timestamp.timeIntervalSince(date)) < abs($1.timestamp.timeIntervalSince(date)) })
+        // Group once per hover event — O(n), but n ≤ maxPoints and fires at most 60/sec.
+        let byTarget = Dictionary(grouping: points, by: \.targetLabel)
+        return byTarget.compactMap { _, pts -> ChartPoint? in
+            guard !pts.isEmpty else { return nil }
+            // Binary search for insertion point (pts sorted by timestamp from DB)
+            var lo = 0, hi = pts.count - 1
+            while lo < hi {
+                let mid = (lo + hi) / 2
+                if pts[mid].timestamp < date { lo = mid + 1 } else { hi = mid }
+            }
+            guard lo > 0 else { return pts[0] }
+            let prev = pts[lo - 1], curr = pts[lo]
+            return abs(prev.timestamp.timeIntervalSince(date)) <= abs(curr.timestamp.timeIntervalSince(date))
+                ? prev : curr
         }
         .sorted { $0.targetLabel < $1.targetLabel }
     }
@@ -287,6 +297,10 @@ struct MetricsChartsView: View {
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let loc):
+                    // Throttle to ≤60 FPS — display link fires at 120 Hz on ProMotion displays.
+                    let now = Date()
+                    guard now.timeIntervalSince(lastHoverCompute) >= 1.0 / 60.0 else { break }
+                    lastHoverCompute = now
                     guard let rawDate: Date = proxy.value(atX: loc.x - origin.x) else { break }
                     // Snap to the nearest actual data timestamp; only trigger a state
                     // update when the snapped point changes (not every cursor pixel).
@@ -663,6 +677,7 @@ struct ChartCard<Content: View>: View {
             content()
         }
         .padding(16)
-        .background(RoundedRectangle(cornerRadius: 10).fill(.regularMaterial))
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color(NSColor.controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
     }
 }

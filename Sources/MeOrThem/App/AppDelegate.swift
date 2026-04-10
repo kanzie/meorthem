@@ -367,6 +367,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 targets:    environment.settings.pingTargets,
                 thresholds: environment.settings.thresholds
             )
+            // Release on close so the SwiftUI hosting controller doesn't linger in the compositor.
+            if let win = chartsWindowController?.window {
+                NotificationCenter.default.addObserver(
+                    forName: NSWindow.willCloseNotification,
+                    object: win, queue: .main
+                ) { [weak self] _ in
+                    self?.chartsWindowController = nil
+                }
+            }
         }
         chartsWindowController?.showAndFocus()
     }
