@@ -160,13 +160,17 @@ final class UpdateChecker: ObservableObject {
         lastCheckDescription = Self.buildDescription()
     }
 
-    private static func buildDescription() -> String {
-        let ud = UserDefaults.standard
-        guard let date = ud.object(forKey: UDKey.lastCheck) as? Date else { return "Never" }
+    private static let _checkDateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .short
         f.timeStyle = .short
-        let ds = f.string(from: date)
+        return f
+    }()
+
+    private static func buildDescription() -> String {
+        let ud = UserDefaults.standard
+        guard let date = ud.object(forKey: UDKey.lastCheck) as? Date else { return "Never" }
+        let ds = _checkDateFormatter.string(from: date)
         let status = ud.string(forKey: UDKey.lastStatus) ?? "ok"
         return status == "failed" ? "Failed to connect to github.com (\(ds))" : ds
     }

@@ -46,7 +46,8 @@ private struct HoverTooltip: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
-        .background(RoundedRectangle(cornerRadius: 8).fill(.regularMaterial))
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color(NSColor.controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
     }
 }
@@ -264,8 +265,8 @@ struct MetricsChartsView: View {
         .sorted { $0.targetLabel < $1.targetLabel }
     }
 
-    private func tooltipEntries(points: [ChartPoint]) -> [(label: String, value: Double, color: Color)] {
-        snappedPoints(in: points).compactMap { p in
+    private func tooltipEntries(snapped: [ChartPoint]) -> [(label: String, value: Double, color: Color)] {
+        snapped.compactMap { p in
             guard let color = colorMap[p.targetLabel] else { return nil }
             return (p.targetLabel, p.value, color)
         }
@@ -346,8 +347,8 @@ struct MetricsChartsView: View {
                     }
                 }
 
-                // Tooltip card
-                let entries = tooltipEntries(points: points)
+                // Tooltip card — reuse already-computed snapped to avoid a second O(n) scan
+                let entries = tooltipEntries(snapped: snapped)
                 if !entries.isEmpty {
                     HoverTooltip(date: date, entries: entries, unit: unit)
                         .fixedSize()
@@ -654,10 +655,14 @@ struct MetricsChartsView: View {
         inc.peakSeverityRaw >= 2 ? .red : .orange
     }
 
+    private static let _incidentFmt: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm MMM d"
+        return f
+    }()
+
     private func incidentDescription(_ inc: SQLiteStore.IncidentRow) -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm MMM d"
-        let start = fmt.string(from: inc.startedAt)
+        let start = Self._incidentFmt.string(from: inc.startedAt)
         if let end = inc.endedAt {
             let dur = Int(end.timeIntervalSince(inc.startedAt))
             return "\(start) · \(inc.cause) · \(dur)s"
