@@ -136,6 +136,9 @@ struct GeneralTab: View {
                                 .frame(width: 48)
                                 .textFieldStyle(.roundedBorder)
                                 .multilineTextAlignment(.trailing)
+                                .onChange(of: settings.rawRetentionDays) { _, v in
+                                    settings.rawRetentionDays = max(1, min(v, 365))
+                                }
                             Text("days")
                                 .foregroundStyle(.secondary)
                         }
@@ -149,6 +152,9 @@ struct GeneralTab: View {
                                 .frame(width: 48)
                                 .textFieldStyle(.roundedBorder)
                                 .multilineTextAlignment(.trailing)
+                                .onChange(of: settings.aggregateRetentionDays) { _, v in
+                                    settings.aggregateRetentionDays = max(1, min(v, 3650))
+                                }
                             Text("days")
                                 .foregroundStyle(.secondary)
                         }
@@ -162,6 +168,9 @@ struct GeneralTab: View {
                                 .frame(width: 48)
                                 .textFieldStyle(.roundedBorder)
                                 .multilineTextAlignment(.trailing)
+                                .onChange(of: settings.incidentRetentionDays) { _, v in
+                                    settings.incidentRetentionDays = max(1, min(v, 3650))
+                                }
                             Text("days")
                                 .foregroundStyle(.secondary)
                         }

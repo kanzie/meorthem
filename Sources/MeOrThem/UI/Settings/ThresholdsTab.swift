@@ -57,8 +57,8 @@ struct ThresholdsTab: View {
             Section {
                 Button("Reset to Defaults") {
                     settings.thresholds = .default
-                    settings.bandwidthBarRedMbps    = 10
-                    settings.bandwidthBarYellowMbps = 25
+                    settings.bandwidthBarRedMbps    = 25
+                    settings.bandwidthBarYellowMbps = 100
                     settings.latencyWindowSecs = 15
                     settings.lossWindowSecs    = 10
                     settings.jitterWindowSecs  = 30
