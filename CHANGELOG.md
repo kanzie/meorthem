@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.28.3 — 2026-04-11
+
+### Changes
+- **Aggregate history extended to 366 days** — Per-minute roll-up retention increased from 90 to 366 days, allowing year-over-year comparison of the same day.
+
+---
+
 ## v1.28.1 — 2026-04-10
 
 ### Bug Fixes

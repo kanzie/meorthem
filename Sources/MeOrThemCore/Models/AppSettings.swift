@@ -111,7 +111,7 @@ final class AppSettings: ObservableObject {
         bandwidthScheduleHours = ud.double(forKey: "bandwidthScheduleHours")
         enableLogRotation         = ud.bool(forKey: "enableLogRotation")
         rawRetentionDays          = ud.object(forKey: "rawRetentionDays")       as? Int ?? 7
-        aggregateRetentionDays    = ud.object(forKey: "aggregateRetentionDays") as? Int ?? 90
+        aggregateRetentionDays    = ud.object(forKey: "aggregateRetentionDays") as? Int ?? 366
         incidentRetentionDays     = ud.object(forKey: "incidentRetentionDays")  as? Int ?? 365
         bandwidthBarRedMbps    = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
         bandwidthBarYellowMbps = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
