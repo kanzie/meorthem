@@ -232,6 +232,21 @@ public final class SQLiteStore: @unchecked Sendable {
         }
     }
 
+    /// Returns true if any ping data exists for the given targets in the given time range.
+    /// Used by the Network History time-window picker to disable buttons for windows where
+    /// the selected target has no data (even if other targets do).
+    /// UUID strings contain only hex digits and hyphens so embedding them directly is safe.
+    public func hasPingData(forTargetIDs targetIDs: [UUID], from: Date, to: Date) -> Bool {
+        guard !targetIDs.isEmpty else { return hasPingData(from: from, to: to) }
+        let f   = from.timeIntervalSince1970
+        let t   = to.timeIntervalSince1970
+        let ids = targetIDs.map { "'\($0.uuidString)'" }.joined(separator: ",")
+        return queue.sync {
+            _scalar("SELECT 1 FROM ping_samples    WHERE target_id IN (\(ids)) AND timestamp        >= \(f) AND timestamp        <= \(t) LIMIT 1;") > 0
+         || _scalar("SELECT 1 FROM ping_aggregates WHERE target_id IN (\(ids)) AND timestamp_minute >= \(f) AND timestamp_minute <= \(t) LIMIT 1;") > 0
+        }
+    }
+
     /// Count of raw ping samples across all targets (useful for diagnostics).
     public func rawPingCount() -> Int {
         queue.sync { _scalar("SELECT COUNT(*) FROM ping_samples;") }

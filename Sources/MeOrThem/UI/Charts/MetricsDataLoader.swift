@@ -75,17 +75,24 @@ final class MetricsDataLoader: ObservableObject {
     }
 
     /// Probes every time window with a LIMIT-1 query and updates windowsWithData.
+    /// Pass specific target IDs to check only those targets (e.g. when a single target
+    /// is selected in the picker); pass nil to check across all targets.
     /// Runs off the main thread so it doesn't block the UI.
-    func checkAvailableWindows() {
-        let db = self.db
+    func checkAvailableWindows(for targetIDs: [UUID]? = nil) {
+        let db  = self.db
+        let ids = targetIDs
         Task.detached(priority: .utility) { [weak self] in
             let now = Date()
             var available = Set<TimeWindow>()
             for window in TimeWindow.allCases {
                 let from = now.addingTimeInterval(-window.duration)
-                if db.hasPingData(from: from, to: now) {
-                    available.insert(window)
+                let hasData: Bool
+                if let ids, !ids.isEmpty {
+                    hasData = db.hasPingData(forTargetIDs: ids, from: from, to: now)
+                } else {
+                    hasData = db.hasPingData(from: from, to: now)
                 }
+                if hasData { available.insert(window) }
             }
             await MainActor.run { [weak self] in
                 self?.windowsWithData = available

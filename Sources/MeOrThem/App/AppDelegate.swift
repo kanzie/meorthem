@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuSpeedtestUpdate: AnyCancellable?
     private var menuHistoryUpdate: AnyCancellable?
     private var countdownTimer: Timer?
+    private var chartsWindowObserver: NSObjectProtocol?
     private var isPulsing = false
     private var hasInitialData = false
     private var loadingBlinkTimer: Timer?
@@ -368,12 +369,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 thresholds: environment.settings.thresholds
             )
             // Release on close so the SwiftUI hosting controller doesn't linger in the compositor.
+            // The token must be stored — discarding it causes ARC to remove the observer
+            // immediately, so the close notification would never fire.
             if let win = chartsWindowController?.window {
-                NotificationCenter.default.addObserver(
+                chartsWindowObserver = NotificationCenter.default.addObserver(
                     forName: NSWindow.willCloseNotification,
                     object: win, queue: .main
                 ) { [weak self] _ in
                     self?.chartsWindowController = nil
+                    self?.chartsWindowObserver = nil
                 }
             }
         }

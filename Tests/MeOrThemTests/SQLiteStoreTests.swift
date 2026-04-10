@@ -171,4 +171,50 @@ func runSQLiteStoreTests() {
         expectEqual(rows2[0].lossPct, 5.0, "T2 loss = 5%")
         expectEqual(store.rawPingCount(), 2, "total raw count = 2")
     }
+
+    suite("SQLiteStore — hasPingData per-target filter") {
+        let store = SQLiteStore(path: ":memory:")
+        let id1 = UUID()
+        let id2 = UUID()
+        let id3 = UUID()  // target with no data
+        let now = Date()
+
+        store.insertPing(PingResult(timestamp: now, rtt: 10, lossPercent: 0, jitter: nil),
+                         targetID: id1, targetLabel: "T1", host: "1.1.1.1")
+        // id2: only has data 10 days in the past (simulates a target with limited history)
+        let old = now.addingTimeInterval(-10 * 86_400)
+        store.insertPing(PingResult(timestamp: old, rtt: 20, lossPercent: 0, jitter: nil),
+                         targetID: id2, targetLabel: "T2", host: "8.8.8.8")
+        store.waitForPendingOps()
+
+        let recent = now.addingTimeInterval(-3600)  // 1h window
+
+        // All-targets check: true because id1 has recent data
+        expectEqual(store.hasPingData(from: recent, to: now), true,
+                    "all-targets check finds id1 data")
+
+        // Per-target filter: id1 has recent data
+        expectEqual(store.hasPingData(forTargetIDs: [id1], from: recent, to: now), true,
+                    "id1 has recent data")
+
+        // Per-target filter: id2 has NO recent data (data is 10 days old)
+        expectEqual(store.hasPingData(forTargetIDs: [id2], from: recent, to: now), false,
+                    "id2 has no data in 1h window")
+
+        // Per-target filter: id3 has no data at all
+        expectEqual(store.hasPingData(forTargetIDs: [id3], from: recent, to: now), false,
+                    "id3 has no data")
+
+        // Multi-target filter: [id1, id2] → true because id1 has recent data
+        expectEqual(store.hasPingData(forTargetIDs: [id1, id2], from: recent, to: now), true,
+                    "[id1, id2] finds id1 data")
+
+        // Multi-target filter: [id2, id3] → false, neither has recent data
+        expectEqual(store.hasPingData(forTargetIDs: [id2, id3], from: recent, to: now), false,
+                    "[id2, id3] has no recent data")
+
+        // Empty target list falls back to all-targets check
+        expectEqual(store.hasPingData(forTargetIDs: [], from: recent, to: now), true,
+                    "empty list falls back to all-targets")
+    }
 }
