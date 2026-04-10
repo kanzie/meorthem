@@ -19,7 +19,7 @@ private let _SQLITE_TRANSIENT = unsafeBitCast(-1, to: sqlite3_destructor_type.se
 /// Data tiers managed automatically:
 ///   • `ping_samples`    — one row per poll per target; raw retention configurable (default 7 days)
 ///   • `wifi_samples`    — one row per WiFi snapshot; same raw retention
-///   • `ping_aggregates` — per-minute roll-ups created from aged-out raw rows (default 90 days)
+///   • `ping_aggregates` — per-minute roll-ups created from aged-out raw rows (default 366 days)
 ///   • `incidents`       — degradation event journal (default 1 year)
 // Thread safety is managed entirely via `queue` — all mutable state (`db`) is only
 // ever accessed on that serial queue. The @unchecked annotation opts out of the
