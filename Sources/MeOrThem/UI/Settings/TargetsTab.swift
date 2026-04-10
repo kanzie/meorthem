@@ -138,6 +138,13 @@ struct TargetsTab: View {
         }
 
         if let idx = editingIndex {
+            let duplicate = settings.pingTargets.indices.contains(where: {
+                $0 != idx && settings.pingTargets[$0].host.lowercased() == host.lowercased()
+            })
+            if duplicate {
+                errorMsg = "A target with that host already exists."
+                return
+            }
             settings.pingTargets[idx] = PingTarget(
                 id: settings.pingTargets[idx].id,
                 label: InputValidator.sanitizedLabel(label),
@@ -147,6 +154,13 @@ struct TargetsTab: View {
         } else {
             guard settings.pingTargets.count < 10 else {
                 errorMsg = "Maximum 10 targets allowed."
+                return
+            }
+            let duplicate = settings.pingTargets.contains(where: {
+                $0.host.lowercased() == host.lowercased()
+            })
+            if duplicate {
+                errorMsg = "A target with that host already exists."
                 return
             }
             settings.pingTargets.append(

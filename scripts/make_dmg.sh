@@ -114,8 +114,8 @@ tell application "Finder"
         set arrangement of viewOptions to not arranged
         set icon size of viewOptions to 128
         set background picture of viewOptions to POSIX file "$MOUNT_POINT/.background/background.png"
-        set position of item "$APP_NAME.app" of container window to {320, 300}
-        set position of item "Applications" of container window to {950, 300}
+        set position of item "$APP_NAME.app" of container window to {320, 236}
+        set position of item "Applications" of container window to {950, 236}
         update without registering applications
         delay 5
     end tell

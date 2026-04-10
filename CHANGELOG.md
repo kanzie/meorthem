@@ -5,6 +5,18 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.28.4 — 2026-04-11
+
+### New Features
+- **1 Year chart view** — Network History now includes a "1 Year" time window button, backed by 366-day per-minute aggregate data.
+
+### Bug Fixes
+- **Threshold reset ignored bandwidth sliders** — "Reset to Defaults" in Settings → Thresholds now correctly resets bandwidth to Red < 25 Mbps / Yellow < 100 Mbps.
+- **Duplicate targets allowed silently** — Adding a target with a host that already exists now shows an inline error instead of creating a duplicate entry that pings the same host twice.
+- **Retention fields accepted invalid input** — Typing 0 or a negative number into the data retention fields in Settings is now clamped to a valid range (1–365 days for raw, 1–3650 for summaries and incidents).
+
+---
+
 ## v1.28.3 — 2026-04-11
 
 ### Changes
