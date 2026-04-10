@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.27.1 — 2026-04-10
+
+### Changes
+- **Reduced CPU at high polling frequencies** — Ping subprocess packet count reduced from 5 to 3 (200ms interval unchanged). Subprocess duty cycle drops from ~50% to ~22% at the 2-second poll interval, bringing average CPU from ~2% closer to ~1.3%. Loss granularity changes from 20% steps to 33% steps per sample, which has no practical effect since evaluation windows average across multiple polls.
+
+---
+
 ## v1.27.0 — 2026-04-10
 
 ### New Features
