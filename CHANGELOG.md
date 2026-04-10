@@ -5,6 +5,17 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v1.28.1 — 2026-04-10
+
+### Bug Fixes
+- **Hover tooltip causing CPU spike** — The hover tooltip card in Network History was using `.regularMaterial`, the same vibrancy background that caused the 46% CPU regression in v1.27.0. The chart cards were fixed at the time but the tooltip overlay was missed. Replaced with a solid system color, eliminating compositor re-blending on cursor movement.
+
+### Changes
+- **Hover rendering efficiency** — Nearest-point computation (`snappedPoints`) was called twice per hover frame — once for the cursor markers, once for the tooltip — each time iterating and grouping the full point set. The result is now computed once per frame and passed through to both consumers.
+- **DateFormatter allocation eliminated** — Formatters in the update checker and incident list were being allocated on every call. Both are now static constants, removing repeated `DateFormatter` initialization.
+
+---
+
 ## v1.28.0 — 2026-04-10
 
 ### Bug Fixes

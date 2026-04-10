@@ -104,19 +104,18 @@ final class MetricStore: ObservableObject {
 
     /// Most-recent sampled CPU utilisation fraction (0–1). Updated each tick before pings run.
     @Published private(set) var currentSystemLoad: Double = 0
-    private var recentSystemLoads: [Double] = []
-    private let kSystemLoadWindow = 3          // ~15 s at 5 s poll
+    private var recentSystemLoads = CircularBuffer<Double>(capacity: 3)   // ~15 s at 5 s poll
 
     /// Called by MonitoringEngine at the start of every tick with the delta CPU fraction.
     func recordSystemLoad(_ fraction: Double) {
         currentSystemLoad = fraction
         recentSystemLoads.append(fraction)
-        if recentSystemLoads.count > kSystemLoadWindow { recentSystemLoads.removeFirst() }
     }
 
     private var averageRecentSystemLoad: Double {
-        guard !recentSystemLoads.isEmpty else { return 0 }
-        return recentSystemLoads.reduce(0, +) / Double(recentSystemLoads.count)
+        let all = recentSystemLoads.last(recentSystemLoads.count)
+        guard !all.isEmpty else { return 0 }
+        return all.reduce(0, +) / Double(all.count)
     }
 
     // MARK: - Derived
