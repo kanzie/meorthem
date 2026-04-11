@@ -165,7 +165,11 @@ final class MonitoringEngine {
     // MARK: - Gateway ping
 
     private func pingGateway() async {
-        guard let gatewayIP = NetworkInfo.defaultGateway() else {
+        // NetworkInfo.defaultGateway() spawns /sbin/route and calls waitUntilExit() when
+        // the 30-second cache expires. Run it off the MainActor to avoid blocking the
+        // main thread during that brief subprocess wait.
+        let gatewayIP = await Task.detached { NetworkInfo.defaultGateway() }.value
+        guard let gatewayIP else {
             store.recordGatewayPing(nil)
             return
         }

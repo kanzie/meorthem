@@ -33,6 +33,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var bandwidthBlinkTimer: Timer?
     private var bandwidthBlinkVisible = false
 
+    /// Last image pointer set on the status bar button. Used to skip redundant
+    /// `button.image` assignments when the icon state hasn't changed — each
+    /// assignment unconditionally triggers an IPC round-trip to SystemUIServer.
+    private var _lastSetImage: NSImage?
+    /// Last title string set on the status bar button. Skips NSButton layout work
+    /// when the latency text rounds to the same value between consecutive ticks.
+    private var _lastSetTitle: String = ""
+
     // MARK: - Lifecycle
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -103,9 +111,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                         self.updateIcon(status: self.environment.metricStore.overallStatus)
                     }
                 }
-                // Update menubar text when data arrives (showLatencyInMenubar mode)
+                // Only refresh the latency text — the icon image is driven by $overallStatus
+                // and tickStarted. Calling full updateIcon() here causes N+1 CoreGraphics
+                // renders and IPC round-trips to SystemUIServer per tick (once per target +
+                // gateway), most of which produce the same image. Use the cheap title-only path.
                 if self.environment.settings.showLatencyInMenubar {
-                    self.updateIcon(status: self.environment.metricStore.overallStatus)
+                    self.updateLatencyTitle()
                 }
             }
             .store(in: &cancellables)
@@ -243,25 +254,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             bandwidthBarRedMbps:     settings.bandwidthBarRedMbps,
             bandwidthBarYellowMbps:  settings.bandwidthBarYellowMbps
         )
-        statusItem.button?.image = image
-
-        if settings.showLatencyInMenubar && hasInitialData && !environment.monitoringEngine.isPaused {
-            let targets = settings.pingTargets
-            let store   = environment.metricStore
-            let rtts    = targets.compactMap { store.latestPing[$0.id]?.rtt }
-            if !rtts.isEmpty {
-                let avg = rtts.reduce(0, +) / Double(rtts.count)
-                statusItem.button?.title = String(format: " %.0fms", avg)
-            } else {
-                statusItem.button?.title = ""
-            }
-        } else if settings.showLatencyInMenubar && environment.monitoringEngine.isPaused {
-            statusItem.button?.title = " —"
-        } else {
-            statusItem.button?.title = ""
+        // Guard: StatusBarIconRenderer caches images by state key and returns the same
+        // NSImage pointer for identical visual state. Only push to AppKit when the pointer
+        // differs — each assignment triggers an IPC round-trip to SystemUIServer even when
+        // the icon is visually unchanged.
+        if image !== _lastSetImage {
+            _lastSetImage = image
+            statusItem.button?.image = image
         }
 
+        updateLatencyTitle()
+
         statusItem.button?.toolTip = "Me Or Them — \(status.label)"
+    }
+
+    /// Updates only the status bar button title (latency text). Called from the
+    /// $latestPing subscriber so the text stays current every tick without triggering
+    /// a full icon re-render or SystemUIServer IPC for the image.
+    private func updateLatencyTitle() {
+        let settings = environment.settings
+        let newTitle: String
+        if settings.showLatencyInMenubar && hasInitialData {
+            if environment.monitoringEngine.isPaused {
+                newTitle = " —"
+            } else {
+                let targets = settings.pingTargets
+                let store   = environment.metricStore
+                let rtts    = targets.compactMap { store.latestPing[$0.id]?.rtt }
+                if !rtts.isEmpty {
+                    let avg = rtts.reduce(0, +) / Double(rtts.count)
+                    newTitle = String(format: " %.0fms", avg)
+                } else {
+                    newTitle = ""
+                }
+            }
+        } else {
+            newTitle = ""
+        }
+        // Guard: skip NSButton layout work when the text hasn't changed.
+        if newTitle != _lastSetTitle {
+            _lastSetTitle = newTitle
+            statusItem.button?.title = newTitle
+        }
     }
 
     // MARK: - NSMenuDelegate
