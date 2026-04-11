@@ -117,9 +117,21 @@ if [ "$DEVELOPER_SIGNING" = true ]; then
     echo "==> 1. Finding and signing ALL nested binaries (e.g. speedtest helper)..."
     # Signs every executable inside the bundle except the main app binary itself.
     # Nested binaries must be signed before the outer bundle is sealed.
-    find "$APP_PATH" -type f -perm +111 ! -path "$APP_PATH/Contents/MacOS/MeOrThem" | while read -r BINARY; do
+    #
+    # IMPORTANT: speedtest is a third-party helper launched as a subprocess. It must
+    # NOT be signed with --options runtime (Hardened Runtime). On macOS 14+, a Hardened
+    # Runtime binary with zero entitlements is blocked by AMFI when launched as a
+    # subprocess of a Hardened Runtime app — producing "CNSTask.Process error 0".
+    # Sign it with Developer ID only (no runtime flag, no entitlements).
+    HELPER_SIGN_OPTS="--force --timestamp --sign \"$SIGNING_IDENTITY\""
+    find "$APP_PATH" -type f -perm +111 \
+        ! -path "$APP_PATH/Contents/MacOS/MeOrThem" | while read -r BINARY; do
         echo "   Signing: $(basename "$BINARY")"
-        eval "codesign $SIGN_OPTS \"$BINARY\"" || { echo "❌ Failed to sign $BINARY"; exit 1; }
+        if [[ "$(basename "$BINARY")" == "speedtest" ]]; then
+            eval "codesign $HELPER_SIGN_OPTS \"$BINARY\"" || { echo "❌ Failed to sign $BINARY"; exit 1; }
+        else
+            eval "codesign $SIGN_OPTS \"$BINARY\"" || { echo "❌ Failed to sign $BINARY"; exit 1; }
+        fi
     done
 
     echo "==> 2. Signing the main App Bundle with entitlements..."
