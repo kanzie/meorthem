@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.0.1 — 2026-04-11
+
+### Bug Fixes
+- **High CPU during network jitter** — The `$latestPing` publisher fired once per monitoring target on each poll tick, and each fire called the full icon-update path which unconditionally sent the status bar image to System UI Server via IPC — even when the icon was visually unchanged. The update path now separates the latency text (updated per tick) from the icon image (updated only when status actually changes). The image assignment is also guarded by pointer equality so cached images are never re-sent to the compositor. Additionally, the default-gateway lookup — which spawns `/sbin/route` and waits synchronously — was running on the main thread every 30 seconds; it now runs on a background thread.
+
+---
+
 ## v2.0.0 — 2026-04-11
 
 ### Bug Fixes
