@@ -84,6 +84,7 @@ cp "$SOURCES_RESOURCES/Info.plist" "$APP_PATH/Contents/Info.plist"
 # helper executables that are signed and run as subprocesses.
 cp "$SOURCES_RESOURCES/speedtest" "$APP_PATH/Contents/MacOS/speedtest"
 chmod +x "$APP_PATH/Contents/MacOS/speedtest"
+xattr -d com.apple.quarantine "$APP_PATH/Contents/MacOS/speedtest" 2>/dev/null || true
 
 # Copy SPM resource bundle if present
 BUNDLE_PATH="$ROOT_DIR/.build/release/${APP_NAME}_${APP_NAME}.bundle"

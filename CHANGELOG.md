@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.0.0 — 2026-04-11
+
+### Bug Fixes
+- **Bandwidth check failing silently** — The bundled speedtest binary carried a quarantine extended attribute from its original download, which Gatekeeper blocked at launch time. The build script now strips the attribute after copying the binary into the app bundle.
+
+---
+
 ## v1.28.4 — 2026-04-11
 
 ### New Features
