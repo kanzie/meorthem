@@ -163,9 +163,60 @@ private struct UpdateView: View {
         changelogLoading = true
         if let (data, _) = try? await URLSession.shared.data(from: changelogURL),
            let text = String(data: data, encoding: .utf8) {
-            changelog = wordWrap(text)
+            changelog = wordWrap(extractDelta(from: text))
         }
         changelogLoading = false
+    }
+
+    /// Extracts changelog sections for every version strictly newer than
+    /// `currentVersion` and at most `release.version`, in document order.
+    /// Falls back to the full file if parsing finds nothing.
+    private func extractDelta(from text: String) -> String {
+        // Split on version headings ("## v2.0.3 — …").
+        // Each element after the first is one release block.
+        let headingRegex = try? NSRegularExpression(pattern: #"^## (v\d+\.\d+\.\d+)"#)
+        var sections: [(version: String, body: String)] = []
+        var current: (version: String, lines: [String])?
+
+        for line in text.components(separatedBy: "\n") {
+            let range = NSRange(line.startIndex..., in: line)
+            if let m = headingRegex?.firstMatch(in: line, range: range),
+               let vRange = Range(m.range(at: 1), in: line) {
+                if let prev = current {
+                    sections.append((prev.version, prev.lines.joined(separator: "\n")))
+                }
+                current = (String(line[vRange]), [line])
+            } else {
+                current?.lines.append(line)
+            }
+        }
+        if let last = current {
+            sections.append((last.version, last.lines.joined(separator: "\n")))
+        }
+
+        let delta = sections.filter { section in
+            versionIsNewer(section.version, than: "v\(currentVersion)") &&
+            !versionIsNewer(section.version, than: release.version)
+        }
+
+        guard !delta.isEmpty else { return text }
+        return delta.map(\.body)
+                    .joined(separator: "\n\n---\n\n")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Returns true when `a` is strictly newer than `b` (both "vX.Y.Z" strings).
+    private func versionIsNewer(_ a: String, than b: String) -> Bool {
+        func parts(_ v: String) -> [Int] {
+            v.drop(while: { $0 == "v" })
+             .split(separator: ".")
+             .compactMap { Int($0) }
+        }
+        let lhs = parts(a), rhs = parts(b)
+        for (l, r) in zip(lhs, rhs) {
+            if l != r { return l > r }
+        }
+        return lhs.count > rhs.count
     }
 
     /// Word-wraps each line of `text` at `width` characters, preserving
