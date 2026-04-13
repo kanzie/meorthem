@@ -103,6 +103,10 @@ git filter-repo \
     --path CLAUDE.md \
     --path CLAUDE.md.old \
     --path PROGRESS.md \
+    --path HARDENING.md \
+    --path OPTIMIZATION.md \
+    --path publish_github.sh \
+    --path REFACTOR-SPLIT-APP-ARCHITECTURE.md \
     --path FIXES.md \
     --path index.html \
     --path images \
