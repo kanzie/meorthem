@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.0.2 — 2026-04-12
+
+### Bug Fixes
+- **Bandwidth test retry on transient failure** — When the speedtest binary is killed by the OS mid-run (exit code 15 / SIGTERM), the runner now automatically retries up to 3 times with a 4-second delay between attempts before reporting a failure. The menu shows "Retrying (2/3)…" during the wait so the status is always visible.
+
+---
+
 ## v2.0.1 — 2026-04-11
 
 ### Bug Fixes
