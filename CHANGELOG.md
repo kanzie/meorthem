@@ -7,6 +7,10 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ## v2.0.3 — 2026-04-13
 
+### Apology!
+There was a small bug making the update-window crazy wide. Sorry for this inconvenience trying to get to the download button all the way to the right.
+This release will fix this problem for future releases!
+
 ### Bug Fixes
 - **Update window too wide** — The "Update Available" changelog text is now word-wrapped at 80 characters and the window has a maximum width, preventing long release-note lines from stretching the window off-screen.
 - **App not closed before update install** — Clicking "Download & Install" now quits Me Or Them automatically once the DMG has been downloaded and opened, so the user can immediately replace the app without a separate manual quit step.
