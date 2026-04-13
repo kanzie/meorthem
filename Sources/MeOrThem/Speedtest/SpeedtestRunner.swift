@@ -18,6 +18,11 @@ final class SpeedtestRunner: ObservableObject {
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
     }()
     @Published private(set) var lastResultSummary: String? = UserDefaults.standard.string(forKey: "speedtestLastResultSummary")
+    /// Non-nil while waiting between retry attempts: (current attempt, max attempts).
+    @Published private(set) var retryAttempt: (current: Int, max: Int)? = nil
+
+    private static let maxRetries = 3
+    private static let retryDelay: UInt64 = 4_000_000_000 // 4 seconds in nanoseconds
 
     private var runningTask: Task<Void, Never>?
     private var runningProcess: Process?
@@ -28,12 +33,27 @@ final class SpeedtestRunner: ObservableObject {
         runningProcess?.terminate()
         runningProcess = nil
         state = .running
+        retryAttempt = nil
 
         runningTask = Task {
-            let result = await self.executeSpeedtest()
+            var lastResult: SpeedtestState = .failed("Unknown error")
+            for attempt in 1...Self.maxRetries {
+                if Task.isCancelled { return }
+                let result = await self.executeSpeedtest()
+                if case .failed(let msg) = result, self.isRetryable(message: msg), attempt < Self.maxRetries {
+                    self.retryAttempt = (attempt + 1, Self.maxRetries)
+                    try? await Task.sleep(nanoseconds: Self.retryDelay)
+                    self.retryAttempt = nil
+                    lastResult = result
+                    continue
+                }
+                lastResult = result
+                break
+            }
             if !Task.isCancelled {
-                self.state = result
-                if case .completed(let r) = result {
+                self.state = lastResult
+                self.retryAttempt = nil
+                if case .completed(let r) = lastResult {
                     let now = Date()
                     self.lastRunDate = now
                     UserDefaults.standard.set(now.timeIntervalSince1970,
@@ -46,17 +66,29 @@ final class SpeedtestRunner: ObservableObject {
         }
     }
 
+    /// Returns true for transient failures that are worth retrying (SIGTERM / timeout).
+    private func isRetryable(message: String) -> Bool {
+        // Exit code 15 = SIGTERM (OS killed the process or our watchdog fired).
+        // "timed out" covers ProcessError.timeout from runAsync.
+        message.contains("Exit code 15") || message.lowercased().contains("timed out")
+    }
+
     func cancel() {
         runningTask?.cancel()
         runningProcess?.terminate()
         runningProcess = nil
         state = .idle
+        retryAttempt = nil
     }
 
     var summaryText: String {
         switch state {
         case .idle:               return lastResultSummary ?? ""
-        case .running:            return "Running…"
+        case .running:
+            if let retry = retryAttempt {
+                return "Retrying (\(retry.current)/\(retry.max))…"
+            }
+            return "Running…"
         case .unavailable(let m): return m
         case .failed(let m):      return "Failed: \(m)"
         case .completed(let r):   return "↓\(r.downloadFormatted)  ↑\(r.uploadFormatted)  \(r.latencyFormatted)"
