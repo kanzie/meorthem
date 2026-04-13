@@ -36,6 +36,7 @@ final class UpdateWindowController: NSWindowController {
         win.isReleasedWhenClosed = false
         win.setContentSize(NSSize(width: 500, height: 520))
         win.minSize = NSSize(width: 420, height: 380)
+        win.maxSize = NSSize(width: 560, height: 800)
         win.center()
         self.window = win
 
@@ -162,9 +163,33 @@ private struct UpdateView: View {
         changelogLoading = true
         if let (data, _) = try? await URLSession.shared.data(from: changelogURL),
            let text = String(data: data, encoding: .utf8) {
-            changelog = text
+            changelog = wordWrap(text)
         }
         changelogLoading = false
+    }
+
+    /// Word-wraps each line of `text` at `width` characters, preserving
+    /// blank lines and indentation so markdown structure stays readable.
+    private func wordWrap(_ text: String, at width: Int = 80) -> String {
+        text.components(separatedBy: "\n").map { line -> String in
+            guard line.count > width else { return line }
+            // Preserve leading whitespace (e.g. indented list items).
+            let indent = String(line.prefix(while: { $0 == " " || $0 == "\t" }))
+            var result: [String] = []
+            var current = indent
+            for word in line.dropFirst(indent.count).components(separatedBy: " ") {
+                if current == indent {
+                    current += word
+                } else if current.count + 1 + word.count <= width {
+                    current += " " + word
+                } else {
+                    result.append(current)
+                    current = indent + word
+                }
+            }
+            if !current.isEmpty { result.append(current) }
+            return result.joined(separator: "\n")
+        }.joined(separator: "\n")
     }
 
     // MARK: - Download & install
@@ -183,6 +208,7 @@ private struct UpdateView: View {
                 try FileManager.default.moveItem(at: localURL, to: dest)
                 NSWorkspace.shared.open(dest)
                 onDismiss()
+                NSApp.terminate(nil)
             } catch {
                 downloadError = "Download failed: \(error.localizedDescription)"
                 isDownloading = false
