@@ -90,6 +90,11 @@ xattr -d com.apple.quarantine "$APP_PATH/Contents/MacOS/speedtest" 2>/dev/null |
 BUNDLE_PATH="$ROOT_DIR/.build/release/${APP_NAME}_${APP_NAME}.bundle"
 if [ -d "$BUNDLE_PATH" ]; then
     cp -r "$BUNDLE_PATH" "$APP_PATH/Contents/Resources/"
+    # Remove duplicate speedtest from resource bundle — canonical copy lives in
+    # Contents/MacOS/ and is referenced directly by SpeedtestRunner. Leaving a
+    # second unsigned/differently-signed copy in the bundle causes notarization
+    # failures (two separate binaries, both inspected independently by Apple).
+    rm -f "$APP_PATH/Contents/Resources/${APP_NAME}_${APP_NAME}.bundle/speedtest"
 fi
 
 # Copy app icon (pre-generated); regenerate if missing
@@ -118,12 +123,12 @@ if [ "$DEVELOPER_SIGNING" = true ]; then
     # Signs every executable inside the bundle except the main app binary itself.
     # Nested binaries must be signed before the outer bundle is sealed.
     #
-    # IMPORTANT: speedtest is a third-party helper launched as a subprocess. It must
-    # NOT be signed with --options runtime (Hardened Runtime). On macOS 14+, a Hardened
-    # Runtime binary with zero entitlements is blocked by AMFI when launched as a
-    # subprocess of a Hardened Runtime app — producing "CNSTask.Process error 0".
-    # Sign it with Developer ID only (no runtime flag, no entitlements).
-    HELPER_SIGN_OPTS="--force --timestamp --sign \"$SIGNING_IDENTITY\""
+    # IMPORTANT: speedtest is a third-party helper launched as a subprocess.
+    # It must be signed with --options runtime (required by Apple notarization) AND
+    # with the same entitlements that grant it the relaxed Hardened Runtime flags
+    # (allow-unsigned-executable-memory, disable-library-validation) so that Ookla's
+    # binary can execute its dynamic code under AMFI without being blocked.
+    HELPER_SIGN_OPTS="--force --options runtime --timestamp --entitlements \"$ENTITLEMENTS\" --sign \"$SIGNING_IDENTITY\""
     find "$APP_PATH" -type f -perm +111 \
         ! -path "$APP_PATH/Contents/MacOS/MeOrThem" | while read -r BINARY; do
         echo "   Signing: $(basename "$BINARY")"
