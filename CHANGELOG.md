@@ -5,6 +5,16 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.0.3 — 2026-04-13
+
+### Bug Fixes
+- **Update window too wide** — The "Update Available" changelog text is now word-wrapped at 80 characters and the window has a maximum width, preventing long release-note lines from stretching the window off-screen.
+- **App not closed before update install** — Clicking "Download & Install" now quits Me Or Them automatically once the DMG has been downloaded and opened, so the user can immediately replace the app without a separate manual quit step.
+- **Notarization failure on fresh build** — The speedtest helper was being signed without the Hardened Runtime flag, which Apple rejects at notarization. It is now signed with Hardened Runtime and the required entitlements. A duplicate copy of the binary that SPM placed in the resource bundle is also removed at build time.
+- **DMG installer window too narrow** — The installer window was sized larger than most screens, causing the Applications folder shortcut to be clipped. The window is now 660 × 400 points with both icons fully visible at launch.
+
+---
+
 ## v2.0.2 — 2026-04-12
 
 ### Bug Fixes
