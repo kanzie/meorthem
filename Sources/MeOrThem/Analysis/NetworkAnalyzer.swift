@@ -256,34 +256,63 @@ final class NetworkAnalyzer {
                                   sufficiency: DataSufficiency) -> [NetworkFinding] {
         guard input.wifiRows.count >= 10 else { return [] }
 
-        let rssis  = input.wifiRows.map { Double($0.rssi) }
+        let rssis   = input.wifiRows.map { Double($0.rssi) }
         let avgRSSI = rssis.reduce(0, +) / Double(rssis.count)
 
-        // Only flag if signal is consistently poor
-        guard avgRSSI < -65 else { return [] }
+        let snrs   = input.wifiRows.map { Double($0.snr) }
+        let avgSNR = snrs.reduce(0, +) / Double(snrs.count)
 
-        let snrs    = input.wifiRows.map { Double($0.snr) }
-        let avgSNR  = snrs.reduce(0, +) / Double(snrs.count)
-
-        // Higher confidence for very poor signal, lower for borderline
-        let base: Double
-        switch avgRSSI {
-        case ..<(-80): base = 0.90
-        case ..<(-72): base = 0.75
-        default:       base = 0.55
-        }
+        // RSSI standard deviation — measures signal instability.
+        let rssiVariance = rssis.map { pow($0 - avgRSSI, 2) }.reduce(0, +) / Double(rssis.count)
+        let rssiStdDev   = sqrt(rssiVariance)
 
         // WiFi sufficiency uses its own row count
         let wifiSufficiency = DataSufficiency(sampleCount: input.wifiRows.count)
-        let confidence = base * wifiSufficiency.multiplier
 
-        let quality = avgRSSI < -80 ? "very poor" : avgRSSI < -72 ? "poor" : "marginal"
-        let detail  = String(format: "Average signal %.0f dBm (%@), SNR %.0f dB. Consider moving closer to your router or switching bands.", avgRSSI, quality, avgSNR)
+        // SNR adjusts confidence: noisy environment (low SNR) makes signal quality worse
+        let snrBoost: Double = avgSNR < 20 ? 0.10 : (avgSNR > 30 ? -0.05 : 0.0)
 
-        return [NetworkFinding(category: .wifi,
-                               title: "Weak Wi-Fi signal",
-                               detail: detail,
-                               confidence: confidence)]
+        var findings: [NetworkFinding] = []
+
+        // Finding A: Weak average signal (avgRSSI below -65 dBm)
+        if avgRSSI < -65 {
+            let base: Double
+            switch avgRSSI {
+            case ..<(-80): base = 0.90
+            case ..<(-72): base = 0.75
+            default:       base = 0.55
+            }
+            let confidence = min(1.0, (base + snrBoost) * wifiSufficiency.multiplier)
+            let quality    = avgRSSI < -80 ? "very poor" : avgRSSI < -72 ? "poor" : "marginal"
+
+            let varianceNote = rssiStdDev > 8.0
+                ? String(format: " Signal also varies widely (±%.0f dBm), compounding the impact.", rssiStdDev)
+                : ""
+            let detail = String(format: "Average signal %.0f dBm (%@), SNR %.0f dB.%@ Consider moving closer to your router or switching bands.",
+                                avgRSSI, quality, avgSNR, varianceNote)
+
+            findings.append(NetworkFinding(category: .wifi,
+                                           title: "Weak Wi-Fi signal",
+                                           detail: detail,
+                                           confidence: confidence))
+        }
+
+        // Finding B: Unstable signal (high variance even when average looks acceptable)
+        // Only emit this as a standalone finding if avgRSSI is acceptable (>= -65).
+        // When avgRSSI is already poor, the variance note is folded into Finding A above.
+        if rssiStdDev > 8.0 && avgRSSI >= -65 {
+            let base: Double = rssiStdDev > 15.0 ? 0.80 : 0.65
+            let confidence   = min(1.0, (base + snrBoost) * wifiSufficiency.multiplier)
+            let detail = String(format: "Signal varied by ±%.0f dBm around an average of %.0f dBm. Instability typically indicates interference, obstacles between the device and router, or the device roaming between access points.",
+                                rssiStdDev, avgRSSI)
+
+            findings.append(NetworkFinding(category: .wifi,
+                                           title: "Unstable Wi-Fi signal",
+                                           detail: detail,
+                                           confidence: confidence))
+        }
+
+        return findings
     }
 
     // MARK: - Pattern 5: Bandwidth anomaly

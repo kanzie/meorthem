@@ -5,6 +5,20 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.3.0 — 2026-04-16
+
+### New Features
+- **Wi-Fi signal instability detection** — Network Analysis now detects
+  unstable Wi-Fi signals even when the average signal level looks
+  acceptable. If RSSI swings more than 8 dBm, a dedicated finding
+  explains that interference, obstacles, or roaming between access
+  points may be the cause. When both average signal is weak and variance
+  is high, a combined note is included in the existing weak-signal
+  finding. SNR now modulates confidence: noisy environments (SNR < 20 dB)
+  increase confidence; strong SNR reduces it slightly.
+
+---
+
 ## v2.2.0 — 2026-04-16
 
 ### New Features
