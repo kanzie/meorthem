@@ -99,6 +99,17 @@ final class MetricStore: ObservableObject {
         }
     }
 
+    /// Persists a single interface error delta sample for the current session.
+    /// All values are deltas (change since the previous sample), clamped to ≥ 0.
+    func recordInterfaceDelta(errorsIn: Int64, errorsOut: Int64, dropsIn: Int64, iface: String) {
+        sqliteStore?.insertInterfaceErrors(timestamp: Date(),
+                                           iface: iface,
+                                           errorsIn: errorsIn,
+                                           errorsOut: errorsOut,
+                                           dropsIn: dropsIn,
+                                           sessionID: currentSessionID)
+    }
+
     /// Persists a DNS resolution sample for the current session.
     func recordDNS(resolveMs: Double?, hostname: String) {
         sqliteStore?.insertDNS(timestamp: Date(),

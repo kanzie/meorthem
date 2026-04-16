@@ -107,7 +107,8 @@ private struct NetworkAnalysisView: View {
             let gatewayPings = db.pingRows(for: PingTarget.gatewayID, sessionID: sid)
             let wifiRows     = db.wifiRows(sessionID: sid)
             let speedRows    = db.speedtestRows(from: session.startedAt, to: session.lastSeen)
-            let dnsRows      = db.dnsRows(sessionID: sid)
+            let dnsRows           = db.dnsRows(sessionID: sid)
+            let interfaceErrorRows = db.interfaceErrorRows(sessionID: sid)
 
             let input = SessionAnalysisInput(session: session,
                                              pingRows: targetPings,
@@ -115,7 +116,8 @@ private struct NetworkAnalysisView: View {
                                              gatewayPingRows: gatewayPings,
                                              wifiRows: wifiRows,
                                              speedtestRows: speedRows,
-                                             dnsRows: dnsRows)
+                                             dnsRows: dnsRows,
+                                             interfaceErrorRows: interfaceErrorRows)
             let suf = DataSufficiency(sampleCount: targetPings.count)
             let results = analyzer.analyze(input)
             return (results, suf.label)

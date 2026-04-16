@@ -108,6 +108,21 @@ public final class SQLiteStore: @unchecked Sendable {
         }
     }
 
+    public func insertInterfaceErrors(timestamp: Date,
+                                       iface: String,
+                                       errorsIn: Int64,
+                                       errorsOut: Int64,
+                                       dropsIn: Int64,
+                                       sessionID: UUID? = nil) {
+        let ts      = timestamp.timeIntervalSince1970
+        let sessStr = sessionID?.uuidString
+        queue.async { [weak self] in
+            self?._insertInterfaceErrors(ts: ts, iface: iface,
+                                         errorsIn: errorsIn, errorsOut: errorsOut,
+                                         dropsIn: dropsIn, sessionID: sessStr)
+        }
+    }
+
     public func insertWiFi(timestamp: Date,
                            rssi: Int,
                            noise: Int,
@@ -191,7 +206,8 @@ public final class SQLiteStore: @unchecked Sendable {
             self?._aggregate(before: rawCutoff)
             self?._exec("DELETE FROM ping_samples    WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM wifi_samples    WHERE timestamp < \(rawCutoff);")
-            self?._exec("DELETE FROM dns_samples     WHERE timestamp < \(rawCutoff);")
+            self?._exec("DELETE FROM dns_samples       WHERE timestamp < \(rawCutoff);")
+            self?._exec("DELETE FROM interface_errors  WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM ping_aggregates WHERE timestamp_minute < \(aggCutoff);")
             self?._exec("DELETE FROM incidents WHERE ended_at IS NOT NULL AND ended_at < \(incCutoff);")
             self?._exec("PRAGMA wal_checkpoint(PASSIVE);")
@@ -232,6 +248,17 @@ public final class SQLiteStore: @unchecked Sendable {
         public let hostname: String
         /// Milliseconds to resolve, or `nil` when resolution failed.
         public let resolveMs: Double?
+    }
+
+    public struct InterfaceErrorRow {
+        public let timestamp:  Date
+        public let iface:      String
+        /// Delta errors_in since the previous sample (clamped to ≥ 0).
+        public let errorsIn:   Int64
+        /// Delta errors_out since the previous sample.
+        public let errorsOut:  Int64
+        /// Delta input drops since the previous sample.
+        public let dropsIn:    Int64
     }
 
     public struct NetworkSessionRow: Identifiable {
@@ -323,6 +350,11 @@ public final class SQLiteStore: @unchecked Sendable {
     /// WiFi samples for a specific session (ascending).
     public func wifiRows(sessionID: UUID) -> [WiFiRow] {
         queue.sync { _wifiRows(sessionID: sessionID.uuidString) }
+    }
+
+    /// Interface error/drop delta rows for a specific session (ascending).
+    public func interfaceErrorRows(sessionID: UUID) -> [InterfaceErrorRow] {
+        queue.sync { _interfaceErrorRows(sessionID: sessionID.uuidString) }
     }
 
     /// DNS resolution samples for a specific session (ascending).
@@ -523,6 +555,15 @@ public final class SQLiteStore: @unchecked Sendable {
                 resolve_ms  REAL,
                 session_id  TEXT
             );
+            CREATE TABLE IF NOT EXISTS interface_errors (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp   REAL    NOT NULL,
+                iface       TEXT    NOT NULL,
+                errors_in   INTEGER NOT NULL DEFAULT 0,
+                errors_out  INTEGER NOT NULL DEFAULT 0,
+                drops_in    INTEGER NOT NULL DEFAULT 0,
+                session_id  TEXT
+            );
             CREATE INDEX IF NOT EXISTS idx_ping_target_time     ON ping_samples(target_id, timestamp);
             CREATE INDEX IF NOT EXISTS idx_wifi_time            ON wifi_samples(timestamp);
             CREATE INDEX IF NOT EXISTS idx_incidents_time       ON incidents(started_at);
@@ -531,6 +572,7 @@ public final class SQLiteStore: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_sessions_time        ON network_sessions(started_at);
             CREATE INDEX IF NOT EXISTS idx_dns_session          ON dns_samples(session_id);
             CREATE INDEX IF NOT EXISTS idx_dns_time             ON dns_samples(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_iferr_session        ON interface_errors(session_id);
             """)
     }
 
@@ -625,6 +667,25 @@ public final class SQLiteStore: @unchecked Sendable {
         _bindText(stmt, 2, hostname)
         if let v = resolveMs  { sqlite3_bind_double(stmt, 3, v) } else { sqlite3_bind_null(stmt, 3) }
         if let v = sessionID  { _bindText(stmt, 4, v) }           else { sqlite3_bind_null(stmt, 4) }
+        sqlite3_step(stmt)
+    }
+
+    private func _insertInterfaceErrors(ts: Double, iface: String,
+                                         errorsIn: Int64, errorsOut: Int64,
+                                         dropsIn: Int64, sessionID: String?) {
+        let sql = """
+            INSERT INTO interface_errors
+                (timestamp, iface, errors_in, errors_out, drops_in, session_id)
+            VALUES (?, ?, ?, ?, ?, ?);
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, ts)
+        _bindText(stmt, 2, iface)
+        sqlite3_bind_int64(stmt, 3, errorsIn)
+        sqlite3_bind_int64(stmt, 4, errorsOut)
+        sqlite3_bind_int64(stmt, 5, dropsIn)
+        if let v = sessionID { _bindText(stmt, 6, v) } else { sqlite3_bind_null(stmt, 6) }
         sqlite3_step(stmt)
     }
 
@@ -910,6 +971,31 @@ public final class SQLiteStore: @unchecked Sendable {
             let ms       = sqlite3_column_type(stmt, 2) != SQLITE_NULL
                          ? sqlite3_column_double(stmt, 2) : nil as Double?
             rows.append(DnsRow(timestamp: ts, hostname: hostname, resolveMs: ms))
+        }
+        return rows
+    }
+
+    private func _interfaceErrorRows(sessionID: String) -> [InterfaceErrorRow] {
+        let sql = """
+            SELECT timestamp, iface, errors_in, errors_out, drops_in
+            FROM interface_errors
+            WHERE session_id = ?
+            ORDER BY timestamp ASC;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, sessionID)
+        var rows: [InterfaceErrorRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let ts    = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0))
+            let iface = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            rows.append(InterfaceErrorRow(
+                timestamp:  ts,
+                iface:      iface,
+                errorsIn:   sqlite3_column_int64(stmt, 2),
+                errorsOut:  sqlite3_column_int64(stmt, 3),
+                dropsIn:    sqlite3_column_int64(stmt, 4)
+            ))
         }
         return rows
     }

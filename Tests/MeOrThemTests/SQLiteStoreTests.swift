@@ -357,4 +357,39 @@ func runSQLiteStoreTests() {
         expectEqual(otherRows.count, 1, "other session has its own row")
         expectEqual(otherRows[0].resolveMs, 8.0, "other session resolve time correct")
     }
+
+    suite("SQLiteStore — interface errors round-trip") {
+        let store  = SQLiteStore(path: ":memory:")
+        let sessID = UUID()
+        let now    = Date()
+
+        // First delta sample with errors
+        store.insertInterfaceErrors(timestamp: now, iface: "en0",
+                                    errorsIn: 3, errorsOut: 1, dropsIn: 2,
+                                    sessionID: sessID)
+        // Second delta — only drops, no errors
+        store.insertInterfaceErrors(timestamp: now.addingTimeInterval(30), iface: "en0",
+                                    errorsIn: 0, errorsOut: 0, dropsIn: 5,
+                                    sessionID: sessID)
+        // Row from a different session — must not appear
+        let otherSession = UUID()
+        store.insertInterfaceErrors(timestamp: now.addingTimeInterval(60), iface: "en1",
+                                    errorsIn: 7, errorsOut: 0, dropsIn: 0,
+                                    sessionID: otherSession)
+        store.waitForPendingOps()
+
+        let rows = store.interfaceErrorRows(sessionID: sessID)
+        expectEqual(rows.count, 2, "two interface error rows for sessID")
+        expectEqual(rows[0].iface, "en0", "interface name preserved")
+        expectEqual(rows[0].errorsIn, 3, "errorsIn preserved")
+        expectEqual(rows[0].errorsOut, 1, "errorsOut preserved")
+        expectEqual(rows[0].dropsIn, 2, "dropsIn preserved")
+        expectEqual(rows[1].dropsIn, 5, "second row dropsIn correct")
+        expectEqual(rows[1].errorsIn, 0, "second row errorsIn is zero")
+
+        let otherRows = store.interfaceErrorRows(sessionID: otherSession)
+        expectEqual(otherRows.count, 1, "other session has its own row")
+        expectEqual(otherRows[0].iface, "en1", "other session iface correct")
+        expectEqual(otherRows[0].errorsIn, 7, "other session errorsIn correct")
+    }
 }

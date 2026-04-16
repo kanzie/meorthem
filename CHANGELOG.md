@@ -5,6 +5,18 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.7.0 — 2026-04-16
+
+### New Features
+- **Network interface error monitoring** — The app now samples hardware-level
+  packet error and drop counters for the active network interface roughly every
+  30 seconds. The Network Analysis window surfaces a new finding when repeated
+  interface errors or driver-level drops are detected — a pattern indicating RF
+  interference, hardware faults, or driver buffer overflows that ping-based
+  metrics alone cannot reveal.
+
+---
+
 ## v2.6.0 — 2026-04-16
 
 ### New Features

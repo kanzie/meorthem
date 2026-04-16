@@ -80,6 +80,8 @@ struct SessionAnalysisInput {
     let speedtestRows: [SQLiteStore.SpeedtestRow]
     /// DNS resolution samples (one per ~30 s). Used to detect slow or failing DNS.
     let dnsRows: [SQLiteStore.DnsRow]
+    /// Interface error/drop delta samples (one per ~30 s). Used to detect hardware-level issues.
+    let interfaceErrorRows: [SQLiteStore.InterfaceErrorRow]
 }
 
 // MARK: - Analyzer
@@ -112,6 +114,7 @@ final class NetworkAnalyzer {
         findings += checkTargetDivergence(input, sufficiency: sufficiency)
         findings += checkBufferbloat(input, sufficiency: sufficiency)
         findings += checkDNS(input, sufficiency: sufficiency)
+        findings += checkInterfaceErrors(input, sufficiency: sufficiency)
 
         return findings.filter { $0.confidence >= 0.40 }
     }
@@ -570,6 +573,41 @@ final class NetworkAnalyzer {
         }
 
         return findings
+    }
+
+    // MARK: - Pattern 11: Network interface errors
+    //
+    // Delta counters from `netstat -i` are sampled every ~30 s. Each row stores the
+    // change in cumulative errors_in, errors_out, and drops_in since the prior sample.
+    // On modern WiFi, hardware-level errors reaching the software interface are rare
+    // and indicate RF interference, driver problems, or hardware faults.
+
+    private func checkInterfaceErrors(_ input: SessionAnalysisInput,
+                                       sufficiency: DataSufficiency) -> [NetworkFinding] {
+        // Need at least 3 samples to distinguish a persistent pattern from transient noise
+        guard input.interfaceErrorRows.count >= 3 else { return [] }
+
+        let nonZeroRows = input.interfaceErrorRows.filter {
+            $0.errorsIn + $0.errorsOut + $0.dropsIn > 0
+        }
+        // Require at least 2 separate intervals with errors to avoid flagging one-off glitches
+        guard nonZeroRows.count >= 2 else { return [] }
+
+        let totalErrors = input.interfaceErrorRows.reduce(0) { $0 + $1.errorsIn + $1.errorsOut }
+        let totalDrops  = input.interfaceErrorRows.reduce(0) { $0 + $1.dropsIn }
+        let iface       = input.interfaceErrorRows.first?.iface ?? "unknown"
+
+        let base: Double = nonZeroRows.count >= 5 ? 0.75 : 0.55
+        let confidence   = min(1.0, base * sufficiency.multiplier)
+
+        let detail = String(format: "Interface %@ recorded %d input/output error(s) and %d drop(s) across %d of %d sampling intervals. Hardware-level errors are rare on modern hardware; when persistent, they indicate RF interference, a failing network adapter, or driver buffer overflows — not congestion or a routing issue.",
+                            iface, Int(totalErrors), Int(totalDrops),
+                            nonZeroRows.count, input.interfaceErrorRows.count)
+
+        return [NetworkFinding(category: .connectivity,
+                               title: "Network interface errors detected",
+                               detail: detail,
+                               confidence: confidence)]
     }
 
     // MARK: - Pattern 10: DNS resolution latency / failures

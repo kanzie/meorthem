@@ -32,6 +32,10 @@ final class MonitoringEngine {
     // MARK: - Periodic sampling counter (DNS, interface errors, MTU)
     private var tickCount = 0
 
+    // MARK: - Interface error delta tracking
+    /// Cumulative counters from the most-recent sample — used to compute deltas.
+    private var lastInterfaceCounters: InterfaceMonitor.Counters?
+
     init(settings: AppSettings, metricStore: MetricStore) {
         self.settings = settings
         self.store = metricStore
@@ -176,6 +180,29 @@ final class MonitoringEngine {
                     DNSMonitor.measure()
                 }.value
                 self.store.recordDNS(resolveMs: ms, hostname: DNSMonitor.testHostname)
+            }
+        }
+
+        // Interface error sample — every 6th tick, offset by 3 ticks (~30 s, staggered from DNS).
+        // Reads cumulative netstat counters and stores the delta since the last reading.
+        if tickCount % 6 == 3 {
+            let iface = store.latestWifi?.interfaceName ?? "en0"
+            Task { [weak self] in
+                guard let self else { return }
+                let counters = await Task.detached(priority: .utility) {
+                    InterfaceMonitor.readCounters(for: iface)
+                }.value
+                guard let counters else { return }
+
+                if let prev = self.lastInterfaceCounters {
+                    // Compute deltas, clamping negatives (counter reset / interface restart)
+                    let dErrIn  = max(0, Int64(counters.errorsIn)  - Int64(prev.errorsIn))
+                    let dErrOut = max(0, Int64(counters.errorsOut) - Int64(prev.errorsOut))
+                    let dDropIn = max(0, Int64(counters.dropsIn)   - Int64(prev.dropsIn))
+                    self.store.recordInterfaceDelta(errorsIn: dErrIn, errorsOut: dErrOut,
+                                                   dropsIn: dDropIn, iface: counters.iface)
+                }
+                self.lastInterfaceCounters = counters
             }
         }
     }
