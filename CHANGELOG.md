@@ -5,6 +5,19 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.8.0 — 2026-04-16
+
+### New Features
+- **MTU / path fragmentation detection** — The app now periodically sends a
+  large-packet probe (1472-byte payload, Don't-Fragment bit set) to the primary
+  ping target, roughly every 2.5 minutes. The Network Analysis window surfaces a
+  finding when the majority of these probes fail while normal pings succeed — a
+  classic sign that something on the network path (a VPN tunnel, PPPoE DSL link,
+  or strict firewall) is silently blocking or fragmenting oversized packets,
+  causing slow page loads and stalled connections without any obvious ping loss.
+
+---
+
 ## v2.7.0 — 2026-04-16
 
 ### New Features

@@ -392,4 +392,38 @@ func runSQLiteStoreTests() {
         expectEqual(otherRows[0].iface, "en1", "other session iface correct")
         expectEqual(otherRows[0].errorsIn, 7, "other session errorsIn correct")
     }
+
+    suite("SQLiteStore — MTU checks round-trip") {
+        let store  = SQLiteStore(path: ":memory:")
+        let sessID = UUID()
+        let now    = Date()
+
+        // Successful large-packet probe
+        store.insertMTUCheck(timestamp: now, host: "8.8.8.8",
+                             payloadBytes: 1472, reachable: true, rttMs: 14.3,
+                             sessionID: sessID)
+        // Failed probe (MTU issue)
+        store.insertMTUCheck(timestamp: now.addingTimeInterval(150), host: "8.8.8.8",
+                             payloadBytes: 1472, reachable: false, rttMs: nil,
+                             sessionID: sessID)
+        // Row from a different session — must not appear
+        let otherSession = UUID()
+        store.insertMTUCheck(timestamp: now.addingTimeInterval(300), host: "1.1.1.1",
+                             payloadBytes: 1472, reachable: true, rttMs: 9.1,
+                             sessionID: otherSession)
+        store.waitForPendingOps()
+
+        let rows = store.mtuRows(sessionID: sessID)
+        expectEqual(rows.count, 2, "two MTU rows for sessID")
+        expectEqual(rows[0].host, "8.8.8.8", "host preserved")
+        expectEqual(rows[0].payloadBytes, 1472, "payloadBytes preserved")
+        expect(rows[0].reachable, "first probe reachable")
+        expectEqual(rows[0].rttMs, 14.3, "rttMs preserved")
+        expect(!rows[1].reachable, "second probe not reachable")
+        expectNil(rows[1].rttMs, "failed probe has nil rttMs")
+
+        let otherRows = store.mtuRows(sessionID: otherSession)
+        expectEqual(otherRows.count, 1, "other session has its own row")
+        expectEqual(otherRows[0].host, "1.1.1.1", "other session host correct")
+    }
 }

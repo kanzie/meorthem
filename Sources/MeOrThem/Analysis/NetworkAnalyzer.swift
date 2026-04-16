@@ -82,6 +82,8 @@ struct SessionAnalysisInput {
     let dnsRows: [SQLiteStore.DnsRow]
     /// Interface error/drop delta samples (one per ~30 s). Used to detect hardware-level issues.
     let interfaceErrorRows: [SQLiteStore.InterfaceErrorRow]
+    /// MTU probe results (~every 2.5 min). Used to detect path fragmentation.
+    let mtuRows: [SQLiteStore.MTURow]
 }
 
 // MARK: - Analyzer
@@ -115,6 +117,7 @@ final class NetworkAnalyzer {
         findings += checkBufferbloat(input, sufficiency: sufficiency)
         findings += checkDNS(input, sufficiency: sufficiency)
         findings += checkInterfaceErrors(input, sufficiency: sufficiency)
+        findings += checkMTU(input, sufficiency: sufficiency)
 
         return findings.filter { $0.confidence >= 0.40 }
     }
@@ -702,6 +705,39 @@ final class NetworkAnalyzer {
 
         return [NetworkFinding(category: .bandwidth,
                                title: "Bufferbloat detected",
+                               detail: detail,
+                               confidence: confidence)]
+    }
+
+    // MARK: - Pattern 12: MTU / path fragmentation
+    //
+    // MTUChecker probes with a 1472-byte payload (1500-byte Ethernet frame) with the
+    // Don't-Fragment bit set.  If the probe fails while normal pings succeed, something
+    // on the path is blocking or fragmenting large packets — common with misconfigured
+    // VPNs, PPPoE links without correct MSS clamping, or strict middleboxes.
+
+    private func checkMTU(_ input: SessionAnalysisInput,
+                           sufficiency: DataSufficiency) -> [NetworkFinding] {
+        guard input.mtuRows.count >= 2 else { return [] }
+
+        let failedProbes = input.mtuRows.filter { !$0.reachable }
+        let failRate = Double(failedProbes.count) / Double(input.mtuRows.count)
+        // Only flag if the majority of probes fail (≥ 50%) to avoid spurious single-packet loss
+        guard failRate >= 0.50 else { return [] }
+
+        let host         = input.mtuRows.first?.host ?? "unknown"
+        let payloadBytes = input.mtuRows.first?.payloadBytes ?? MTUChecker.standardPayload
+
+        // Scale confidence by how many probes confirm the pattern
+        let base: Double = input.mtuRows.count >= 5 ? 0.80 : 0.60
+        let confidence   = min(1.0, base * sufficiency.multiplier)
+
+        let detail = String(format: "%d of %d large-packet probes to %@ failed (%.0f%% loss). The probe uses a %d-byte payload with the Don't-Fragment bit set, producing a standard 1500-byte Ethernet frame. This pattern typically indicates that something on the network path — a VPN tunnel, PPPoE DSL link, or strict firewall — is blocking or fragmenting oversized packets. Small pings may still succeed while web pages load slowly or stall (\"PMTUD black hole\"). Correcting MSS clamping or raising the MTU on intervening devices usually resolves this.",
+                            failedProbes.count, input.mtuRows.count, host,
+                            failRate * 100, payloadBytes)
+
+        return [NetworkFinding(category: .connectivity,
+                               title: "Possible MTU / path fragmentation issue",
                                detail: detail,
                                confidence: confidence)]
     }

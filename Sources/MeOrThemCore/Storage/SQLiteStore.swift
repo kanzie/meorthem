@@ -123,6 +123,25 @@ public final class SQLiteStore: @unchecked Sendable {
         }
     }
 
+    public func insertMTUCheck(timestamp: Date,
+                               host: String,
+                               payloadBytes: Int,
+                               reachable: Bool,
+                               rttMs: Double?,
+                               sessionID: UUID? = nil) {
+        let ts      = timestamp.timeIntervalSince1970
+        let sessStr = sessionID?.uuidString
+        queue.async { [weak self] in
+            self?._insertMTUCheck(ts: ts, host: host, payloadBytes: payloadBytes,
+                                  reachable: reachable, rttMs: rttMs, sessionID: sessStr)
+        }
+    }
+
+    /// MTU probe results for a specific session (ascending).
+    public func mtuRows(sessionID: UUID) -> [MTURow] {
+        queue.sync { _mtuRows(sessionID: sessionID.uuidString) }
+    }
+
     public func insertWiFi(timestamp: Date,
                            rssi: Int,
                            noise: Int,
@@ -208,6 +227,7 @@ public final class SQLiteStore: @unchecked Sendable {
             self?._exec("DELETE FROM wifi_samples    WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM dns_samples       WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM interface_errors  WHERE timestamp < \(rawCutoff);")
+            self?._exec("DELETE FROM mtu_checks        WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM ping_aggregates WHERE timestamp_minute < \(aggCutoff);")
             self?._exec("DELETE FROM incidents WHERE ended_at IS NOT NULL AND ended_at < \(incCutoff);")
             self?._exec("PRAGMA wal_checkpoint(PASSIVE);")
@@ -259,6 +279,16 @@ public final class SQLiteStore: @unchecked Sendable {
         public let errorsOut:  Int64
         /// Delta input drops since the previous sample.
         public let dropsIn:    Int64
+    }
+
+    public struct MTURow {
+        public let timestamp:    Date
+        public let host:         String
+        public let payloadBytes: Int
+        /// `true` if the large-packet probe received a reply.
+        public let reachable:    Bool
+        /// Round-trip time in milliseconds if reachable.
+        public let rttMs:        Double?
     }
 
     public struct NetworkSessionRow: Identifiable {
@@ -573,6 +603,16 @@ public final class SQLiteStore: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_dns_session          ON dns_samples(session_id);
             CREATE INDEX IF NOT EXISTS idx_dns_time             ON dns_samples(timestamp);
             CREATE INDEX IF NOT EXISTS idx_iferr_session        ON interface_errors(session_id);
+            CREATE TABLE IF NOT EXISTS mtu_checks (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp    REAL    NOT NULL,
+                host         TEXT    NOT NULL,
+                payload_bytes INTEGER NOT NULL,
+                reachable    INTEGER NOT NULL DEFAULT 0,
+                rtt_ms       REAL,
+                session_id   TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_mtu_session ON mtu_checks(session_id);
             """)
     }
 
@@ -996,6 +1036,47 @@ public final class SQLiteStore: @unchecked Sendable {
                 errorsOut:  sqlite3_column_int64(stmt, 3),
                 dropsIn:    sqlite3_column_int64(stmt, 4)
             ))
+        }
+        return rows
+    }
+
+    private func _insertMTUCheck(ts: Double, host: String, payloadBytes: Int,
+                                  reachable: Bool, rttMs: Double?, sessionID: String?) {
+        let sql = """
+            INSERT INTO mtu_checks (timestamp, host, payload_bytes, reachable, rtt_ms, session_id)
+            VALUES (?, ?, ?, ?, ?, ?);
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, ts)
+        _bindText(stmt, 2, host)
+        sqlite3_bind_int(stmt, 3, Int32(payloadBytes))
+        sqlite3_bind_int(stmt, 4, reachable ? 1 : 0)
+        if let rttMs { sqlite3_bind_double(stmt, 5, rttMs) } else { sqlite3_bind_null(stmt, 5) }
+        if let sid = sessionID { _bindText(stmt, 6, sid) } else { sqlite3_bind_null(stmt, 6) }
+        sqlite3_step(stmt)
+    }
+
+    private func _mtuRows(sessionID: String) -> [MTURow] {
+        let sql = """
+            SELECT timestamp, host, payload_bytes, reachable, rtt_ms
+            FROM mtu_checks
+            WHERE session_id = ?
+            ORDER BY timestamp ASC;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, sessionID)
+        var rows: [MTURow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let ts           = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0))
+            let host         = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            let payloadBytes = Int(sqlite3_column_int(stmt, 2))
+            let reachable    = sqlite3_column_int(stmt, 3) != 0
+            let rttMs: Double? = sqlite3_column_type(stmt, 4) != SQLITE_NULL
+                              ? sqlite3_column_double(stmt, 4) : nil
+            rows.append(MTURow(timestamp: ts, host: host, payloadBytes: payloadBytes,
+                               reachable: reachable, rttMs: rttMs))
         }
         return rows
     }

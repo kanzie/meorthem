@@ -118,6 +118,16 @@ final class MetricStore: ObservableObject {
                                sessionID: currentSessionID)
     }
 
+    /// Persists an MTU probe result for the current session.
+    func recordMTUResult(host: String, payloadBytes: Int, reachable: Bool, rttMs: Double?) {
+        sqliteStore?.insertMTUCheck(timestamp: Date(),
+                                    host: host,
+                                    payloadBytes: payloadBytes,
+                                    reachable: reachable,
+                                    rttMs: rttMs,
+                                    sessionID: currentSessionID)
+    }
+
     func recordGatewayPing(_ result: PingResult?, gatewayIP: String? = nil) {
         if let ip = gatewayIP { latestGatewayIP = ip }
         latestGatewayPing = result

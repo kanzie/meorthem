@@ -205,6 +205,26 @@ final class MonitoringEngine {
                 self.lastInterfaceCounters = counters
             }
         }
+
+        // MTU probe — every 30th tick (~150 s at 5 s poll interval), offset by 15 ticks.
+        // Probes the first external ping target with a 1472-byte payload (Don't-Fragment).
+        // A loss where normal pings succeed indicates MTU-related path fragmentation.
+        if tickCount % 30 == 15 {
+            if let probeHost = settings.pingTargets.first?.host {
+                Task { [weak self] in
+                    guard let self else { return }
+                    let result = await Task.detached(priority: .utility) {
+                        MTUChecker.probe(host: probeHost)
+                    }.value
+                    if let result {
+                        self.store.recordMTUResult(host: probeHost,
+                                                   payloadBytes: result.payloadBytes,
+                                                   reachable: result.reachable,
+                                                   rttMs: result.rttMs)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Gateway ping
