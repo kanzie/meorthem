@@ -5,6 +5,20 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.4.0 — 2026-04-16
+
+### Changes
+- **Jitter analysis uses inter-poll variance** — The jitter finding in
+  Network Analysis now measures how much average latency varies between
+  consecutive poll cycles rather than averaging the per-poll standard
+  deviation of three ICMP packets. This inter-poll metric has far less
+  sampling noise and accurately reflects the latency inconsistency a
+  user experiences. The finding also distinguishes between a congestion
+  pattern (only inter-poll variance is high) and severe instability
+  (both inter-poll and intra-poll variance are elevated).
+
+---
+
 ## v2.3.0 — 2026-04-16
 
 ### New Features

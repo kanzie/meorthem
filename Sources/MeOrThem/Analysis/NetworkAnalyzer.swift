@@ -231,18 +231,39 @@ final class NetworkAnalyzer {
 
     private func checkJitter(_ input: SessionAnalysisInput,
                               sufficiency: DataSufficiency) -> [NetworkFinding] {
-        let jitters = input.pingRows.compactMap(\.jitterMs)
-        guard jitters.count >= 10 else { return [] }
+        // Inter-poll jitter: std dev of the per-poll average RTT sequence.
+        // This captures how consistently the network performs across polls — which
+        // is what the user actually experiences — rather than the intra-poll std dev
+        // of 3 ICMP packets (which has high sampling error with so few samples).
+        let rtts = input.pingRows.compactMap(\.rttMs)
+        guard rtts.count >= 10 else { return [] }
 
-        let avg    = jitters.reduce(0, +) / Double(jitters.count)
+        let rttMean     = rtts.reduce(0, +) / Double(rtts.count)
+        let rttVariance = rtts.map { pow($0 - rttMean, 2) }.reduce(0, +) / Double(rtts.count)
+        let interPollJitter = sqrt(rttVariance)
+
         let thresh = settings.thresholds.jitterYellowMs
+        guard interPollJitter >= thresh else { return [] }
 
-        guard avg >= thresh else { return [] }
+        // Also check average intra-poll jitter (std dev of 3 packets per poll).
+        // When both are high → severe instability; when only inter-poll is high → congestion pattern.
+        let intraPollJitters = input.pingRows.compactMap(\.jitterMs)
+        let avgIntraPoll: Double? = intraPollJitters.count >= 5
+            ? intraPollJitters.reduce(0, +) / Double(intraPollJitters.count)
+            : nil
 
-        let base: Double = avg >= thresh * 2 ? 0.80 : 0.60
+        let base: Double = interPollJitter >= thresh * 2 ? 0.80 : 0.60
         let confidence   = base * sufficiency.multiplier
 
-        let detail = String(format: "Average jitter %.1f ms (threshold %.0f ms). High jitter typically indicates network congestion or an unstable wireless connection.", avg, thresh)
+        let pattern: String
+        if let intra = avgIntraPoll, intra >= thresh {
+            pattern = "Instability is present both within individual polls and across polls, suggesting a severely unstable connection."
+        } else {
+            pattern = "Latency drifts significantly between polls, consistent with intermittent congestion or buffering on the path."
+        }
+
+        let detail = String(format: "Latency varied ±%.1f ms between polls (threshold %.0f ms). %@",
+                            interPollJitter, thresh, pattern)
 
         return [NetworkFinding(category: .jitter,
                                title: "High jitter",
