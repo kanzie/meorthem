@@ -5,6 +5,38 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.1.1 — 2026-04-16
+
+### Bug Fixes
+- **Network Analysis double data load** — Selecting a network session in the
+  analysis window previously fetched all SQLite rows twice. The redundant fetch
+  is eliminated; analysis now loads data in a single background pass.
+
+---
+
+## v2.1.0 — 2026-04-16
+
+### New Features
+- **Network Analysis** — A new analysis window (under Advanced in the menu)
+  reviews historical data for each network session and surfaces findings for
+  elevated latency, packet loss, jitter, weak Wi-Fi signal, and variable
+  download speed. Each finding is rated High, Medium, or Low confidence based
+  on data volume and metric severity.
+- **Network session tracking** — Me Or Them now automatically identifies and
+  records distinct network environments using a fingerprint derived from gateway
+  IP, Wi-Fi band, channel, and subnet — no location permissions required. All
+  ping and Wi-Fi samples are tagged to their session so the analyser can draw
+  accurate per-network conclusions.
+
+### Changes
+- **Advanced submenu** — Graphs (formerly Network History), Network Analysis,
+  Export Reports, and Network Details are now grouped under a new Advanced
+  submenu to keep the main menu concise. Previous Disturbances and Settings
+  sit in the same section beneath it; Help and About have their own section
+  directly above Quit.
+
+---
+
 ## v2.0.3 — 2026-04-13
 
 ### Apology!
