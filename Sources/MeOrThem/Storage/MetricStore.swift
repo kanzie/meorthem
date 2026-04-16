@@ -20,6 +20,9 @@ final class MetricStore: ObservableObject {
     private(set) var latestGatewayPing: PingResult?
     @Published private(set) var latestGatewayIP: String?
 
+    // MARK: - Current network session (set by AppEnvironment on WiFi fingerprint change)
+    var currentSessionID: UUID?
+
     // MARK: - History (read by export + sparklines)
     private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]
     private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)
@@ -71,7 +74,8 @@ final class MetricStore: ObservableObject {
                           jitter:      result.jitter,
                           targetID:    targetID,
                           targetLabel: label,
-                          host:        host)
+                          host:        host,
+                          sessionID:   currentSessionID)
         }
     }
 
@@ -90,8 +94,17 @@ final class MetricStore: ObservableObject {
                                     phyMode:       s.phyMode,
                                     interfaceName: s.interfaceName,
                                     ipAddress:     s.ipAddress,
-                                    routerIP:      s.routerIP)
+                                    routerIP:      s.routerIP,
+                                    sessionID:     currentSessionID)
         }
+    }
+
+    /// Persists a DNS resolution sample for the current session.
+    func recordDNS(resolveMs: Double?, hostname: String) {
+        sqliteStore?.insertDNS(timestamp: Date(),
+                               hostname: hostname,
+                               resolveMs: resolveMs,
+                               sessionID: currentSessionID)
     }
 
     func recordGatewayPing(_ result: PingResult?, gatewayIP: String? = nil) {

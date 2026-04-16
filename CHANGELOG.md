@@ -5,6 +5,18 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.6.0 — 2026-04-16
+
+### New Features
+- **DNS resolution monitoring** — The app now periodically measures how
+  long it takes the system resolver to look up a hostname, sampling roughly
+  every 30 seconds. The Network Analysis window surfaces two new findings:
+  slow DNS resolution (average > 200 ms) and DNS failure rate (> 10% of
+  lookups failing). Slow DNS is a common hidden cause of sluggish browsing
+  and app connections even when ping times to servers are normal.
+
+---
+
 ## v2.5.0 — 2026-04-16
 
 ### New Features

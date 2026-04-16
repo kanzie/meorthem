@@ -217,4 +217,144 @@ func runSQLiteStoreTests() {
         expectEqual(store.hasPingData(forTargetIDs: [], from: recent, to: now), true,
                     "empty list falls back to all-targets")
     }
+
+    suite("SQLiteStore — network sessions: open, touch, and query") {
+        let store  = SQLiteStore(path: ":memory:")
+        let sessID = UUID()
+        let fp     = "192.168.1.1|6|2.4 GHz|192.168.1"
+        let name   = "2.4 GHz • 192.168.1.x"
+        let start  = Date()
+
+        store.openSession(id: sessID, fingerprint: fp, displayName: name, startTime: start)
+        store.waitForPendingOps()
+
+        // latestSession returns the opened session
+        let latest = store.latestSession(for: fp)
+        expectEqual(latest != nil, true, "latestSession returns a row after openSession")
+        expectEqual(latest?.id, sessID, "session ID matches")
+        expectEqual(latest?.displayName, name, "display name preserved")
+        expectEqual(latest?.fingerprint, fp, "fingerprint preserved")
+
+        // Touch updates last_seen
+        let touchTime = start.addingTimeInterval(60)
+        store.touchSession(id: sessID, at: touchTime)
+        store.waitForPendingOps()
+
+        let touched = store.latestSession(for: fp)
+        let diff = abs((touched?.lastSeen ?? start).timeIntervalSince(touchTime))
+        expectEqual(diff < 1.0, true, "touchSession updates last_seen")
+
+        // sessionsInRange returns the session when range overlaps
+        let inRange = store.sessionsInRange(from: start.addingTimeInterval(-10),
+                                             to: start.addingTimeInterval(120))
+        expectEqual(inRange.count, 1, "sessionsInRange returns 1 session in range")
+
+        // sessionsInRange returns nothing when range is before session start
+        let outRange = store.sessionsInRange(from: start.addingTimeInterval(-100),
+                                              to: start.addingTimeInterval(-10))
+        expectEqual(outRange.count, 0, "sessionsInRange returns 0 when out of range")
+    }
+
+    suite("SQLiteStore — session-scoped ping and wifi rows") {
+        let store   = SQLiteStore(path: ":memory:")
+        let sessA   = UUID()
+        let sessB   = UUID()
+        let targetA = UUID()
+        let now     = Date()
+
+        // Insert pings with sessA session_id
+        store.insertPing(timestamp:   now,
+                         rtt:         15.0,
+                         lossPercent: 0,
+                         jitter:      1.0,
+                         targetID:    targetA,
+                         targetLabel: "T",
+                         host:        "1.1.1.1",
+                         sessionID:   sessA)
+        store.insertPing(timestamp:   now.addingTimeInterval(5),
+                         rtt:         18.0,
+                         lossPercent: 0,
+                         jitter:      1.5,
+                         targetID:    targetA,
+                         targetLabel: "T",
+                         host:        "1.1.1.1",
+                         sessionID:   sessA)
+        // Insert one ping with a different session (sessB)
+        store.insertPing(timestamp:   now.addingTimeInterval(10),
+                         rtt:         200.0,
+                         lossPercent: 50,
+                         jitter:      20.0,
+                         targetID:    targetA,
+                         targetLabel: "T",
+                         host:        "1.1.1.1",
+                         sessionID:   sessB)
+        store.waitForPendingOps()
+
+        let rowsA = store.pingRows(for: targetA, sessionID: sessA)
+        let rowsB = store.pingRows(for: targetA, sessionID: sessB)
+        expectEqual(rowsA.count, 2, "2 pings for sessA")
+        expectEqual(rowsB.count, 1, "1 ping for sessB")
+        expectEqual(rowsA[0].rttMs, 15.0, "sessA first RTT")
+        expectEqual(rowsB[0].rttMs, 200.0, "sessB RTT")
+
+        // WiFi session-scoped rows
+        let snap = WiFiSnapshot(timestamp: now, bssid: "aa:bb:cc:dd:ee:ff",
+                                rssi: -60, noise: -95, snr: 35,
+                                channelNumber: 36, channelBandGHz: 5.0, txRateMbps: 800,
+                                interfaceName: "en0", macAddress: "aa:bb:cc:dd:ee:ff",
+                                phyMode: "802.11ax", ipAddress: "192.168.1.5", routerIP: "192.168.1.1")
+        store.insertWiFi(snap, sessionID: sessA)
+        store.waitForPendingOps()
+
+        let wifiA = store.wifiRows(sessionID: sessA)
+        let wifiB = store.wifiRows(sessionID: sessB)
+        expectEqual(wifiA.count, 1, "1 wifi row for sessA")
+        expectEqual(wifiB.count, 0, "0 wifi rows for sessB")
+        expectEqual(wifiA[0].rssi, -60, "wifi RSSI preserved")
+    }
+
+    suite("SQLiteStore — openSession is idempotent (INSERT OR IGNORE)") {
+        let store = SQLiteStore(path: ":memory:")
+        let id    = UUID()
+        let fp    = "10.0.0.1|1|2.4 GHz|10.0.0"
+        let t1    = Date()
+        let t2    = t1.addingTimeInterval(300)
+
+        store.openSession(id: id, fingerprint: fp, displayName: "2.4 GHz • 10.0.0.x", startTime: t1)
+        store.openSession(id: id, fingerprint: fp, displayName: "2.4 GHz • 10.0.0.x", startTime: t2)
+        store.waitForPendingOps()
+
+        let sessions = store.sessionsInRange(from: t1.addingTimeInterval(-1), to: t2.addingTimeInterval(1))
+        expectEqual(sessions.count, 1, "duplicate openSession inserts only one row (INSERT OR IGNORE)")
+        let diff = abs(sessions[0].startedAt.timeIntervalSince(t1))
+        expectEqual(diff < 1.0, true, "startedAt reflects first open, not second")
+    }
+
+    suite("SQLiteStore — DNS samples round-trip") {
+        let store  = SQLiteStore(path: ":memory:")
+        let sessID = UUID()
+        let now    = Date()
+
+        // Successful resolution
+        store.insertDNS(timestamp: now, hostname: "dns.google",
+                        resolveMs: 12.5, sessionID: sessID)
+        // Failed resolution (resolveMs = nil)
+        store.insertDNS(timestamp: now.addingTimeInterval(30), hostname: "dns.google",
+                        resolveMs: nil, sessionID: sessID)
+        // Sample from a different session — must not appear in sessID query
+        let otherSession = UUID()
+        store.insertDNS(timestamp: now.addingTimeInterval(60), hostname: "dns.google",
+                        resolveMs: 8.0, sessionID: otherSession)
+        store.waitForPendingOps()
+
+        let rows = store.dnsRows(sessionID: sessID)
+        expectEqual(rows.count, 2, "two DNS rows for sessID")
+        expectEqual(rows[0].hostname, "dns.google", "hostname preserved")
+        expectEqual(rows[0].resolveMs, 12.5, "resolve time preserved")
+        expectNil(rows[1].resolveMs, "failed resolution stored as nil")
+
+        let otherRows = store.dnsRows(sessionID: otherSession)
+        expectEqual(otherRows.count, 1, "other session has its own row")
+        expectEqual(otherRows[0].resolveMs, 8.0, "other session resolve time correct")
+    }
 }

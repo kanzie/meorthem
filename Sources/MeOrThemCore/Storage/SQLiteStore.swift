@@ -48,6 +48,7 @@ public final class SQLiteStore: @unchecked Sendable {
         queue.sync {
             self._open()
             self._createSchema()
+            self._runMigrations()
         }
     }
 
@@ -70,12 +71,40 @@ public final class SQLiteStore: @unchecked Sendable {
                            jitter: Double?,
                            targetID: UUID,
                            targetLabel: String,
-                           host: String) {
-        let ts    = timestamp.timeIntervalSince1970
-        let idStr = targetID.uuidString
+                           host: String,
+                           sessionID: UUID? = nil) {
+        let ts      = timestamp.timeIntervalSince1970
+        let idStr   = targetID.uuidString
+        let sessStr = sessionID?.uuidString
         queue.async { [weak self] in
             self?._insertPing(ts: ts, targetID: idStr, label: targetLabel,
-                              host: host, rtt: rtt, loss: lossPercent, jitter: jitter)
+                              host: host, rtt: rtt, loss: lossPercent, jitter: jitter,
+                              sessionID: sessStr)
+        }
+    }
+
+    public func insertSpeedtest(timestamp: Date,
+                               downloadMbps: Double,
+                               uploadMbps: Double,
+                               latencyMs: Double,
+                               jitterMs: Double,
+                               isp: String,
+                               serverName: String) {
+        let ts = timestamp.timeIntervalSince1970
+        queue.async { [weak self] in
+            self?._insertSpeedtest(ts: ts, dl: downloadMbps, ul: uploadMbps,
+                                   lat: latencyMs, jit: jitterMs, isp: isp, server: serverName)
+        }
+    }
+
+    public func insertDNS(timestamp: Date,
+                          hostname: String,
+                          resolveMs: Double?,
+                          sessionID: UUID? = nil) {
+        let ts      = timestamp.timeIntervalSince1970
+        let sessStr = sessionID?.uuidString
+        queue.async { [weak self] in
+            self?._insertDNS(ts: ts, hostname: hostname, resolveMs: resolveMs, sessionID: sessStr)
         }
     }
 
@@ -89,13 +118,15 @@ public final class SQLiteStore: @unchecked Sendable {
                            phyMode: String,
                            interfaceName: String,
                            ipAddress: String?,
-                           routerIP: String?) {
-        let ts = timestamp.timeIntervalSince1970
+                           routerIP: String?,
+                           sessionID: UUID? = nil) {
+        let ts      = timestamp.timeIntervalSince1970
+        let sessStr = sessionID?.uuidString
         queue.async { [weak self] in
             self?._insertWiFi(ts: ts, rssi: rssi, noise: noise, snr: snr,
                               channel: channel, bandGHz: bandGHz, txRate: txRateMbps,
                               phyMode: phyMode, iface: interfaceName,
-                              ip: ipAddress, gw: routerIP)
+                              ip: ipAddress, gw: routerIP, sessionID: sessStr)
         }
     }
 
@@ -160,6 +191,7 @@ public final class SQLiteStore: @unchecked Sendable {
             self?._aggregate(before: rawCutoff)
             self?._exec("DELETE FROM ping_samples    WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM wifi_samples    WHERE timestamp < \(rawCutoff);")
+            self?._exec("DELETE FROM dns_samples     WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM ping_aggregates WHERE timestamp_minute < \(aggCutoff);")
             self?._exec("DELETE FROM incidents WHERE ended_at IS NOT NULL AND ended_at < \(incCutoff);")
             self?._exec("PRAGMA wal_checkpoint(PASSIVE);")
@@ -183,6 +215,31 @@ public final class SQLiteStore: @unchecked Sendable {
         public let channelNumber: Int
         public let bandGHz: Double
         public let txRateMbps: Double
+    }
+
+    public struct SpeedtestRow {
+        public let timestamp:    Date
+        public let downloadMbps: Double
+        public let uploadMbps:   Double
+        public let latencyMs:    Double
+        public let jitterMs:     Double
+        public let isp:          String
+        public let serverName:   String
+    }
+
+    public struct DnsRow {
+        public let timestamp: Date
+        public let hostname: String
+        /// Milliseconds to resolve, or `nil` when resolution failed.
+        public let resolveMs: Double?
+    }
+
+    public struct NetworkSessionRow: Identifiable {
+        public let id: UUID
+        public let fingerprint: String
+        public let displayName: String
+        public let startedAt: Date
+        public let lastSeen: Date
     }
 
     public struct IncidentRow: Identifiable {
@@ -214,6 +271,63 @@ public final class SQLiteStore: @unchecked Sendable {
     public func wifiRows(from: Date, to: Date) -> [WiFiRow] {
         queue.sync { _wifiRows(from: from.timeIntervalSince1970,
                                to:   to.timeIntervalSince1970) }
+    }
+
+    /// Speedtest results in the given time range (ascending).
+    public func speedtestRows(from: Date, to: Date) -> [SpeedtestRow] {
+        queue.sync { _speedtestRows(from: from.timeIntervalSince1970,
+                                    to:   to.timeIntervalSince1970) }
+    }
+
+    /// All persisted speedtest results (ascending).
+    public func allSpeedtestRows() -> [SpeedtestRow] {
+        queue.sync { _speedtestRows(from: 0, to: Date.distantFuture.timeIntervalSince1970) }
+    }
+
+    /// Opens (or re-uses) a network session record. Fire-and-forget.
+    public func openSession(id: UUID, fingerprint: String, displayName: String, startTime: Date = .init()) {
+        let idStr = id.uuidString
+        let ts    = startTime.timeIntervalSince1970
+        queue.async { [weak self] in
+            self?._openSession(id: idStr, fingerprint: fingerprint,
+                               displayName: displayName, ts: ts)
+        }
+    }
+
+    /// Updates `last_seen` for the given session. Fire-and-forget.
+    public func touchSession(id: UUID, at time: Date = .init()) {
+        let idStr = id.uuidString
+        let ts    = time.timeIntervalSince1970
+        queue.async { [weak self] in
+            self?._touchSession(id: idStr, ts: ts)
+        }
+    }
+
+    /// Returns the most-recently-started session for the given fingerprint, if any.
+    public func latestSession(for fingerprint: String) -> NetworkSessionRow? {
+        queue.sync { _latestSession(fingerprint: fingerprint) }
+    }
+
+    /// Returns all sessions whose active window overlaps the given range.
+    public func sessionsInRange(from: Date, to: Date) -> [NetworkSessionRow] {
+        queue.sync { _sessionsInRange(from: from.timeIntervalSince1970,
+                                      to:   to.timeIntervalSince1970) }
+    }
+
+    /// Raw ping samples for a specific session (ascending).
+    public func pingRows(for targetID: UUID, sessionID: UUID) -> [PingRow] {
+        queue.sync { _pingRows(targetID: targetID.uuidString,
+                               sessionID: sessionID.uuidString) }
+    }
+
+    /// WiFi samples for a specific session (ascending).
+    public func wifiRows(sessionID: UUID) -> [WiFiRow] {
+        queue.sync { _wifiRows(sessionID: sessionID.uuidString) }
+    }
+
+    /// DNS resolution samples for a specific session (ascending).
+    public func dnsRows(sessionID: UUID) -> [DnsRow] {
+        queue.sync { _dnsRows(sessionID: sessionID.uuidString) }
     }
 
     /// Most-recent incidents, newest first. Queries both open and resolved events.
@@ -281,7 +395,7 @@ public final class SQLiteStore: @unchecked Sendable {
     }
 
     /// Convenience wrapper for tests — extracts primitives from a Core WiFiSnapshot.
-    func insertWiFi(_ snapshot: WiFiSnapshot) {
+    func insertWiFi(_ snapshot: WiFiSnapshot, sessionID: UUID? = nil) {
         insertWiFi(timestamp:      snapshot.timestamp,
                    rssi:           snapshot.rssi,
                    noise:          snapshot.noise,
@@ -292,7 +406,8 @@ public final class SQLiteStore: @unchecked Sendable {
                    phyMode:        snapshot.phyMode,
                    interfaceName:  snapshot.interfaceName,
                    ipAddress:      snapshot.ipAddress,
-                   routerIP:       snapshot.routerIP)
+                   routerIP:       snapshot.routerIP,
+                   sessionID:      sessionID)
     }
 
     /// Convenience wrapper for tests — takes Core MetricStatus instead of raw Int.
@@ -384,20 +499,61 @@ public final class SQLiteStore: @unchecked Sendable {
                 peak_severity_raw INTEGER NOT NULL,
                 cause             TEXT    NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_ping_target_time  ON ping_samples(target_id, timestamp);
-            CREATE INDEX IF NOT EXISTS idx_wifi_time         ON wifi_samples(timestamp);
-            CREATE INDEX IF NOT EXISTS idx_incidents_time    ON incidents(started_at);
+            CREATE TABLE IF NOT EXISTS speedtest_results (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp   REAL    NOT NULL,
+                dl_mbps     REAL    NOT NULL,
+                ul_mbps     REAL    NOT NULL,
+                latency_ms  REAL    NOT NULL,
+                jitter_ms   REAL    NOT NULL,
+                isp         TEXT    NOT NULL DEFAULT '',
+                server_name TEXT    NOT NULL DEFAULT ''
+            );
+            CREATE TABLE IF NOT EXISTS network_sessions (
+                id           TEXT    PRIMARY KEY,
+                fingerprint  TEXT    NOT NULL,
+                display_name TEXT    NOT NULL,
+                started_at   REAL    NOT NULL,
+                last_seen    REAL    NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS dns_samples (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp   REAL    NOT NULL,
+                hostname    TEXT    NOT NULL,
+                resolve_ms  REAL,
+                session_id  TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_ping_target_time     ON ping_samples(target_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_wifi_time            ON wifi_samples(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_incidents_time       ON incidents(started_at);
+            CREATE INDEX IF NOT EXISTS idx_speedtest_time       ON speedtest_results(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_sessions_fingerprint ON network_sessions(fingerprint);
+            CREATE INDEX IF NOT EXISTS idx_sessions_time        ON network_sessions(started_at);
+            CREATE INDEX IF NOT EXISTS idx_dns_session          ON dns_samples(session_id);
+            CREATE INDEX IF NOT EXISTS idx_dns_time             ON dns_samples(timestamp);
             """)
+    }
+
+    // MARK: - Private: migrations
+
+    /// Idempotent ALTER TABLE migrations — SQLite returns an error if the column
+    /// already exists, which `_exec` silently discards.
+    private func _runMigrations() {
+        _exec("ALTER TABLE ping_samples  ADD COLUMN session_id TEXT;")
+        _exec("ALTER TABLE wifi_samples  ADD COLUMN session_id TEXT;")
+        _exec("CREATE INDEX IF NOT EXISTS idx_ping_session  ON ping_samples(session_id);")
+        _exec("CREATE INDEX IF NOT EXISTS idx_wifi_session  ON wifi_samples(session_id);")
     }
 
     // MARK: - Private: insert implementations
 
     private func _insertPing(ts: Double, targetID: String, label: String, host: String,
-                              rtt: Double?, loss: Double, jitter: Double?) {
+                              rtt: Double?, loss: Double, jitter: Double?,
+                              sessionID: String? = nil) {
         let sql = """
             INSERT INTO ping_samples
-                (timestamp, target_id, target_label, host, rtt_ms, loss_pct, jitter_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?);
+                (timestamp, target_id, target_label, host, rtt_ms, loss_pct, jitter_ms, session_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
             """
         guard let stmt = _prepare(sql) else { return }
         defer { sqlite3_finalize(stmt) }
@@ -405,21 +561,23 @@ public final class SQLiteStore: @unchecked Sendable {
         _bindText(stmt, 2, targetID)
         _bindText(stmt, 3, label)
         _bindText(stmt, 4, host)
-        if let v = rtt    { sqlite3_bind_double(stmt, 5, v) } else { sqlite3_bind_null(stmt, 5) }
+        if let v = rtt      { sqlite3_bind_double(stmt, 5, v) } else { sqlite3_bind_null(stmt, 5) }
         sqlite3_bind_double(stmt, 6, loss)
-        if let v = jitter { sqlite3_bind_double(stmt, 7, v) } else { sqlite3_bind_null(stmt, 7) }
+        if let v = jitter   { sqlite3_bind_double(stmt, 7, v) } else { sqlite3_bind_null(stmt, 7) }
+        if let v = sessionID { _bindText(stmt, 8, v) }         else { sqlite3_bind_null(stmt, 8) }
         sqlite3_step(stmt)
     }
 
     private func _insertWiFi(ts: Double, rssi: Int, noise: Int, snr: Int,
                               channel: Int, bandGHz: Double, txRate: Double,
                               phyMode: String, iface: String,
-                              ip: String?, gw: String?) {
+                              ip: String?, gw: String?,
+                              sessionID: String? = nil) {
         let sql = """
             INSERT INTO wifi_samples
                 (timestamp, rssi, noise, snr, channel, band_ghz, tx_rate_mbps,
-                 phy_mode, interface_name, ip_address, router_ip)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                 phy_mode, interface_name, ip_address, router_ip, session_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """
         guard let stmt = _prepare(sql) else { return }
         defer { sqlite3_finalize(stmt) }
@@ -432,8 +590,41 @@ public final class SQLiteStore: @unchecked Sendable {
         sqlite3_bind_double(stmt, 7, txRate)
         _bindText(stmt, 8, phyMode)
         _bindText(stmt, 9, iface)
-        if let v = ip { _bindText(stmt, 10, v) } else { sqlite3_bind_null(stmt, 10) }
-        if let v = gw { _bindText(stmt, 11, v) } else { sqlite3_bind_null(stmt, 11) }
+        if let v = ip        { _bindText(stmt, 10, v) } else { sqlite3_bind_null(stmt, 10) }
+        if let v = gw        { _bindText(stmt, 11, v) } else { sqlite3_bind_null(stmt, 11) }
+        if let v = sessionID { _bindText(stmt, 12, v) } else { sqlite3_bind_null(stmt, 12) }
+        sqlite3_step(stmt)
+    }
+
+    private func _insertSpeedtest(ts: Double, dl: Double, ul: Double,
+                                   lat: Double, jit: Double, isp: String, server: String) {
+        let sql = """
+            INSERT INTO speedtest_results (timestamp, dl_mbps, ul_mbps, latency_ms, jitter_ms, isp, server_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, ts)
+        sqlite3_bind_double(stmt, 2, dl)
+        sqlite3_bind_double(stmt, 3, ul)
+        sqlite3_bind_double(stmt, 4, lat)
+        sqlite3_bind_double(stmt, 5, jit)
+        _bindText(stmt, 6, isp)
+        _bindText(stmt, 7, server)
+        sqlite3_step(stmt)
+    }
+
+    private func _insertDNS(ts: Double, hostname: String, resolveMs: Double?, sessionID: String?) {
+        let sql = """
+            INSERT INTO dns_samples (timestamp, hostname, resolve_ms, session_id)
+            VALUES (?, ?, ?, ?);
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, ts)
+        _bindText(stmt, 2, hostname)
+        if let v = resolveMs  { sqlite3_bind_double(stmt, 3, v) } else { sqlite3_bind_null(stmt, 3) }
+        if let v = sessionID  { _bindText(stmt, 4, v) }           else { sqlite3_bind_null(stmt, 4) }
         sqlite3_step(stmt)
     }
 
@@ -562,6 +753,163 @@ public final class SQLiteStore: @unchecked Sendable {
                 bandGHz:       sqlite3_column_double(stmt, 4),
                 txRateMbps:    sqlite3_column_double(stmt, 5)
             ))
+        }
+        return rows
+    }
+
+    private func _speedtestRows(from: Double, to: Double) -> [SpeedtestRow] {
+        let sql = """
+            SELECT timestamp, dl_mbps, ul_mbps, latency_ms, jitter_ms, isp, server_name
+            FROM speedtest_results
+            WHERE timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, from)
+        sqlite3_bind_double(stmt, 2, to)
+        var rows: [SpeedtestRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let ts     = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0))
+            let dl     = sqlite3_column_double(stmt, 1)
+            let ul     = sqlite3_column_double(stmt, 2)
+            let lat    = sqlite3_column_double(stmt, 3)
+            let jit    = sqlite3_column_double(stmt, 4)
+            let isp    = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""
+            let server = sqlite3_column_text(stmt, 6).map { String(cString: $0) } ?? ""
+            rows.append(SpeedtestRow(timestamp: ts, downloadMbps: dl, uploadMbps: ul,
+                                     latencyMs: lat, jitterMs: jit, isp: isp, serverName: server))
+        }
+        return rows
+    }
+
+    // MARK: - Private: session implementations
+
+    private func _openSession(id: String, fingerprint: String, displayName: String, ts: Double) {
+        let sql = """
+            INSERT OR IGNORE INTO network_sessions
+                (id, fingerprint, display_name, started_at, last_seen)
+            VALUES (?, ?, ?, ?, ?);
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, id)
+        _bindText(stmt, 2, fingerprint)
+        _bindText(stmt, 3, displayName)
+        sqlite3_bind_double(stmt, 4, ts)
+        sqlite3_bind_double(stmt, 5, ts)
+        sqlite3_step(stmt)
+    }
+
+    private func _touchSession(id: String, ts: Double) {
+        let sql = "UPDATE network_sessions SET last_seen = ? WHERE id = ?;"
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, ts)
+        _bindText(stmt, 2, id)
+        sqlite3_step(stmt)
+    }
+
+    private func _latestSession(fingerprint: String) -> NetworkSessionRow? {
+        let sql = """
+            SELECT id, fingerprint, display_name, started_at, last_seen
+            FROM network_sessions
+            WHERE fingerprint = ?
+            ORDER BY started_at DESC
+            LIMIT 1;
+            """
+        guard let stmt = _prepare(sql) else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, fingerprint)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return _sessionRow(stmt)
+    }
+
+    private func _sessionsInRange(from: Double, to: Double) -> [NetworkSessionRow] {
+        // A session overlaps [from, to] if it started before `to` and last_seen >= from.
+        let sql = """
+            SELECT id, fingerprint, display_name, started_at, last_seen
+            FROM network_sessions
+            WHERE started_at <= ? AND last_seen >= ?
+            ORDER BY started_at ASC;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, to)
+        sqlite3_bind_double(stmt, 2, from)
+        var rows: [NetworkSessionRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let r = _sessionRow(stmt) { rows.append(r) }
+        }
+        return rows
+    }
+
+    private func _sessionRow(_ stmt: OpaquePointer) -> NetworkSessionRow? {
+        guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
+              let id    = UUID(uuidString: idStr) else { return nil }
+        let fp   = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+        let name = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+        let startedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
+        let lastSeen  = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
+        return NetworkSessionRow(id: id, fingerprint: fp, displayName: name,
+                                 startedAt: startedAt, lastSeen: lastSeen)
+    }
+
+    private func _pingRows(targetID: String, sessionID: String) -> [PingRow] {
+        let sql = """
+            SELECT timestamp, rtt_ms, loss_pct, jitter_ms
+            FROM ping_samples
+            WHERE target_id = ? AND session_id = ?
+            ORDER BY timestamp ASC;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, targetID)
+        _bindText(stmt, 2, sessionID)
+        return _collectPingRows(stmt, targetID: targetID)
+    }
+
+    private func _wifiRows(sessionID: String) -> [WiFiRow] {
+        let sql = """
+            SELECT timestamp, rssi, snr, channel, band_ghz, tx_rate_mbps
+            FROM wifi_samples
+            WHERE session_id = ?
+            ORDER BY timestamp ASC;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, sessionID)
+        var rows: [WiFiRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            rows.append(WiFiRow(
+                timestamp:     Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0)),
+                rssi:          Int(sqlite3_column_int(stmt, 1)),
+                snr:           Int(sqlite3_column_int(stmt, 2)),
+                channelNumber: Int(sqlite3_column_int(stmt, 3)),
+                bandGHz:       sqlite3_column_double(stmt, 4),
+                txRateMbps:    sqlite3_column_double(stmt, 5)
+            ))
+        }
+        return rows
+    }
+
+    private func _dnsRows(sessionID: String) -> [DnsRow] {
+        let sql = """
+            SELECT timestamp, hostname, resolve_ms
+            FROM dns_samples
+            WHERE session_id = ?
+            ORDER BY timestamp ASC;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, sessionID)
+        var rows: [DnsRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let ts       = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0))
+            let hostname = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            let ms       = sqlite3_column_type(stmt, 2) != SQLITE_NULL
+                         ? sqlite3_column_double(stmt, 2) : nil as Double?
+            rows.append(DnsRow(timestamp: ts, hostname: hostname, resolveMs: ms))
         }
         return rows
     }

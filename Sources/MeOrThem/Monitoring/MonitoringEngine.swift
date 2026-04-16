@@ -29,6 +29,9 @@ final class MonitoringEngine {
     private var isAdaptiveMode = false
     private var adaptiveResetGreenCount = 0
 
+    // MARK: - Periodic sampling counter (DNS, interface errors, MTU)
+    private var tickCount = 0
+
     init(settings: AppSettings, metricStore: MetricStore) {
         self.settings = settings
         self.store = metricStore
@@ -160,6 +163,21 @@ final class MonitoringEngine {
 
         // Adaptive polling — speed up when degraded, restore when healthy
         adaptPollInterval()
+
+        // Increment tick counter for periodic background measurements
+        tickCount += 1
+
+        // DNS resolution sample — every 6th tick (~30 s at 5 s poll interval).
+        // Measures system-resolver latency for dns.google to detect slow or broken DNS.
+        if tickCount % 6 == 0 {
+            Task { [weak self] in
+                guard let self else { return }
+                let ms = await Task.detached(priority: .utility) {
+                    DNSMonitor.measure()
+                }.value
+                self.store.recordDNS(resolveMs: ms, hostname: DNSMonitor.testHostname)
+            }
+        }
     }
 
     // MARK: - Gateway ping

@@ -78,6 +78,8 @@ struct SessionAnalysisInput {
     let gatewayPingRows: [SQLiteStore.PingRow]
     let wifiRows: [SQLiteStore.WiFiRow]
     let speedtestRows: [SQLiteStore.SpeedtestRow]
+    /// DNS resolution samples (one per ~30 s). Used to detect slow or failing DNS.
+    let dnsRows: [SQLiteStore.DnsRow]
 }
 
 // MARK: - Analyzer
@@ -109,6 +111,7 @@ final class NetworkAnalyzer {
         findings += checkWiFiLatencyCorrelation(input, sufficiency: sufficiency)
         findings += checkTargetDivergence(input, sufficiency: sufficiency)
         findings += checkBufferbloat(input, sufficiency: sufficiency)
+        findings += checkDNS(input, sufficiency: sufficiency)
 
         return findings.filter { $0.confidence >= 0.40 }
     }
@@ -564,6 +567,56 @@ final class NetworkAnalyzer {
                                            title: "Outlier target: \(label)",
                                            detail: detail,
                                            confidence: confidence))
+        }
+
+        return findings
+    }
+
+    // MARK: - Pattern 10: DNS resolution latency / failures
+    //
+    // Samples are taken every ~30 s via DNSMonitor.measure(). A resolveMs of nil means
+    // the resolution failed outright. Two independent findings can fire: slow average
+    // resolution time (≥ 200 ms) and elevated failure rate (≥ 10 %).
+
+    private func checkDNS(_ input: SessionAnalysisInput,
+                           sufficiency: DataSufficiency) -> [NetworkFinding] {
+        guard input.dnsRows.count >= 5 else { return [] }
+
+        let total    = input.dnsRows.count
+        let resolved = input.dnsRows.compactMap(\.resolveMs)
+        let failCount = total - resolved.count
+        let failRate  = Double(failCount) / Double(total)
+
+        // Scale sufficiency on DNS sample count (1 sample ≈ 30 s, so 12 ≈ adequate)
+        let dnsSuf = DataSufficiency(sampleCount: total * 12)
+
+        var findings: [NetworkFinding] = []
+
+        // Finding A — high failure rate
+        if failRate >= 0.10 {
+            let base: Double = failRate >= 0.30 ? 0.85 : 0.65
+            let confidence   = min(1.0, base * dnsSuf.multiplier)
+            let detail = String(format: "%.0f%% of DNS lookups failed (%d of %d samples). DNS failures prevent hostname resolution and can cause intermittent connectivity errors even when the network path is otherwise healthy. Check router DNS settings or try switching to a public resolver such as 1.1.1.1 or 8.8.8.8.",
+                                failRate * 100, failCount, total)
+            findings.append(NetworkFinding(category: .connectivity,
+                                           title: "DNS resolution failures",
+                                           detail: detail,
+                                           confidence: confidence))
+        }
+
+        // Finding B — slow average resolution
+        if !resolved.isEmpty {
+            let avg = resolved.reduce(0, +) / Double(resolved.count)
+            if avg >= 200 {
+                let base: Double = avg >= 500 ? 0.80 : 0.60
+                let confidence   = min(1.0, base * dnsSuf.multiplier)
+                let detail = String(format: "DNS resolution averaged %.0f ms (threshold 200 ms). Slow DNS adds hidden latency to every new connection — websites and apps feel sluggish even when server ping times are low. The likely cause is a slow router DNS relay or ISP resolver; switching to 1.1.1.1 or 8.8.8.8 typically resolves it.",
+                                    avg)
+                findings.append(NetworkFinding(category: .connectivity,
+                                               title: "Slow DNS resolution",
+                                               detail: detail,
+                                               confidence: confidence))
+            }
         }
 
         return findings
