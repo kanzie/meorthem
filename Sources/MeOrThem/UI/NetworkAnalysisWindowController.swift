@@ -94,16 +94,19 @@ private struct NetworkAnalysisView: View {
 
         let (newFindings, newSufLabel) = await Task.detached(priority: .userInitiated) {
             () -> ([NetworkFinding], String) in
-            // Collect external target ping rows for this session
+            // External target pings (user-configured targets only)
             var targetPings: [SQLiteStore.PingRow] = []
             for t in targets {
                 targetPings += db.pingRows(for: t.id, sessionID: sid)
             }
-            let wifiRows  = db.wifiRows(sessionID: sid)
-            let speedRows = db.speedtestRows(from: session.startedAt, to: session.lastSeen)
+            // Gateway pings kept separate for fault attribution
+            let gatewayPings = db.pingRows(for: PingTarget.gatewayID, sessionID: sid)
+            let wifiRows     = db.wifiRows(sessionID: sid)
+            let speedRows    = db.speedtestRows(from: session.startedAt, to: session.lastSeen)
 
             let input = SessionAnalysisInput(session: session,
                                              pingRows: targetPings,
+                                             gatewayPingRows: gatewayPings,
                                              wifiRows: wifiRows,
                                              speedtestRows: speedRows)
             let suf = DataSufficiency(sampleCount: targetPings.count)

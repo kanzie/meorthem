@@ -68,7 +68,10 @@ struct NetworkFinding: Identifiable {
 
 struct SessionAnalysisInput {
     let session: SQLiteStore.NetworkSessionRow
-    let pingRows: [SQLiteStore.PingRow]           // all targets combined
+    /// Ping rows for user-configured external targets only (gateway excluded).
+    let pingRows: [SQLiteStore.PingRow]
+    /// Ping rows for the local gateway target — used to distinguish local vs. ISP faults.
+    let gatewayPingRows: [SQLiteStore.PingRow]
     let wifiRows: [SQLiteStore.WiFiRow]
     let speedtestRows: [SQLiteStore.SpeedtestRow]
 }
@@ -114,7 +117,7 @@ final class NetworkAnalyzer {
 
         guard avg >= thresh else { return [] }
 
-        // Check for time-of-day correlation: split into two halves and compare
+        // Check for time-of-day correlation: bucket by hour and flag hours >40% above avg
         let sorted = input.pingRows.sorted { $0.timestamp < $1.timestamp }
         let hourBuckets = Dictionary(grouping: sorted) { row -> Int in
             Calendar.current.component(.hour, from: row.timestamp)
@@ -127,15 +130,37 @@ final class NetworkAnalyzer {
             if hAvg > avg * 1.4 { peakHours.append(hour) }
         }
 
-        let base: Double = avg >= thresh * 2 ? 0.85 : 0.65
-        let confidence   = base * sufficiency.multiplier
+        // Gateway attribution: compare gateway latency to external target latency.
+        // If the gateway is also elevated, the bottleneck is local (router/LAN/WiFi).
+        // If the gateway is clean while external targets are high, it's upstream (ISP).
+        let attribution: String
+        var confidenceBoost = 0.0
+        let gwRtts = input.gatewayPingRows.compactMap(\.rttMs)
+        if gwRtts.count >= 5 {
+            let gwAvg = gwRtts.reduce(0, +) / Double(gwRtts.count)
+            if gwAvg >= thresh {
+                attribution = "Gateway latency is also elevated (avg %.0f ms), suggesting the bottleneck is on the local network or router."
+                confidenceBoost = 0.10
+            } else {
+                attribution = "Gateway responds normally (avg %.0f ms), suggesting the bottleneck is upstream — ISP or routing path."
+                confidenceBoost = 0.10
+            }
+        } else {
+            attribution = ""
+        }
 
-        let detail: String
+        let base: Double = avg >= thresh * 2 ? 0.85 : 0.65
+        let confidence   = min(1.0, (base + confidenceBoost) * sufficiency.multiplier)
+
+        var detail: String
         if !peakHours.isEmpty {
             let hrs = peakHours.sorted().map { String(format: "%02d:00", $0) }.joined(separator: ", ")
             detail = String(format: "Average RTT %.1f ms (threshold %.0f ms). Elevated during: %@.", avg, thresh, hrs)
         } else {
             detail = String(format: "Average RTT %.1f ms sustained above threshold (%.0f ms).", avg, thresh)
+        }
+        if !attribution.isEmpty, let gwAvg = gwRtts.isEmpty ? nil : gwRtts.reduce(0, +) / Double(gwRtts.count) {
+            detail += " " + String(format: attribution, gwAvg)
         }
 
         return [NetworkFinding(category: .latency,
@@ -173,12 +198,28 @@ final class NetworkAnalyzer {
         let avgBurst = burstLengths.isEmpty ? 1.0
             : Double(burstLengths.reduce(0, +)) / Double(burstLengths.count)
 
+        // Gateway attribution: if the gateway also drops packets at a similar rate,
+        // the fault is local. If the gateway is clean, the fault is upstream.
+        let gwLosses = input.gatewayPingRows.map(\.lossPct)
+        var attribution = ""
+        var confidenceBoost = 0.0
+        if gwLosses.count >= 5 {
+            let gwAvgLoss = gwLosses.reduce(0, +) / Double(gwLosses.count)
+            if gwAvgLoss >= thresh {
+                attribution = String(format: " Gateway also drops %.1f%% of packets, pointing to the local network or router as the likely cause.", gwAvgLoss)
+                confidenceBoost = 0.10
+            } else {
+                attribution = " Gateway responds without loss, suggesting the drops occur upstream — ISP or internet routing."
+                confidenceBoost = 0.10
+            }
+        }
+
         let base: Double = avgLoss >= thresh * 2 ? 0.90 : 0.70
-        let confidence   = base * sufficiency.multiplier
+        let confidence   = min(1.0, (base + confidenceBoost) * sufficiency.multiplier)
 
         let style = avgBurst > 3 ? "sustained bursts" : "sporadic drops"
         let detail = String(format: "Average loss %.1f%% (%@). %d loss event(s) detected.",
-                            avgLoss, style, burstCount)
+                            avgLoss, style, burstCount) + attribution
 
         return [NetworkFinding(category: .packetLoss,
                                title: "Packet loss detected",

@@ -5,6 +5,18 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.2.0 — 2026-04-16
+
+### New Features
+- **Gateway fault attribution** — The Network Analysis patterns for elevated
+  latency and packet loss now compare external target metrics against gateway
+  ping metrics. When the gateway is also degraded, the finding attributes the
+  problem to the local network or router. When the gateway responds normally,
+  the finding points upstream to the ISP or routing path. Attributable findings
+  receive a confidence boost.
+
+---
+
 ## v2.1.1 — 2026-04-16
 
 ### Bug Fixes
