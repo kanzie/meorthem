@@ -5,6 +5,30 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.5.0 — 2026-04-16
+
+### New Features
+- **Session fault profile** — Network Analysis now includes a
+  "Connectivity" finding that classifies each minute of session
+  degradation as local (gateway was also affected) or upstream (gateway
+  was clean). Sessions with enough degraded time receive a clear verdict:
+  primarily local network issues, primarily ISP issues, or a mixed picture.
+- **Wi-Fi / latency correlation** — When Wi-Fi RSSI and ping RTT samples
+  are time-aligned across a session, the analyser computes their Pearson
+  correlation. A strong negative correlation (signal drops → latency
+  rises) surfaces as a finding that confirms Wi-Fi is the root cause of
+  latency problems — distinct from ISP or server-side issues.
+- **Outlier target detection** — If one ping target consistently shows
+  more than 2.5× the average latency of the other targets, a finding
+  names that target and explains it likely reflects a routing, geographic,
+  or CDN issue specific to that destination.
+- **Bufferbloat detection** — Speed test latency (measured under full
+  load) is compared against the idle baseline RTT. When load latency is
+  at least 2× the idle average, a finding explains bufferbloat and
+  recommends enabling SQM/FQ-CoDel on the router.
+
+---
+
 ## v2.4.0 — 2026-04-16
 
 ### Changes

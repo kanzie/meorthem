@@ -94,11 +94,15 @@ private struct NetworkAnalysisView: View {
 
         let (newFindings, newSufLabel) = await Task.detached(priority: .userInitiated) {
             () -> ([NetworkFinding], String) in
-            // External target pings (user-configured targets only)
-            var targetPings: [SQLiteStore.PingRow] = []
+            // External target pings — fetched per-target for divergence analysis,
+            // then flattened for single-target patterns.
+            var pingsByTarget: [UUID: [SQLiteStore.PingRow]] = [:]
             for t in targets {
-                targetPings += db.pingRows(for: t.id, sessionID: sid)
+                let rows = db.pingRows(for: t.id, sessionID: sid)
+                if !rows.isEmpty { pingsByTarget[t.id] = rows }
             }
+            let targetPings  = pingsByTarget.values.flatMap { $0 }
+                                   .sorted { $0.timestamp < $1.timestamp }
             // Gateway pings kept separate for fault attribution
             let gatewayPings = db.pingRows(for: PingTarget.gatewayID, sessionID: sid)
             let wifiRows     = db.wifiRows(sessionID: sid)
@@ -106,6 +110,7 @@ private struct NetworkAnalysisView: View {
 
             let input = SessionAnalysisInput(session: session,
                                              pingRows: targetPings,
+                                             pingRowsByTarget: pingsByTarget,
                                              gatewayPingRows: gatewayPings,
                                              wifiRows: wifiRows,
                                              speedtestRows: speedRows)
@@ -285,11 +290,12 @@ private struct FindingCard: View {
 
     private var categoryIcon: String {
         switch finding.category {
-        case .latency:    return "clock"
-        case .packetLoss: return "xmark.circle"
-        case .jitter:     return "waveform.path"
-        case .wifi:       return "wifi.exclamationmark"
-        case .bandwidth:  return "arrow.down.arrow.up"
+        case .latency:      return "clock"
+        case .packetLoss:   return "xmark.circle"
+        case .jitter:       return "waveform.path"
+        case .wifi:         return "wifi.exclamationmark"
+        case .bandwidth:    return "arrow.down.arrow.up"
+        case .connectivity: return "network"
         }
     }
 

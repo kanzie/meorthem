@@ -41,11 +41,12 @@ enum DataSufficiency {
 
 struct NetworkFinding: Identifiable {
     enum Category: String {
-        case latency    = "Latency"
-        case packetLoss = "Packet Loss"
-        case jitter     = "Jitter"
-        case wifi       = "Wi-Fi Signal"
-        case bandwidth  = "Bandwidth"
+        case latency      = "Latency"
+        case packetLoss   = "Packet Loss"
+        case jitter       = "Jitter"
+        case wifi         = "Wi-Fi Signal"
+        case bandwidth    = "Bandwidth"
+        case connectivity = "Connectivity"
     }
 
     let id = UUID()
@@ -69,7 +70,10 @@ struct NetworkFinding: Identifiable {
 struct SessionAnalysisInput {
     let session: SQLiteStore.NetworkSessionRow
     /// Ping rows for user-configured external targets only (gateway excluded).
+    /// Flat list used by single-target patterns (latency, loss, jitter).
     let pingRows: [SQLiteStore.PingRow]
+    /// Same rows as `pingRows` but keyed by target UUID, used by divergence analysis.
+    let pingRowsByTarget: [UUID: [SQLiteStore.PingRow]]
     /// Ping rows for the local gateway target — used to distinguish local vs. ISP faults.
     let gatewayPingRows: [SQLiteStore.PingRow]
     let wifiRows: [SQLiteStore.WiFiRow]
@@ -87,7 +91,7 @@ final class NetworkAnalyzer {
         self.settings = settings
     }
 
-    /// Runs all five pattern checks on the given session data and returns findings.
+    /// Runs all pattern checks on the given session data and returns findings.
     /// Only medium- and high-confidence findings (confidence ≥ 0.40) are returned.
     func analyze(_ input: SessionAnalysisInput) -> [NetworkFinding] {
         let pingCount = input.pingRows.count
@@ -101,6 +105,10 @@ final class NetworkAnalyzer {
         findings += checkJitter(input, sufficiency: sufficiency)
         findings += checkWiFiSignal(input, sufficiency: sufficiency)
         findings += checkBandwidth(input, sufficiency: sufficiency)
+        findings += checkSessionFaultProfile(input, sufficiency: sufficiency)
+        findings += checkWiFiLatencyCorrelation(input, sufficiency: sufficiency)
+        findings += checkTargetDivergence(input, sufficiency: sufficiency)
+        findings += checkBufferbloat(input, sufficiency: sufficiency)
 
         return findings.filter { $0.confidence >= 0.40 }
     }
@@ -360,6 +368,249 @@ final class NetworkAnalyzer {
 
         return [NetworkFinding(category: .bandwidth,
                                title: "Variable download speed",
+                               detail: detail,
+                               confidence: confidence)]
+    }
+
+    // MARK: - Pattern 6: Session fault profile (local vs ISP attribution)
+    //
+    // Bins all ping rows into per-minute slots and classifies each degraded minute
+    // as local (gateway also degraded), upstream (gateway clean), or both.
+    // Emits a connectivity finding that summarises where problems occurred during
+    // the session — even when individual metric thresholds were not crossed.
+
+    private func checkSessionFaultProfile(_ input: SessionAnalysisInput,
+                                          sufficiency: DataSufficiency) -> [NetworkFinding] {
+        guard input.gatewayPingRows.count >= 10,
+              input.pingRows.count >= 10 else { return [] }
+
+        let lossThresh = settings.thresholds.lossYellowPct
+        let latThresh  = settings.thresholds.latencyYellowMs
+
+        // Build per-minute sets: which minutes had degraded external targets / gateway
+        func degradedMinutes(rows: [SQLiteStore.PingRow]) -> Set<Int> {
+            var mins = Set<Int>()
+            // Group rows by minute bucket
+            let byMinute = Dictionary(grouping: rows) { row in
+                Int(row.timestamp.timeIntervalSince1970 / 60)
+            }
+            for (minute, bucket) in byMinute {
+                let losses = bucket.map(\.lossPct)
+                let rtts   = bucket.compactMap(\.rttMs)
+                let avgLoss = losses.reduce(0, +) / Double(losses.count)
+                let avgRTT  = rtts.isEmpty ? 0.0 : rtts.reduce(0, +) / Double(rtts.count)
+                if avgLoss >= lossThresh || avgRTT >= latThresh { mins.insert(minute) }
+            }
+            return mins
+        }
+
+        let externalDegraded = degradedMinutes(rows: input.pingRows)
+        let gatewayDegraded  = degradedMinutes(rows: input.gatewayPingRows)
+
+        // Only minutes where external targets were degraded matter for diagnosis
+        guard externalDegraded.count >= 5 else { return [] }
+
+        let localFaultMins    = externalDegraded.intersection(gatewayDegraded).count
+        let upstreamFaultMins = externalDegraded.subtracting(gatewayDegraded).count
+        let totalDegraded     = externalDegraded.count
+
+        let localFraction    = Double(localFaultMins)    / Double(totalDegraded)
+        let upstreamFraction = Double(upstreamFaultMins) / Double(totalDegraded)
+
+        let title: String
+        let detail: String
+        let base: Double
+
+        switch (localFraction, upstreamFraction) {
+        case let (l, _) where l >= 0.65:
+            title  = "Primarily local network issues"
+            detail = String(format: "In %.0f%% of degraded periods (%d of %d minutes), the gateway was also affected, indicating the local network or router as the likely bottleneck. Check router performance, cable connections, or WiFi interference.",
+                            localFraction * 100, localFaultMins, totalDegraded)
+            base   = localFraction >= 0.85 ? 0.85 : 0.70
+
+        case let (_, u) where u >= 0.65:
+            title  = "Primarily upstream / ISP issues"
+            detail = String(format: "In %.0f%% of degraded periods (%d of %d minutes), the gateway responded normally while external targets degraded, pointing to the ISP or internet routing as the likely cause.",
+                            upstreamFraction * 100, upstreamFaultMins, totalDegraded)
+            base   = upstreamFraction >= 0.85 ? 0.85 : 0.70
+
+        default:
+            title  = "Mixed local and upstream issues"
+            detail = String(format: "Degradation was split: %.0f%% local (%d min) and %.0f%% upstream (%d min). The connection may have experienced both router/LAN problems and ISP-side issues during this session.",
+                            localFraction * 100, localFaultMins,
+                            upstreamFraction * 100, upstreamFaultMins)
+            base   = 0.60
+        }
+
+        let confidence = min(1.0, base * sufficiency.multiplier)
+        return [NetworkFinding(category: .connectivity, title: title, detail: detail, confidence: confidence)]
+    }
+
+    // MARK: - Pattern 7: WiFi–latency correlation
+    //
+    // Time-aligns WiFi RSSI samples with external ping RTTs and computes the
+    // Pearson correlation coefficient. A strong negative correlation (as signal
+    // drops, latency rises) is evidence that WiFi is the root cause of latency
+    // degradation — even if average signal looks borderline acceptable.
+
+    private func checkWiFiLatencyCorrelation(_ input: SessionAnalysisInput,
+                                              sufficiency: DataSufficiency) -> [NetworkFinding] {
+        guard input.wifiRows.count >= 20,
+              input.pingRows.count >= 20 else { return [] }
+
+        // Build paired (RSSI, RTT) observations by matching each ping row to the
+        // nearest WiFi sample within ±15 seconds.
+        var pairs: [(rssi: Double, rtt: Double)] = []
+        for pingRow in input.pingRows {
+            guard let rtt = pingRow.rttMs else { continue }
+            let t = pingRow.timestamp.timeIntervalSince1970
+            // Binary-search-friendly: wifi rows are ascending by timestamp
+            let nearest = input.wifiRows.min(by: {
+                abs($0.timestamp.timeIntervalSince1970 - t) <
+                abs($1.timestamp.timeIntervalSince1970 - t)
+            })
+            guard let wifi = nearest,
+                  abs(wifi.timestamp.timeIntervalSince1970 - t) <= 15 else { continue }
+            pairs.append((Double(wifi.rssi), rtt))
+        }
+        guard pairs.count >= 20 else { return [] }
+
+        // Pearson r
+        let n      = Double(pairs.count)
+        let rssis  = pairs.map(\.rssi)
+        let rtts   = pairs.map(\.rtt)
+        let rssiM  = rssis.reduce(0, +) / n
+        let rttM   = rtts.reduce(0, +) / n
+        let num    = zip(rssis, rtts).map { ($0 - rssiM) * ($1 - rttM) }.reduce(0, +)
+        let denR   = sqrt(rssis.map { pow($0 - rssiM, 2) }.reduce(0, +))
+        let denL   = sqrt(rtts.map   { pow($0 - rttM,  2) }.reduce(0, +))
+        guard denR > 0, denL > 0 else { return [] }
+        let r = num / (denR * denL)
+
+        // Only surface strong negative correlations (RSSI drops → RTT rises)
+        guard r < -0.45 else { return [] }
+
+        let strength: String
+        let base: Double
+        switch r {
+        case ..<(-0.75): strength = "strong"; base = 0.85
+        case ..<(-0.60): strength = "moderate"; base = 0.70
+        default:         strength = "mild"; base = 0.55
+        }
+
+        let wifiSufficiency = DataSufficiency(sampleCount: pairs.count)
+        let confidence = min(1.0, base * wifiSufficiency.multiplier)
+
+        let detail = String(format: "There is a %@ negative correlation (r = %.2f) between Wi-Fi signal strength and latency for this session. As signal dropped, round-trip times rose correspondingly — consistent with Wi-Fi being the primary cause of latency degradation rather than ISP or server-side issues.",
+                            strength, r)
+
+        return [NetworkFinding(category: .wifi,
+                               title: "Wi-Fi signal correlates with latency",
+                               detail: detail,
+                               confidence: confidence)]
+    }
+
+    // MARK: - Pattern 8: Per-target divergence
+    //
+    // Compares per-target average RTT and loss against the session-wide average.
+    // When one target consistently shows significantly worse metrics than the
+    // others, the problem is likely specific to that destination (CDN, routing
+    // path, geographic distance) rather than the local connection or ISP.
+
+    private func checkTargetDivergence(_ input: SessionAnalysisInput,
+                                        sufficiency: DataSufficiency) -> [NetworkFinding] {
+        guard input.pingRowsByTarget.count >= 2 else { return [] }
+
+        // Compute per-target average RTT and loss
+        struct TargetStats {
+            let id: UUID; let avgRTT: Double?; let avgLoss: Double; let count: Int
+        }
+        var stats: [TargetStats] = []
+        for (id, rows) in input.pingRowsByTarget {
+            guard rows.count >= 10 else { continue }
+            let rtts = rows.compactMap(\.rttMs)
+            let avgRTT  = rtts.isEmpty ? nil : rtts.reduce(0, +) / Double(rtts.count)
+            let avgLoss = rows.map(\.lossPct).reduce(0, +) / Double(rows.count)
+            stats.append(TargetStats(id: id, avgRTT: avgRTT, avgLoss: avgLoss, count: rows.count))
+        }
+        guard stats.count >= 2 else { return [] }
+
+        // Overall average RTT across all valid targets
+        let allRTTs    = stats.compactMap(\.avgRTT)
+        guard !allRTTs.isEmpty else { return [] }
+        let overallAvg = allRTTs.reduce(0, +) / Double(allRTTs.count)
+        guard overallAvg > 0 else { return [] }
+
+        var findings: [NetworkFinding] = []
+
+        for s in stats {
+            guard let tAvg = s.avgRTT else { continue }
+            let ratio = tAvg / overallAvg
+
+            // Flag if this target is more than 2.5x the overall average
+            guard ratio > 2.5 else { continue }
+
+            let label = settings.pingTargets.first(where: { $0.id == s.id })?.label
+                     ?? s.id.uuidString.prefix(8).description
+
+            let base: Double = ratio > 4.0 ? 0.80 : 0.65
+            let targetSufficiency = DataSufficiency(sampleCount: s.count)
+            let confidence = min(1.0, base * targetSufficiency.multiplier)
+
+            let detail = String(format: "\"%@\" averaged %.0f ms RTT — %.1f× higher than the %.0f ms average across other targets. This pattern suggests a routing, geographic, or CDN issue specific to that destination rather than a problem with the local network or ISP.",
+                                label, tAvg, ratio, overallAvg)
+
+            findings.append(NetworkFinding(category: .latency,
+                                           title: "Outlier target: \(label)",
+                                           detail: detail,
+                                           confidence: confidence))
+        }
+
+        return findings
+    }
+
+    // MARK: - Pattern 9: Bufferbloat detection
+    //
+    // Compares idle baseline RTT (from ping samples) against the under-load
+    // latency recorded by the speed test. A large ratio indicates bufferbloat —
+    // oversized router or modem buffers that inflate latency under throughput load.
+
+    private func checkBufferbloat(_ input: SessionAnalysisInput,
+                                   sufficiency: DataSufficiency) -> [NetworkFinding] {
+        guard !input.speedtestRows.isEmpty else { return [] }
+
+        let rtts = input.pingRows.compactMap(\.rttMs)
+        guard rtts.count >= 10 else { return [] }
+
+        let baselineRTT  = rtts.reduce(0, +) / Double(rtts.count)
+        // Skip: if idle latency is already bad, bufferbloat isn't the primary diagnosis
+        guard baselineRTT < settings.thresholds.latencyYellowMs else { return [] }
+        guard baselineRTT > 0 else { return [] }
+
+        let underLoadRTTs = input.speedtestRows.map(\.latencyMs)
+        let underLoadAvg  = underLoadRTTs.reduce(0, +) / Double(underLoadRTTs.count)
+
+        let ratio = underLoadAvg / baselineRTT
+        // Only flag when latency at least doubles under load
+        guard ratio >= 2.0 else { return [] }
+
+        let severity: String
+        let base: Double
+        switch ratio {
+        case 4.0...: severity = "severe"; base = 0.85
+        case 3.0...: severity = "significant"; base = 0.75
+        default:     severity = "moderate"; base = 0.60
+        }
+
+        // Speedtest sufficiency: scale count so 5 tests ≈ adequate
+        let speedSufficiency = DataSufficiency(sampleCount: input.speedtestRows.count * 24)
+        let confidence = min(1.0, base * speedSufficiency.multiplier)
+
+        let detail = String(format: "Idle latency averaged %.0f ms, but during speed tests it rose to %.0f ms (%.1f× higher). This %@ increase under load is a classic sign of bufferbloat — large buffers in a router or modem queue packets and inflate latency when the connection is saturated. Enabling SQM/FQ-CoDel on your router, if supported, typically resolves this.",
+                            baselineRTT, underLoadAvg, ratio, severity)
+
+        return [NetworkFinding(category: .bandwidth,
+                               title: "Bufferbloat detected",
                                detail: detail,
                                confidence: confidence)]
     }
