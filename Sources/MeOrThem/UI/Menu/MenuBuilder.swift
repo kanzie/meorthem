@@ -326,7 +326,7 @@ enum MenuBuilder {
     // MARK: - DNS summary item (tag 6)
 
     /// Builds a single-line DNS health item.
-    /// Format: "DNS  ● 14ms  Cloudflare  (5/5)"
+    /// Format: "DNS  ● 8ms"
     /// Hidden when monitoring is paused or no DNS data is available yet.
     @MainActor
     private static func dnsSummaryItem(store: MetricStore, paused: Bool) -> NSMenuItem {
@@ -342,11 +342,8 @@ enum MenuBuilder {
         case .red:    dot = "●"; dotColor = .systemRed
         }
 
-        // Build attributed string with colored dot followed by plain text
         let rttStr = summary.bestRTTMs > 0
             ? String(format: "%.0fms", summary.bestRTTMs) : "—"
-        let countStr = "(\(summary.respondingCount)/\(summary.totalCount))"
-        let plainText = "DNS  \(dot) \(rttStr)  \(summary.bestResolverName)  \(countStr)"
 
         let attrs = NSMutableAttributedString(
             string: "DNS  ",
@@ -355,11 +352,10 @@ enum MenuBuilder {
             string: "\(dot) ",
             attributes: [.foregroundColor: dotColor, .font: _menuFont])
         let restPart = NSAttributedString(
-            string: "\(rttStr)  \(summary.bestResolverName)  \(countStr)",
-            attributes: [.foregroundColor: NSColor.labelColor, .font: _menuFont])
+            string: rttStr,
+            attributes: [.foregroundColor: NSColor.secondaryLabelColor, .font: _menuFont])
         attrs.append(dotPart)
         attrs.append(restPart)
-        _ = plainText  // suppress unused-variable warning
 
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
         item.attributedTitle = attrs

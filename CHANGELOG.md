@@ -5,6 +5,16 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.21.1 — 2026-04-17
+
+### Bug Fixes
+- **Cleaner DNS menu entry** — The DNS row in the dropdown now shows only the
+  status dot and response time (e.g. "DNS ● 8ms"). The resolver name and
+  responding-resolver count badge have been removed; they were confusing in
+  context and added no actionable signal in the menu.
+
+---
+
 ## v2.21.0 — 2026-04-17
 
 ### New Features
