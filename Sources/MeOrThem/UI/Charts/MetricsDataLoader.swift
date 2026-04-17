@@ -59,6 +59,8 @@ final class MetricsDataLoader: ObservableObject {
     @Published private(set) var lossPoints:      [ChartPoint] = []
     @Published private(set) var jitterPoints:    [ChartPoint] = []
     @Published private(set) var wifiRSSI:        [ChartPoint] = []
+    /// Per-resolver RTT points. `targetLabel` = resolver name for color-coding.
+    @Published private(set) var dnsPoints:       [ChartPoint] = []
     @Published private(set) var incidents:       [SQLiteStore.IncidentRow] = []
     @Published private(set) var isLoading        = false
     @Published private(set) var rangeStart       = Date()
@@ -149,6 +151,26 @@ final class MetricsDataLoader: ObservableObject {
                 $0.startedAt >= from && $0.startedAt <= now
             }
 
+            // DNS resolver samples — raw 7-day table only; no aggregates.
+            // Cap at 7 days regardless of selected window.
+            let dnsFrom    = max(from, now.addingTimeInterval(-7 * 86_400))
+            let dnsRawRows = db.dnsResolverRows(from: dnsFrom, to: now)
+            let dnsPoints: [ChartPoint] = dnsRawRows.compactMap { row in
+                guard let ms = row.resolveMs else { return nil }
+                return ChartPoint(timestamp: row.timestamp, value: ms,
+                                  targetLabel: row.resolverName)
+            }
+            // Downsample per resolver to keep chart responsive
+            let dnsDownsampled: [ChartPoint]
+            if dnsPoints.count > maxPts {
+                let stride = Double(dnsPoints.count) / Double(maxPts)
+                dnsDownsampled = (0..<maxPts).map { i in
+                    dnsPoints[min(Int((Double(i) * stride).rounded()), dnsPoints.count - 1)]
+                }
+            } else {
+                dnsDownsampled = dnsPoints
+            }
+
             guard !Task.isCancelled else { return }
 
             // Capture computed values as let bindings for safe transfer across isolation
@@ -156,6 +178,7 @@ final class MetricsDataLoader: ObservableObject {
             let finalLoss      = loss
             let finalJitter    = jitter
             let finalWifi      = wifiPoints
+            let finalDNS       = dnsDownsampled
             let finalIncidents = recentIncidents
 
             await MainActor.run { [weak self] in
@@ -166,6 +189,7 @@ final class MetricsDataLoader: ObservableObject {
                 self.lossPoints    = finalLoss
                 self.jitterPoints  = finalJitter
                 self.wifiRSSI      = finalWifi
+                self.dnsPoints     = finalDNS
                 self.incidents     = finalIncidents
                 self.isLoading     = false
             }

@@ -120,6 +120,7 @@ struct MetricsChartsView: View {
                         lossCard
                         jitterCard
                         if !loader.wifiRSSI.isEmpty { wifiCard }
+                        if !loader.dnsPoints.isEmpty { dnsCard }
                         if !loader.incidents.isEmpty { incidentList }
                     }
                     .padding(20)
@@ -624,6 +625,77 @@ struct MetricsChartsView: View {
                                      points: loader.wifiRSSI, unit: "dBm")
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: - DNS card
+
+    /// Fixed resolver color palette — keyed by name fragment so colors are stable
+    /// as resolvers are enabled/disabled.
+    private func dnsColor(for resolverName: String) -> Color {
+        let name = resolverName.lowercased()
+        if name.contains("cloudflare") { return .orange }
+        if name.contains("google")     { return .blue }
+        if name.contains("quad9")      { return .purple }
+        if name.contains("opendns")    { return .teal }
+        if name.contains("adguard")    { return .pink }
+        if name.contains("system")     { return Color(nsColor: .secondaryLabelColor) }
+        if name.contains("gateway") || name.contains("router") { return .green }
+        // Custom resolvers: assign from palette by name hash
+        let colors: [Color] = [.indigo, .mint, .yellow, .red, .brown]
+        let idx = abs(resolverName.hashValue) % colors.count
+        return colors[idx]
+    }
+
+    private var dnsResolverNames: [String] {
+        Array(Set(loader.dnsPoints.map(\.targetLabel))).sorted()
+    }
+
+    private var dnsCard: some View {
+        ChartCard(title: "DNS Latency",
+                  subtitle: "Round-trip time per resolver (ms) — failures shown as gaps") {
+            VStack(alignment: .leading, spacing: 6) {
+                Chart {
+                    ForEach(loader.dnsPoints) { p in
+                        LineMark(x: .value("Time", p.timestamp),
+                                 y: .value("ms", p.value))
+                            .foregroundStyle(by: .value("Resolver", p.targetLabel))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5))
+                            .symbolSize(30)
+                    }
+                }
+                .chartForegroundStyleScale(
+                    domain: dnsResolverNames,
+                    range:  dnsResolverNames.map { dnsColor(for: $0) }
+                )
+                .chartLegend(position: .topLeading, alignment: .leading, spacing: 6) {
+                    HStack(spacing: 10) {
+                        ForEach(dnsResolverNames, id: \.self) { name in
+                            HStack(spacing: 4) {
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(dnsColor(for: name))
+                                    .frame(width: 12, height: 3)
+                                Text(name)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 6)) { _ in
+                        AxisValueLabel().font(.caption).foregroundStyle(.secondary)
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { _ in
+                        AxisValueLabel().font(.caption).foregroundStyle(.secondary)
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
+                    }
+                }
+                .frame(height: 180)
             }
         }
     }
