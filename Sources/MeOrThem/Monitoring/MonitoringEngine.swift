@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import MeOrThemCore
 
 @MainActor
 final class MonitoringEngine {
@@ -171,15 +172,73 @@ final class MonitoringEngine {
         // Increment tick counter for periodic background measurements
         tickCount += 1
 
-        // DNS resolution sample — every 6th tick (~30 s at 5 s poll interval).
-        // Measures system-resolver latency for dns.google to detect slow or broken DNS.
+        // Multi-resolver DNS probe — every 6th tick (~30 s at 5 s poll interval).
+        // Raw UDP queries bypass mDNSResponder cache; probes run concurrently via TaskGroup.
         if tickCount % 6 == 0 {
-            Task { [weak self] in
-                guard let self else { return }
-                let ms = await Task.detached(priority: .utility) {
-                    DNSMonitor.measure()
-                }.value
-                self.store.recordDNS(resolveMs: ms, hostname: DNSMonitor.testHostname)
+            let activeResolvers = settings.dnsResolvers.filter { $0.isEnabled && $0.autoDisabledAt == nil }
+            if !activeResolvers.isEmpty {
+                // Capture dynamic IPs before leaving the MainActor.
+                let gatewayIP = lastGatewayIP
+                Task { [weak self] in
+                    guard let self else { return }
+                    let results = await Task.detached(priority: .utility) {
+                        await withTaskGroup(of: (DNSResolver, Double?, Int?).self) { group in
+                            for resolver in activeResolvers {
+                                let ip: String?
+                                if resolver.isGateway      { ip = gatewayIP }
+                                else if resolver.isSystem  { ip = DNSProber.systemResolverIP() }
+                                else                       { ip = resolver.ip.isEmpty ? nil : resolver.ip }
+                                guard let resolvedIP = ip else { continue }
+                                group.addTask {
+                                    let (ms, rcode) = DNSProber.probe(resolverIP: resolvedIP)
+                                    return (resolver, ms, rcode)
+                                }
+                            }
+                            var out: [(DNSResolver, Double?, Int?)] = []
+                            for await r in group { out.append(r) }
+                            return out
+                        }
+                    }.value
+
+                    let anySucceeded = results.contains { $0.1 != nil }
+                    for (resolver, ms, rcode) in results {
+                        self.store.recordDNSResolverSample(resolver: resolver, resolveMs: ms, rcode: rcode)
+                        await MainActor.run {
+                            self.settings.updateDNSResolverFailureCount(
+                                id: resolver.id,
+                                succeeded: ms != nil,
+                                otherResolversOK: anySucceeded && ms == nil ? true : anySucceeded)
+                        }
+                    }
+                    // Refresh the summary once all results are recorded.
+                    let enabledSummary = activeResolvers.map { (name: $0.name, ip: $0.isGateway ? (gatewayIP ?? "") : ($0.isSystem ? (DNSProber.systemResolverIP() ?? "") : $0.ip)) }
+                    self.store.refreshDNSSummary(enabledResolvers: enabledSummary)
+                }
+            }
+        }
+
+        // Re-probe auto-disabled resolvers — every 60th tick (~5 min), offset by 30.
+        // Only one probe per disabled resolver; re-enables on success.
+        if tickCount % 60 == 30 {
+            let disabledResolvers = settings.dnsResolvers.filter { $0.isEnabled && $0.autoDisabledAt != nil }
+            if !disabledResolvers.isEmpty {
+                let gatewayIP = lastGatewayIP
+                Task { [weak self] in
+                    guard let self else { return }
+                    for resolver in disabledResolvers {
+                        let ip: String?
+                        if resolver.isGateway      { ip = gatewayIP }
+                        else if resolver.isSystem  { ip = DNSProber.systemResolverIP() }
+                        else                       { ip = resolver.ip.isEmpty ? nil : resolver.ip }
+                        guard let resolvedIP = ip else { continue }
+                        let (ms, _) = await Task.detached(priority: .utility) {
+                            DNSProber.probe(resolverIP: resolvedIP)
+                        }.value
+                        if ms != nil {
+                            await MainActor.run { self.settings.reEnableDNSResolver(id: resolver.id) }
+                        }
+                    }
+                }
             }
         }
 

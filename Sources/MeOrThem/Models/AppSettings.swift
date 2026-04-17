@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import MeOrThemCore
 
 enum ColorTheme: String, Codable, CaseIterable {
     case system = "System"
@@ -96,6 +97,13 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(bandwidthBarYellowMbps, forKey: "bandwidthBarYellowMbps") }
     }
 
+    // MARK: - DNS Resolvers
+    /// The configured multi-resolver list. On first launch after upgrade (no saved key),
+    /// defaults to the pre-populated list with the default five enabled.
+    @Published var dnsResolvers: [DNSResolver] {
+        didSet { encode(dnsResolvers, forKey: "dnsResolvers") }
+    }
+
     // MARK: - Notifications
     @Published var enableNotificationBanner: Bool {
         didSet { UserDefaults.standard.set(enableNotificationBanner, forKey: "enableNotificationBanner") }
@@ -107,8 +115,9 @@ final class AppSettings: ObservableObject {
     private init() {
         let ud = UserDefaults.standard
 
-        pingTargets  = (try? ud.decoded([PingTarget].self, forKey: "pingTargets")) ?? PingTarget.defaults
-        thresholds   = (try? ud.decoded(Thresholds.self, forKey: "thresholds")) ?? .default
+        pingTargets   = (try? ud.decoded([PingTarget].self,    forKey: "pingTargets"))   ?? PingTarget.defaults
+        thresholds    = (try? ud.decoded(Thresholds.self,     forKey: "thresholds"))    ?? .default
+        dnsResolvers  = (try? ud.decoded([DNSResolver].self,  forKey: "dnsResolvers"))  ?? DNSResolver.defaults
 
         alwaysShowBarChart        = ud.bool(forKey: "alwaysShowBarChart")
         colorTheme                = ColorTheme(rawValue: ud.string(forKey: "colorTheme") ?? "") ?? .system
@@ -129,6 +138,43 @@ final class AppSettings: ObservableObject {
         latencyWindowSecs = Swift.max(ud.double(forKey: "latencyWindowSecs").nonZero ?? 15, poll)
         lossWindowSecs    = Swift.max(ud.double(forKey: "lossWindowSecs").nonZero    ?? 10, poll)
         jitterWindowSecs  = Swift.max(ud.double(forKey: "jitterWindowSecs").nonZero  ?? 30, poll)
+    }
+
+    /// Update failure tracking for one resolver after a probe round.
+    /// - Parameters:
+    ///   - id: The resolver's stable UUID.
+    ///   - succeeded: Whether this resolver returned a valid response this tick.
+    ///   - otherResolversOK: Whether ≥1 other resolver succeeded this tick.
+    ///     When false (all resolvers failing), no failure count is incremented —
+    ///     it's a network outage, not a resolver fault.
+    func updateDNSResolverFailureCount(id: UUID, succeeded: Bool, otherResolversOK: Bool) {
+        guard let idx = dnsResolvers.firstIndex(where: { $0.id == id }) else { return }
+        if succeeded {
+            dnsResolvers[idx].consecutiveFailures = 0
+            dnsResolvers[idx].autoDisabledAt = nil
+        } else if otherResolversOK {
+            dnsResolvers[idx].consecutiveFailures += 1
+            if dnsResolvers[idx].consecutiveFailures >= DNSResolver.autoDisableThreshold,
+               dnsResolvers[idx].autoDisabledAt == nil {
+                dnsResolvers[idx].autoDisabledAt = Date()
+            }
+        }
+        // If !succeeded && !otherResolversOK: network outage — do not penalise any resolver.
+    }
+
+    /// Re-enable a resolver that was auto-disabled (called after a successful re-probe).
+    func reEnableDNSResolver(id: UUID) {
+        guard let idx = dnsResolvers.firstIndex(where: { $0.id == id }) else { return }
+        dnsResolvers[idx].consecutiveFailures = 0
+        dnsResolvers[idx].autoDisabledAt = nil
+    }
+
+    /// Reset all resolver failure counters (called on network session change).
+    func resetDNSResolverFailureCounts() {
+        for idx in dnsResolvers.indices {
+            dnsResolvers[idx].consecutiveFailures = 0
+            dnsResolvers[idx].autoDisabledAt = nil
+        }
     }
 
     private func encode<T: Encodable>(_ value: T, forKey key: String) {

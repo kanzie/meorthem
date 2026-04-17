@@ -18,6 +18,9 @@ final class AppEnvironment {
     private var maintenanceTimer: Timer?
     private var lastBandwidthScheduleHours: Double = 0
 
+    // Session tracking — persisted fingerprint and active session ID
+    private var currentSessionFingerprint: String?
+
     init() {
         settings          = AppSettings.shared
         sqliteStore       = SQLiteStore.makeDefault()
@@ -52,17 +55,54 @@ final class AppEnvironment {
             }
             .store(in: &cancellables)
 
-        // Pause/resume monitoring during bandwidth tests
+        // Track network sessions: open a new session whenever the WiFi fingerprint changes.
+        // The fingerprint encodes gateway IP + channel + band + subnet prefix, giving us
+        // SSID-like session grouping without requiring Location Services.
+        metricStore.$latestWifi
+            .sink { [weak self] snapshot in
+                guard let self else { return }
+                guard let snapshot,
+                      let key = NetworkSessionKey.from(wifi: snapshot) else { return }
+                guard key.fingerprint != self.currentSessionFingerprint else {
+                    // Same network — just touch the session to keep last_seen current
+                    if let sid = self.metricStore.currentSessionID {
+                        self.sqliteStore.touchSession(id: sid)
+                    }
+                    return
+                }
+                // New network fingerprint — open a fresh session
+                let newID = UUID()
+                self.currentSessionFingerprint   = key.fingerprint
+                self.metricStore.currentSessionID = newID
+                self.sqliteStore.openSession(id: newID,
+                                             fingerprint: key.fingerprint,
+                                             displayName: key.displayName)
+                // Reset DNS resolver failure counts — a resolver unreachable on one
+                // network may be fine on another.
+                self.settings.resetDNSResolverFailureCounts()
+            }
+            .store(in: &cancellables)
+
+        // Pause/resume monitoring during bandwidth tests; persist completed results to SQLite
         speedtestRunner.$state
             .sink { [weak self] state in
                 guard let self else { return }
                 switch state {
                 case .running:
                     self.monitoringEngine.pause()
-                case .completed, .failed, .idle, .unavailable:
-                    if self.monitoringEngine.isPaused {
-                        self.monitoringEngine.resume()
-                    }
+                case .completed(let result):
+                    if self.monitoringEngine.isPaused { self.monitoringEngine.resume() }
+                    self.sqliteStore.insertSpeedtest(
+                        timestamp:    result.timestamp,
+                        downloadMbps: result.downloadMbps,
+                        uploadMbps:   result.uploadMbps,
+                        latencyMs:    result.latencyMs,
+                        jitterMs:     result.jitterMs,
+                        isp:          result.isp,
+                        serverName:   result.serverName
+                    )
+                case .failed, .idle, .unavailable:
+                    if self.monitoringEngine.isPaused { self.monitoringEngine.resume() }
                 }
             }
             .store(in: &cancellables)

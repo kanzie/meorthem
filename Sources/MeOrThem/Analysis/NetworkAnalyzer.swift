@@ -88,13 +88,25 @@ struct SessionAnalysisInput {
 
 // MARK: - Analyzer
 
-final class NetworkAnalyzer {
+final class NetworkAnalyzer: @unchecked Sendable {
 
-    // Thresholds used to decide whether a metric is "elevated"
-    private let settings: AppSettings
+    // Values snapshotted from AppSettings on the MainActor before any detached task;
+    // stored as plain value types so NetworkAnalyzer itself needs no actor isolation.
+    private let thresholds:      Thresholds
+    private let pingTargetLabels: [UUID: String]   // id → display label
 
+    /// Initialise with snapshots captured on the @MainActor before entering a detached task.
+    @MainActor
     init(settings: AppSettings) {
-        self.settings = settings
+        self.thresholds      = settings.thresholds
+        self.pingTargetLabels = Dictionary(
+            uniqueKeysWithValues: settings.pingTargets.map { ($0.id, $0.label) })
+    }
+
+    /// Convenience init for contexts where settings are already captured as value types.
+    init(thresholds: Thresholds, pingTargetLabels: [UUID: String]) {
+        self.thresholds       = thresholds
+        self.pingTargetLabels = pingTargetLabels
     }
 
     /// Runs all pattern checks on the given session data and returns findings.
@@ -130,7 +142,7 @@ final class NetworkAnalyzer {
         guard rtts.count >= 10 else { return [] }
 
         let avg    = rtts.reduce(0, +) / Double(rtts.count)
-        let thresh = settings.thresholds.latencyYellowMs
+        let thresh = thresholds.latencyYellowMs
 
         guard avg >= thresh else { return [] }
 
@@ -194,7 +206,7 @@ final class NetworkAnalyzer {
 
         let losses  = input.pingRows.map(\.lossPct)
         let avgLoss = losses.reduce(0, +) / Double(losses.count)
-        let thresh  = settings.thresholds.lossYellowPct
+        let thresh  = thresholds.lossYellowPct
 
         guard avgLoss >= thresh else { return [] }
 
@@ -259,7 +271,7 @@ final class NetworkAnalyzer {
         let rttVariance = rtts.map { pow($0 - rttMean, 2) }.reduce(0, +) / Double(rtts.count)
         let interPollJitter = sqrt(rttVariance)
 
-        let thresh = settings.thresholds.jitterYellowMs
+        let thresh = thresholds.jitterYellowMs
         guard interPollJitter >= thresh else { return [] }
 
         // Also check average intra-poll jitter (std dev of 3 packets per poll).
@@ -393,8 +405,8 @@ final class NetworkAnalyzer {
         guard input.gatewayPingRows.count >= 10,
               input.pingRows.count >= 10 else { return [] }
 
-        let lossThresh = settings.thresholds.lossYellowPct
-        let latThresh  = settings.thresholds.latencyYellowMs
+        let lossThresh = thresholds.lossYellowPct
+        let latThresh  = thresholds.latencyYellowMs
 
         // Build per-minute sets: which minutes had degraded external targets / gateway
         func degradedMinutes(rows: [SQLiteStore.PingRow]) -> Set<Int> {
@@ -559,7 +571,7 @@ final class NetworkAnalyzer {
             // Flag if this target is more than 2.5x the overall average
             guard ratio > 2.5 else { continue }
 
-            let label = settings.pingTargets.first(where: { $0.id == s.id })?.label
+            let label = pingTargetLabels[s.id]
                      ?? s.id.uuidString.prefix(8).description
 
             let base: Double = ratio > 4.0 ? 0.80 : 0.65
@@ -678,7 +690,7 @@ final class NetworkAnalyzer {
 
         let baselineRTT  = rtts.reduce(0, +) / Double(rtts.count)
         // Skip: if idle latency is already bad, bufferbloat isn't the primary diagnosis
-        guard baselineRTT < settings.thresholds.latencyYellowMs else { return [] }
+        guard baselineRTT < thresholds.latencyYellowMs else { return [] }
         guard baselineRTT > 0 else { return [] }
 
         let underLoadRTTs = input.speedtestRows.map(\.latencyMs)

@@ -28,6 +28,29 @@ final class MetricStore: ObservableObject {
     private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)
     private var statusHistory: CircularBuffer<MetricStatus> = CircularBuffer(capacity: 5)
 
+    // MARK: - DNS resolver summary (drives menu tag 6; no SQLite reads)
+
+    struct DNSSummary {
+        /// Name of the fastest-responding enabled resolver this window.
+        let bestResolverName: String
+        /// Trimmed-mean RTT of the best resolver's last 10 samples (ms).
+        let bestRTTMs: Double
+        /// Fraction of last-10 samples that timed out across all enabled resolvers.
+        let failRate: Double
+        /// Count of enabled resolvers that responded this window.
+        let respondingCount: Int
+        /// Total enabled resolver count.
+        let totalCount: Int
+        /// Derived status colour.
+        let status: MetricStatus
+    }
+
+    /// Most-recently computed DNS summary. nil until the first probe round completes.
+    @Published private(set) var dnsSummary: DNSSummary?
+
+    /// Rolling 10-sample RTT buffer per resolver IP (nil entries = timeout/failure).
+    private var dnsRollingBuffer: [String: [Double?]] = [:]
+
     // MARK: - Connection history (last 20 degradation events, backed by SQLite)
     @Published private(set) var connectionHistory: [ConnectionEvent] = []
     private var previousOverallStatus: MetricStatus = .green
@@ -126,6 +149,92 @@ final class MetricStore: ObservableObject {
                                     reachable: reachable,
                                     rttMs: rttMs,
                                     sessionID: currentSessionID)
+    }
+
+    /// Record one resolver probe result. Updates the rolling buffer + summary and
+    /// persists to SQLite. Call from MonitoringEngine after each probe round.
+    func recordDNSResolverSample(resolver: DNSResolver, resolveMs: Double?, rcode: Int?) {
+        // Update rolling 10-sample buffer.
+        let ip = resolver.ip.isEmpty ? resolver.name : resolver.ip
+        var buf = dnsRollingBuffer[ip] ?? []
+        buf.append(resolveMs)
+        if buf.count > 10 { buf.removeFirst(buf.count - 10) }
+        dnsRollingBuffer[ip] = buf
+
+        // Persist to SQLite.
+        sqliteStore?.insertDNSResolverSample(
+            timestamp:    Date(),
+            resolverIP:   ip,
+            resolverName: resolver.name,
+            queryHost:    "example.com",
+            resolveMs:    resolveMs,
+            rcode:        rcode,
+            sessionID:    currentSessionID)
+    }
+
+    /// Recompute `dnsSummary` from the current rolling buffers.
+    /// Call after the full probe round (all resolver results recorded).
+    func refreshDNSSummary(enabledResolvers: [(name: String, ip: String)]) {
+        guard !enabledResolvers.isEmpty else { dnsSummary = nil; return }
+
+        var bestName  = ""
+        var bestRTT   = Double.infinity
+        var totalFail = 0
+        var totalSamples = 0
+        var respondingCount = 0
+
+        for r in enabledResolvers {
+            let key = r.ip.isEmpty ? r.name : r.ip
+            let buf = dnsRollingBuffer[key] ?? []
+            guard !buf.isEmpty else { continue }
+
+            let successes = buf.compactMap { $0 }
+            let failures  = buf.count - successes.count
+            totalFail    += failures
+            totalSamples += buf.count
+            if !successes.isEmpty { respondingCount += 1 }
+
+            if let mean = trimmedMean(successes), mean < bestRTT {
+                bestRTT  = mean
+                bestName = r.name
+            }
+        }
+
+        let failRate: Double = totalSamples > 0 ? Double(totalFail) / Double(totalSamples) : 0
+
+        // Derive colour thresholds per design:
+        // Green:  avg < 80 ms AND 0% failure
+        // Yellow: avg 80–200 ms OR 0–30% failure
+        // Red:    avg > 200 ms OR > 30% failure OR all resolvers timing out
+        let status: MetricStatus
+        if bestRTT == .infinity || failRate > 0.30 {
+            status = .red
+        } else if bestRTT > 200 || failRate > 0 || bestRTT > 80 {
+            status = .yellow
+        } else {
+            status = .green
+        }
+
+        dnsSummary = DNSSummary(
+            bestResolverName: bestName.isEmpty ? "DNS" : bestName,
+            bestRTTMs:        bestRTT == .infinity ? 0 : bestRTT,
+            failRate:         failRate,
+            respondingCount:  respondingCount,
+            totalCount:       enabledResolvers.count,
+            status:           status)
+    }
+
+    /// Trimmed mean: drop bottom and top 10% (min 1 each) when ≥4 samples.
+    private func trimmedMean(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        guard values.count >= 4 else {
+            return values.reduce(0, +) / Double(values.count)
+        }
+        let sorted     = values.sorted()
+        let trimCount  = max(1, values.count / 10)
+        let trimmed    = sorted.dropFirst(trimCount).dropLast(trimCount)
+        guard !trimmed.isEmpty else { return sorted[sorted.count / 2] }
+        return trimmed.reduce(0, +) / Double(trimmed.count)
     }
 
     func recordGatewayPing(_ result: PingResult?, gatewayIP: String? = nil) {
