@@ -5,20 +5,22 @@ import AppKit
 enum MenuBuilder {
 
     struct Actions {
-        let showAbout:          () -> Void
-        let openSettings:       () -> Void
-        let copyReport:         () -> Void
-        let showNetworkHistory: () -> Void
-        let runSpeedtest:       () -> Void
-        let showHelp:           () -> Void
-        let togglePause:        () -> Void
-        let quit:               () -> Void
+        let showAbout:            () -> Void
+        let openSettings:         () -> Void
+        let copyReport:           () -> Void
+        let showNetworkHistory:   () -> Void
+        let showNetworkAnalysis:  () -> Void
+        let runSpeedtest:         () -> Void
+        let showHelp:             () -> Void
+        let togglePause:          () -> Void
+        let quit:                 () -> Void
     }
 
     // Tags for items updated during live refresh
     static let tagLatency                = 1
     static let tagPacketLoss             = 2
     static let tagJitter                 = 3
+    static let tagDNSSummary             = 6
     static let tagNetworkDetails         = 5
     static let tagSpeedtestLabel         = 7
     static let tagSpeedtestLast          = 8
@@ -27,6 +29,7 @@ enum MenuBuilder {
     static let tagLastEvent              = 11
     static let tagPreviousDisturbances   = 12
     static let tagCPUAdvisory            = 13
+    static let tagAdvanced               = 15
     static let tagTargetBase             = 100
     static let tagGatewayTarget          = 200
     static let tagUpdateAvailable        = 14
@@ -104,6 +107,10 @@ enum MenuBuilder {
         jitterItem.tag = tagJitter
         menu.addItem(jitterItem)
 
+        let dnsItem = dnsSummaryItem(store: store, paused: paused)
+        dnsItem.tag = tagDNSSummary
+        menu.addItem(dnsItem)
+
         // Recovery/Ongoing indicator — shown when there is or was a recent degradation event
         let lastEventItem = lastEventMenuItem(store: store)
         lastEventItem.tag = tagLastEvent
@@ -142,21 +149,7 @@ enum MenuBuilder {
 
         menu.addItem(.separator())
 
-        // MARK: - Actions section
-        menu.addItem(actionItem("Export Reports",   action: actions.copyReport))
-        menu.addItem(actionItem("Network History…", action: actions.showNetworkHistory))
-
-        let distItem = previousDisturbancesItem(store: store,
-                                                clearHistory: { store.clearConnectionHistory() })
-        distItem.tag = tagPreviousDisturbances
-        menu.addItem(distItem)
-
-        let netItem = networkDetailsSubmenu(store: store)
-        netItem.tag = tagNetworkDetails
-        menu.addItem(netItem)
-
-        menu.addItem(.separator())
-
+        // MARK: - Check Bandwidth section
         let speedLabelItem = actionItem(speedtestLabel(env.speedtestRunner), action: actions.runSpeedtest)
         speedLabelItem.isEnabled = !isSpeedtestRunning(env.speedtestRunner)
             && !env.monitoringEngine.isManuallyPaused
@@ -173,9 +166,30 @@ enum MenuBuilder {
 
         menu.addItem(.separator())
 
-        // Task 9: Help, Settings, About order
-        menu.addItem(actionItem("Help",            action: actions.showHelp))
-        menu.addItem(actionItem("Settings…",       action: actions.openSettings))
+        // MARK: - Advanced / disturbances / settings section
+        let advancedItem = NSMenuItem(title: "Advanced", action: nil, keyEquivalent: "")
+        advancedItem.tag = tagAdvanced
+        let advancedMenu = NSMenu(title: "Advanced")
+        advancedMenu.addItem(actionItem("Graphs…",           action: actions.showNetworkHistory))
+        advancedMenu.addItem(actionItem("Network Analysis…", action: actions.showNetworkAnalysis))
+        advancedMenu.addItem(actionItem("Export Reports",    action: actions.copyReport))
+        let netItem = networkDetailsSubmenu(store: store)
+        netItem.tag = tagNetworkDetails
+        advancedMenu.addItem(netItem)
+        advancedItem.submenu = advancedMenu
+        menu.addItem(advancedItem)
+
+        let distItem = previousDisturbancesItem(store: store,
+                                                clearHistory: { store.clearConnectionHistory() })
+        distItem.tag = tagPreviousDisturbances
+        menu.addItem(distItem)
+
+        menu.addItem(actionItem("Settings…", action: actions.openSettings))
+
+        menu.addItem(.separator())
+
+        // MARK: - Help / About section
+        menu.addItem(actionItem("Help",             action: actions.showHelp))
         menu.addItem(actionItem("About Me Or Them", action: actions.showAbout))
 
         menu.addItem(.separator())
@@ -232,6 +246,12 @@ enum MenuBuilder {
                 attributes: [.foregroundColor: jitterColor, .font: _menuFont])
         }
 
+        if let item = menu.item(withTag: tagDNSSummary) {
+            let updated = dnsSummaryItem(store: store, paused: paused)
+            item.attributedTitle = updated.attributedTitle
+            item.isHidden        = updated.isHidden
+        }
+
         if let item = menu.item(withTag: tagLastEvent) {
             let updated = lastEventMenuItem(store: store)
             item.attributedTitle = updated.attributedTitle
@@ -280,7 +300,9 @@ enum MenuBuilder {
 
     @MainActor
     static func refreshNetworkDetails(_ menu: NSMenu, environment env: AppEnvironment) {
-        guard let item = menu.item(withTag: tagNetworkDetails) else { return }
+        // Network Details lives inside the Advanced submenu — search one level deeper.
+        guard let advancedItem = menu.item(withTag: tagAdvanced),
+              let item = advancedItem.submenu?.item(withTag: tagNetworkDetails) else { return }
         let updated = networkDetailsSubmenu(store: env.metricStore)
         item.submenu = updated.submenu
     }
@@ -299,6 +321,49 @@ enum MenuBuilder {
                                   pollSecs: settings.pollIntervalSecs, countdown: remaining,
                                   paused: paused),
             attributes: _labelAttrs)
+    }
+
+    // MARK: - DNS summary item (tag 6)
+
+    /// Builds a single-line DNS health item.
+    /// Format: "DNS  ● 14ms  Cloudflare  (5/5)"
+    /// Hidden when monitoring is paused or no DNS data is available yet.
+    @MainActor
+    private static func dnsSummaryItem(store: MetricStore, paused: Bool) -> NSMenuItem {
+        guard !paused, let summary = store.dnsSummary else {
+            return hiddenItem()
+        }
+
+        let dot: String
+        let dotColor: NSColor
+        switch summary.status {
+        case .green:  dot = "●"; dotColor = .systemGreen
+        case .yellow: dot = "●"; dotColor = .systemOrange
+        case .red:    dot = "●"; dotColor = .systemRed
+        }
+
+        // Build attributed string with colored dot followed by plain text
+        let rttStr = summary.bestRTTMs > 0
+            ? String(format: "%.0fms", summary.bestRTTMs) : "—"
+        let countStr = "(\(summary.respondingCount)/\(summary.totalCount))"
+        let plainText = "DNS  \(dot) \(rttStr)  \(summary.bestResolverName)  \(countStr)"
+
+        let attrs = NSMutableAttributedString(
+            string: "DNS  ",
+            attributes: [.foregroundColor: NSColor.labelColor, .font: _menuFont])
+        let dotPart = NSAttributedString(
+            string: "\(dot) ",
+            attributes: [.foregroundColor: dotColor, .font: _menuFont])
+        let restPart = NSAttributedString(
+            string: "\(rttStr)  \(summary.bestResolverName)  \(countStr)",
+            attributes: [.foregroundColor: NSColor.labelColor, .font: _menuFont])
+        attrs.append(dotPart)
+        attrs.append(restPart)
+        _ = plainText  // suppress unused-variable warning
+
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.attributedTitle = attrs
+        return item
     }
 
     // MARK: - Last event item (Task 2)
