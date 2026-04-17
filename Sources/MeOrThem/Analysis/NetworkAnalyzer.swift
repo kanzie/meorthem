@@ -78,8 +78,11 @@ struct SessionAnalysisInput {
     let gatewayPingRows: [SQLiteStore.PingRow]
     let wifiRows: [SQLiteStore.WiFiRow]
     let speedtestRows: [SQLiteStore.SpeedtestRow]
-    /// DNS resolution samples (one per ~30 s). Used to detect slow or failing DNS.
+    /// Legacy single-resolver DNS samples (one per ~30 s). Retained for backward compatibility
+    /// with existing sessions; new sessions use `dnsResolverRows` instead.
     let dnsRows: [SQLiteStore.DnsRow]
+    /// Multi-resolver DNS probe results. Used by patterns 10a–10e.
+    var dnsResolverRows: [SQLiteStore.DNSResolverRow] = []
     /// Interface error/drop delta samples (one per ~30 s). Used to detect hardware-level issues.
     let interfaceErrorRows: [SQLiteStore.InterfaceErrorRow]
     /// MTU probe results (~every 2.5 min). Used to detect path fragmentation.
@@ -127,7 +130,8 @@ final class NetworkAnalyzer: @unchecked Sendable {
         findings += checkWiFiLatencyCorrelation(input, sufficiency: sufficiency)
         findings += checkTargetDivergence(input, sufficiency: sufficiency)
         findings += checkBufferbloat(input, sufficiency: sufficiency)
-        findings += checkDNS(input, sufficiency: sufficiency)
+        findings += checkDNS(input, sufficiency: sufficiency)       // legacy fallback
+        findings += checkDNSMultiResolver(input)                     // patterns 10a–10e
         findings += checkInterfaceErrors(input, sufficiency: sufficiency)
         findings += checkMTU(input, sufficiency: sufficiency)
 
@@ -673,6 +677,217 @@ final class NetworkAnalyzer: @unchecked Sendable {
         }
 
         return findings
+    }
+
+    // MARK: - Patterns 10a–10e: Multi-resolver DNS analysis
+
+    /// Main entry point for multi-resolver DNS patterns. Skipped when no resolver data exists.
+    private func checkDNSMultiResolver(_ input: SessionAnalysisInput) -> [NetworkFinding] {
+        guard !input.dnsResolverRows.isEmpty else { return [] }
+
+        // Group rows by resolver IP
+        var byIP: [String: [SQLiteStore.DNSResolverRow]] = [:]
+        for row in input.dnsResolverRows {
+            byIP[row.resolverIP, default: []].append(row)
+        }
+
+        var findings: [NetworkFinding] = []
+        findings += checkDNSFailureRate(byIP)
+        findings += checkDNSLatency(byIP)
+        findings += checkDNSResolverComparison(byIP)
+        findings += checkDNSAllFailing(byIP, pingRows: input.pingRows)
+        findings += checkDNSPortBlocking(byIP)
+        return findings
+    }
+
+    /// Pattern 10a — Per-resolver failure rate.
+    /// Fires when a specific resolver has > 15% failure rate.
+    private func checkDNSFailureRate(_ byIP: [String: [SQLiteStore.DNSResolverRow]]) -> [NetworkFinding] {
+        var findings: [NetworkFinding] = []
+        for (_, rows) in byIP {
+            guard rows.count >= 5 else { continue }
+            let name      = rows.first?.resolverName ?? rows.first?.resolverIP ?? "Unknown"
+            let ip        = rows.first?.resolverIP ?? ""
+            let failures  = rows.filter { $0.resolveMs == nil && $0.rcode != 3 }  // timeout/SERVFAIL, not NXDOMAIN
+            let failRate  = Double(failures.count) / Double(rows.count)
+            guard failRate >= 0.15 else { continue }
+
+            let suf        = DataSufficiency(sampleCount: rows.count * 12)
+            let base: Double = failRate >= 0.40 ? 0.85 : 0.65
+            let confidence = min(1.0, base * suf.multiplier)
+
+            let detail = String(format: "\"%@\" (%@) failed %.0f%% of the time (%d of %d probes). Consider disabling this resolver if failures persist, or check for connectivity issues specific to this server.",
+                                name, ip, failRate * 100, failures.count, rows.count)
+            findings.append(NetworkFinding(category: .connectivity,
+                                           title: "DNS resolver \"\(name)\" unreliable",
+                                           detail: detail,
+                                           confidence: confidence))
+        }
+        return findings
+    }
+
+    /// Pattern 10b — DNS latency (trimmed mean of best resolver).
+    /// Fires when even the best-performing resolver exceeds 200 ms average.
+    private func checkDNSLatency(_ byIP: [String: [SQLiteStore.DNSResolverRow]]) -> [NetworkFinding] {
+        // Find the fastest resolver by trimmed mean
+        var bestName  = ""
+        var bestRTT   = Double.infinity
+        var systemIP  = ""
+        var gatewayIP = ""
+
+        for (ip, rows) in byIP {
+            guard rows.count >= 5 else { continue }
+            let rtts = rows.compactMap(\.resolveMs)
+            guard let mean = trimmedMeanDNS(rtts) else { continue }
+            if mean < bestRTT {
+                bestRTT  = mean
+                bestName = rows.first?.resolverName ?? ip
+            }
+            if rows.first?.resolverName.lowercased().contains("system") == true { systemIP = ip }
+            if rows.first?.resolverName.lowercased().contains("gateway") == true
+               || rows.first?.resolverName.lowercased().contains("router") == true { gatewayIP = ip }
+        }
+
+        guard bestRTT < .infinity, bestRTT >= 200 else { return [] }
+
+        func avgRTT(_ rows: [SQLiteStore.DNSResolverRow]?) -> Double? {
+            guard let rows, !rows.isEmpty else { return nil }
+            let rtts = rows.compactMap(\.resolveMs)
+            guard !rtts.isEmpty else { return nil }
+            return rtts.reduce(0, +) / Double(rtts.count)
+        }
+        let systemRTT  = avgRTT(byIP[systemIP])
+        let gatewayRTT = avgRTT(byIP[gatewayIP])
+
+        // Determine if system/gateway resolver is specifically responsible
+        var recommendation = "Consider switching to a faster public resolver."
+        if let sRTT = systemRTT, sRTT >= 300, bestRTT < sRTT * 0.5 {
+            recommendation = "Public resolvers are significantly faster than your system resolver. Configuring a faster resolver in your router settings could noticeably speed up browsing."
+        } else if let gRTT = gatewayRTT, gRTT >= 300, bestRTT < gRTT * 0.5 {
+            recommendation = "Your router DNS relay is slow. Configuring a faster resolver like Cloudflare (1.1.1.1) in your router settings could help."
+        }
+
+        let suf        = DataSufficiency(sampleCount: byIP.values.first?.count.advanced(by: 0) ?? 0)
+        let base: Double = bestRTT >= 500 ? 0.80 : 0.60
+        let confidence = min(1.0, base * suf.multiplier)
+
+        let detail = String(format: "Even the fastest resolver (\"%@\") averaged %.0f ms — above the 200 ms threshold. Slow DNS adds hidden latency to every new connection. %@",
+                            bestName, bestRTT, recommendation)
+        return [NetworkFinding(category: .connectivity,
+                               title: "Slow DNS resolution",
+                               detail: detail,
+                               confidence: confidence)]
+    }
+
+    /// Pattern 10c — Resolver performance comparison.
+    /// Fires when the fastest public resolver is 2× faster than system/gateway resolver.
+    private func checkDNSResolverComparison(_ byIP: [String: [SQLiteStore.DNSResolverRow]]) -> [NetworkFinding] {
+        var publicResolvers:   [(name: String, rtt: Double)] = []
+        var systemGatewayRTT: Double?
+        var systemGatewayName = "your system resolver"
+
+        for (_, rows) in byIP where rows.count >= 10 {
+            let rtts = rows.compactMap(\.resolveMs)
+            guard let mean = trimmedMeanDNS(rtts) else { continue }
+            let name = rows.first?.resolverName ?? ""
+            let isLocal = name.lowercased().contains("system")
+                       || name.lowercased().contains("gateway")
+                       || name.lowercased().contains("router")
+            if isLocal {
+                if systemGatewayRTT == nil || mean < systemGatewayRTT! {
+                    systemGatewayRTT  = mean
+                    systemGatewayName = name
+                }
+            } else {
+                publicResolvers.append((name: name, rtt: mean))
+            }
+        }
+
+        guard let sysRTT = systemGatewayRTT,
+              let fastest = publicResolvers.min(by: { $0.rtt < $1.rtt }),
+              sysRTT > 0, fastest.rtt > 0,
+              sysRTT / fastest.rtt >= 2.0 else { return [] }
+
+        let detail = String(format: "\"%@\" averages %.0f ms. \"%@\" averages %.0f ms — %.1f× faster. Configuring \"%@\" as your primary resolver in your router settings could noticeably speed up browsing and app load times.",
+                            systemGatewayName, sysRTT,
+                            fastest.name, fastest.rtt,
+                            sysRTT / fastest.rtt,
+                            fastest.name)
+        return [NetworkFinding(category: .connectivity,
+                               title: "Faster DNS resolver available",
+                               detail: detail,
+                               confidence: 0.65)]
+    }
+
+    /// Pattern 10d — All resolvers failing simultaneously.
+    /// When all resolvers fail, it indicates a network outage — not a DNS fault.
+    private func checkDNSAllFailing(_ byIP: [String: [SQLiteStore.DNSResolverRow]],
+                                     pingRows: [SQLiteStore.PingRow]) -> [NetworkFinding] {
+        guard byIP.count >= 3 else { return [] }  // need enough resolvers to be meaningful
+        let resolversWithData = byIP.filter { $0.value.count >= 5 }
+        guard resolversWithData.count >= 3 else { return [] }
+
+        // Check failure rate per resolver — all must be > 80%
+        let allFailing = resolversWithData.allSatisfy { _, rows in
+            let failures = rows.filter { $0.resolveMs == nil }
+            return Double(failures.count) / Double(rows.count) > 0.80
+        }
+        guard allFailing else { return [] }
+
+        // Cross-reference with packet loss to confirm network-level cause
+        let loss = pingRows.map(\.lossPct).reduce(0, +) / Double(max(pingRows.count, 1))
+        let crossRef = loss > 20
+            ? " This is consistent with the packet loss also detected in this session."
+            : ""
+
+        let detail = "All DNS resolvers (\(resolversWithData.count) monitored) were unreachable for most of this session. When all resolvers fail simultaneously, the cause is typically a complete network outage or severe connectivity degradation rather than a DNS-specific issue.\(crossRef)"
+        return [NetworkFinding(category: .connectivity,
+                               title: "Complete DNS failure — likely network outage",
+                               detail: detail,
+                               confidence: 0.80)]
+    }
+
+    /// Pattern 10e — External resolver blocking (UDP port 53 blocked).
+    /// Fires when external public resolvers consistently fail while system/gateway succeeds.
+    private func checkDNSPortBlocking(_ byIP: [String: [SQLiteStore.DNSResolverRow]]) -> [NetworkFinding] {
+        var externalFailRates: [Double] = []
+        var localFailRates:    [Double] = []
+
+        for (_, rows) in byIP where rows.count >= 5 {
+            let name    = rows.first?.resolverName ?? ""
+            let isLocal = name.lowercased().contains("system")
+                       || name.lowercased().contains("gateway")
+                       || name.lowercased().contains("router")
+            let failRate = Double(rows.filter { $0.resolveMs == nil }.count) / Double(rows.count)
+            if isLocal { localFailRates.append(failRate) }
+            else       { externalFailRates.append(failRate) }
+        }
+
+        guard !externalFailRates.isEmpty, !localFailRates.isEmpty else { return [] }
+
+        let avgExternalFail = externalFailRates.reduce(0, +) / Double(externalFailRates.count)
+        let avgLocalFail    = localFailRates.reduce(0, +) / Double(localFailRates.count)
+
+        // External resolvers consistently failing while local resolver is healthy
+        guard avgExternalFail >= 0.70, avgLocalFail <= 0.20 else { return [] }
+
+        let detail = "Public DNS resolvers were unreachable on this network (%.0f%% failure rate) while your local/gateway resolver worked normally (%.0f%% failure rate). This pattern indicates that UDP port 53 is blocked for external destinations — common on enterprise, hotel, and some ISP networks. Only your network's configured resolver is usable here."
+
+        return [NetworkFinding(category: .connectivity,
+                               title: "External DNS blocked (UDP/53 filtered)",
+                               detail: String(format: detail, avgExternalFail * 100, avgLocalFail * 100),
+                               confidence: 0.80)]
+    }
+
+    /// Trimmed mean for DNS latency: drop bottom/top 10% (min 1) when ≥ 4 samples.
+    private func trimmedMeanDNS(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        guard values.count >= 4 else { return values.reduce(0, +) / Double(values.count) }
+        let sorted    = values.sorted()
+        let trimCount = max(1, values.count / 10)
+        let trimmed   = sorted.dropFirst(trimCount).dropLast(trimCount)
+        guard !trimmed.isEmpty else { return sorted[sorted.count / 2] }
+        return trimmed.reduce(0, +) / Double(trimmed.count)
     }
 
     // MARK: - Pattern 9: Bufferbloat detection
