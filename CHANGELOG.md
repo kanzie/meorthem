@@ -5,6 +5,37 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.16.0 — 2026-04-17
+
+### New Features
+- **Multi-resolver DNS monitoring** — The app now probes up to 8 DNS resolvers
+  concurrently every ~30 seconds using raw UDP queries that bypass the OS cache,
+  giving an accurate per-resolver round-trip time. Cloudflare (1.1.1.1), Google
+  (8.8.8.8), Quad9 (9.9.9.9), OpenDNS, AdGuard, their IPv6 equivalents, and the
+  system and gateway resolvers are pre-configured; custom resolvers can be added
+  in Settings → DNS Resolvers. The fastest responding resolver and its trimmed-
+  mean RTT are shown in the menu bar dropdown. Resolvers that fail repeatedly are
+  auto-paused and re-probed in the background.
+- **DNS resolver settings tab** — A new DNS Resolvers tab in Settings lets you
+  enable or disable individual resolvers, add custom IP addresses (IPv4 or IPv6),
+  remove custom entries, and re-enable any that were auto-paused. A maximum of 8
+  resolvers can be active simultaneously.
+- **DNS latency chart** — The Graphs window now includes a DNS Resolver Latency
+  chart showing per-resolver RTT over time as colour-coded series. Probe failures
+  appear as gaps rather than zero values, making outages visually distinct from
+  genuine low-latency responses.
+- **DNS analysis patterns** — The Network Analysis window surfaces five new DNS-
+  specific findings: high per-resolver failure rate, elevated resolver latency,
+  significant latency divergence between resolvers, all resolvers failing
+  simultaneously, and signs of DNS port blocking where UDP port 53 is unreachable.
+- **DNS data in exports** — CSV exports now include a DNS Resolver Samples
+  section with one row per probe (timestamp, resolver name, IP, RTT, RCODE).
+  JSON exports include a dnsResolvers key with per-resolver trimmed-mean RTT,
+  failure rate, sample count, and the full raw sample list. PDF reports include
+  a DNS Resolvers summary table with average RTT and failure rate per resolver.
+
+---
+
 ## v2.8.0 — 2026-04-16
 
 ### New Features
