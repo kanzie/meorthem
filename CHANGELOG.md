@@ -5,6 +5,39 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.21.0 — 2026-04-17
+
+### New Features
+- **Daily Pattern chart** — The Graphs window now includes a bar chart showing
+  average latency by hour of day across the last 30 days of recorded data. Bars
+  are coloured green, orange, or red based on the configured latency thresholds,
+  making peak congestion windows immediately visible. The chart appears once at
+  least 4 hours of historical aggregate data are available.
+- **Latency trend line** — The Latency chart in the Graphs window now overlays a
+  dashed regression line when a meaningful upward or downward trend is present
+  (slope > 0.3 ms per minute). A red line indicates a worsening trend; green
+  indicates improving. The line is hidden when the data is too flat or too noisy
+  to produce a reliable fit.
+
+### Changes
+- **DNS findings now use a distinct globe icon** — All DNS-related findings in
+  the Network Analysis window (resolver unreliable, slow resolution, faster
+  resolver available, complete DNS failure, port blocking) now appear with a
+  globe icon rather than the generic network icon, making them easier to
+  distinguish from routing and connectivity findings at a glance.
+- **Network Analysis findings sorted by confidence** — Findings are now listed
+  highest-confidence first, so the most actionable issues appear at the top
+  regardless of which order the pattern checks run.
+- **Issue count badge in Network Analysis header** — The session header now
+  shows a badge with the number of issues found, giving a quick summary without
+  having to scroll through the list.
+- **Expandable raw traceroute output** — Traceroute snapshot findings in the
+  Network Analysis window now include a "Show raw output" disclosure section
+  that reveals the full hop-by-hop traceroute text. The text is selectable for
+  copying into a support ticket or further analysis.
+
+---
+
 ## v2.20.0 — 2026-04-17
 
 ### New Features

@@ -60,8 +60,10 @@ final class MetricsDataLoader: ObservableObject {
     @Published private(set) var jitterPoints:    [ChartPoint] = []
     @Published private(set) var wifiRSSI:        [ChartPoint] = []
     /// Per-resolver RTT points. `targetLabel` = resolver name for color-coding.
-    @Published private(set) var dnsPoints:       [ChartPoint] = []
-    @Published private(set) var incidents:       [SQLiteStore.IncidentRow] = []
+    @Published private(set) var dnsPoints:         [ChartPoint] = []
+    @Published private(set) var incidents:         [SQLiteStore.IncidentRow] = []
+    /// Cross-session average RTT per hour-of-day (0–23) from the last 30 days of aggregates.
+    @Published private(set) var hourlyRTTAverages: [Int: Double] = [:]
     @Published private(set) var isLoading        = false
     @Published private(set) var rangeStart       = Date()
     @Published private(set) var rangeEnd         = Date()
@@ -192,6 +194,21 @@ final class MetricsDataLoader: ObservableObject {
                 self.dnsPoints     = finalDNS
                 self.incidents     = finalIncidents
                 self.isLoading     = false
+            }
+        }
+
+        // Load cross-session hourly averages independently (not window-scoped; always 30 days)
+        loadHourlyAverages()
+    }
+
+    /// Fetches per-hour-of-day average RTT from the last 30 days of aggregates.
+    /// Runs off the main thread; result is safe to use in chart views.
+    func loadHourlyAverages() {
+        let db = self.db
+        Task.detached(priority: .utility) { [weak self] in
+            let averages = db.hourlyRTTAverages(lookback: 30 * 86_400, minSampleCount: 3)
+            await MainActor.run { [weak self] in
+                self?.hourlyRTTAverages = averages
             }
         }
     }

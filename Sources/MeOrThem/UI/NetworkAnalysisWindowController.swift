@@ -133,7 +133,7 @@ private struct NetworkAnalysisView: View {
         }.value
 
         sufficiencyLabel = newSufLabel
-        findings  = newFindings
+        findings  = newFindings.sorted { $0.confidence > $1.confidence }
         isLoading = false
     }
 }
@@ -198,8 +198,19 @@ private struct FindingsPanel: View {
             // Header
             VStack(alignment: .leading, spacing: 4) {
                 if let s = session {
-                    Text(s.displayName)
-                        .font(.title2).fontWeight(.semibold)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(s.displayName)
+                            .font(.title2).fontWeight(.semibold)
+                        Spacer()
+                        if !isLoading && !findings.isEmpty {
+                            Text("\(findings.count) issue\(findings.count == 1 ? "" : "s")")
+                                .font(.caption).fontWeight(.medium)
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(Color.orange.opacity(0.15))
+                                .foregroundStyle(.orange)
+                                .clipShape(Capsule())
+                        }
+                    }
                     HStack(spacing: 8) {
                         Text(dateRange(s))
                             .font(.caption).foregroundStyle(.secondary)
@@ -275,6 +286,7 @@ private struct FindingsPanel: View {
 
 private struct FindingCard: View {
     let finding: NetworkFinding
+    @State private var showingRawOutput = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -291,6 +303,23 @@ private struct FindingCard: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if let raw = finding.expandedDetail, !raw.isEmpty {
+                DisclosureGroup(isExpanded: $showingRawOutput) {
+                    ScrollView(.vertical) {
+                        Text(raw)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 4)
+                    }
+                    .frame(maxHeight: 180)
+                } label: {
+                    Text(showingRawOutput ? "Hide raw output" : "Show raw output")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
         .padding(12)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -309,6 +338,7 @@ private struct FindingCard: View {
         case .wifi:         return "wifi.exclamationmark"
         case .bandwidth:    return "arrow.down.arrow.up"
         case .connectivity: return "network"
+        case .dns:          return "globe"
         }
     }
 

@@ -121,6 +121,7 @@ struct MetricsChartsView: View {
                         jitterCard
                         if !loader.wifiRSSI.isEmpty { wifiCard }
                         if !loader.dnsPoints.isEmpty { dnsCard }
+                        if loader.hourlyRTTAverages.count >= 4 { hourlyPatternCard }
                         if !loader.incidents.isEmpty { incidentList }
                     }
                     .padding(20)
@@ -403,6 +404,26 @@ struct MetricsChartsView: View {
                                 .lineStyle(StrokeStyle(lineWidth: 2))
                                 .interpolationMethod(.catmullRom)
                         }
+
+                        // Regression trend line (only shown when a meaningful slope exists)
+                        if let trend = latencyTrendLine {
+                            let trendColor = trend.end.1 > trend.start.1 ? Color.red : Color.green
+                            LineMark(
+                                x: .value("Time", trend.start.0),
+                                y: .value("RTT ms", trend.start.1),
+                                series: .value("Series", "Trend")
+                            )
+                            .foregroundStyle(trendColor.opacity(0.70))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+
+                            LineMark(
+                                x: .value("Time", trend.end.0),
+                                y: .value("RTT ms", trend.end.1),
+                                series: .value("Series", "Trend")
+                            )
+                            .foregroundStyle(trendColor.opacity(0.70))
+                            .lineStyle(StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
+                        }
                     }
                     .chartForegroundStyleScale(domain: visibleTargetLabels, range: visibleTargetColors)
                     .chartLegend(.hidden)
@@ -438,6 +459,30 @@ struct MetricsChartsView: View {
     private var maxLatencyY: Double {
         let peak = filteredLatency.map(\.value).max() ?? 0
         return max(peak * 1.2, thresholds.latencyRedMs * 1.5)
+    }
+
+    /// Two-point regression line for the latency chart. Returns (start, end) Date→ms pairs,
+    /// or nil when the trend is too weak or there's insufficient data.
+    private var latencyTrendLine: (start: (Date, Double), end: (Date, Double))? {
+        let pts = filteredLatency
+        guard pts.count >= 20 else { return nil }
+        let origin = loader.rangeStart
+        let pairs  = pts.map { ($0.timestamp.timeIntervalSince(origin), $0.value) }
+        let n  = Double(pairs.count)
+        let sX = pairs.reduce(0) { $0 + $1.0 }
+        let sY = pairs.reduce(0) { $0 + $1.1 }
+        let sXY = pairs.reduce(0) { $0 + $1.0 * $1.1 }
+        let sX2 = pairs.reduce(0) { $0 + $1.0 * $1.0 }
+        let denom = n * sX2 - sX * sX
+        guard abs(denom) > 0 else { return nil }
+        let slope     = (n * sXY - sX * sY) / denom
+        let intercept = (sY - slope * sX) / n
+        // Only show when slope > 0.3 ms/min (upward) or < -0.3 ms/min (downward)
+        guard abs(slope * 60) > 0.3 else { return nil }
+        let endX = loader.rangeEnd.timeIntervalSince(origin)
+        let startY = max(0, intercept)
+        let endY   = max(0, intercept + slope * endX)
+        return ((loader.rangeStart, startY), (loader.rangeEnd, endY))
     }
 
     // MARK: - Loss Card
@@ -697,6 +742,81 @@ struct MetricsChartsView: View {
                 }
                 .frame(height: 180)
             }
+        }
+    }
+
+    // MARK: - Hourly Pattern Card
+
+    /// Bar chart showing historical average RTT by hour-of-day from the last 30 days.
+    /// Bars are coloured green → orange → red based on how they compare to the latency thresholds.
+    private var hourlyPatternCard: some View {
+        ChartCard(title: "Daily Pattern",
+                  subtitle: "Average latency by time of day — last 30 days") {
+            let hours   = loader.hourlyRTTAverages.sorted { $0.key < $1.key }
+            let maxRTT  = hours.map(\.value).max() ?? thresholds.latencyRedMs
+            let yMax    = max(maxRTT * 1.2, thresholds.latencyYellowMs * 2)
+            VStack(alignment: .leading, spacing: 6) {
+                Chart {
+                    RuleMark(y: .value("Yellow", thresholds.latencyYellowMs))
+                        .foregroundStyle(Color.orange.opacity(0.4))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    RuleMark(y: .value("Red", thresholds.latencyRedMs))
+                        .foregroundStyle(Color.red.opacity(0.4))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    ForEach(hours, id: \.key) { hour, avg in
+                        BarMark(
+                            x: .value("Hour", hourLabel(hour)),
+                            y: .value("Avg RTT ms", avg)
+                        )
+                        .foregroundStyle(barColor(avg))
+                        .cornerRadius(3)
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 8)) { v in
+                        AxisValueLabel().font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { _ in
+                        AxisValueLabel().font(.caption).foregroundStyle(.secondary)
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
+                    }
+                }
+                .chartYScale(domain: 0...yMax)
+                .frame(height: 160)
+
+                HStack(spacing: 12) {
+                    legendDot(.green,  "Normal")
+                    legendDot(.orange, "Elevated")
+                    legendDot(.red,    "High")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    private func hourLabel(_ hour: Int) -> String {
+        switch hour {
+        case 0:  return "12 AM"
+        case 12: return "12 PM"
+        case let h where h < 12: return "\(h) AM"
+        default: return "\(hour - 12) PM"
+        }
+    }
+
+    private func barColor(_ avg: Double) -> Color {
+        if avg >= thresholds.latencyRedMs    { return .red }
+        if avg >= thresholds.latencyYellowMs { return .orange }
+        return .green
+    }
+
+    private func legendDot(_ color: Color, _ label: String) -> some View {
+        HStack(spacing: 4) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 10, height: 10)
+            Text(label)
         }
     }
 

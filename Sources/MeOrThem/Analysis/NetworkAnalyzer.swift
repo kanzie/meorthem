@@ -47,6 +47,7 @@ struct NetworkFinding: Identifiable {
         case wifi         = "Wi-Fi Signal"
         case bandwidth    = "Bandwidth"
         case connectivity = "Connectivity"
+        case dns          = "DNS"
     }
 
     let id = UUID()
@@ -55,6 +56,17 @@ struct NetworkFinding: Identifiable {
     let detail: String
     /// 0–1. Accounts for data sufficiency and session mixing.
     let confidence: Double
+    /// Optional long-form text shown in a disclosure section (e.g. raw traceroute output).
+    let expandedDetail: String?
+
+    init(category: Category, title: String, detail: String,
+         confidence: Double, expandedDetail: String? = nil) {
+        self.category       = category
+        self.title          = title
+        self.detail         = detail
+        self.confidence     = confidence
+        self.expandedDetail = expandedDetail
+    }
 
     var confidenceLabel: String {
         switch confidence {
@@ -664,7 +676,7 @@ final class NetworkAnalyzer: @unchecked Sendable {
             let confidence   = min(1.0, base * dnsSuf.multiplier)
             let detail = String(format: "%.0f%% of DNS lookups failed (%d of %d samples). DNS failures prevent hostname resolution and can cause intermittent connectivity errors even when the network path is otherwise healthy. Check router DNS settings or try switching to a public resolver such as 1.1.1.1 or 8.8.8.8.",
                                 failRate * 100, failCount, total)
-            findings.append(NetworkFinding(category: .connectivity,
+            findings.append(NetworkFinding(category: .dns,
                                            title: "DNS resolution failures",
                                            detail: detail,
                                            confidence: confidence))
@@ -678,7 +690,7 @@ final class NetworkAnalyzer: @unchecked Sendable {
                 let confidence   = min(1.0, base * dnsSuf.multiplier)
                 let detail = String(format: "DNS resolution averaged %.0f ms (threshold 200 ms). Slow DNS adds hidden latency to every new connection — websites and apps feel sluggish even when server ping times are low. The likely cause is a slow router DNS relay or ISP resolver; switching to 1.1.1.1 or 8.8.8.8 typically resolves it.",
                                     avg)
-                findings.append(NetworkFinding(category: .connectivity,
+                findings.append(NetworkFinding(category: .dns,
                                                title: "Slow DNS resolution",
                                                detail: detail,
                                                confidence: confidence))
@@ -727,7 +739,7 @@ final class NetworkAnalyzer: @unchecked Sendable {
 
             let detail = String(format: "\"%@\" (%@) failed %.0f%% of the time (%d of %d probes). Consider disabling this resolver if failures persist, or check for connectivity issues specific to this server.",
                                 name, ip, failRate * 100, failures.count, rows.count)
-            findings.append(NetworkFinding(category: .connectivity,
+            findings.append(NetworkFinding(category: .dns,
                                            title: "DNS resolver \"\(name)\" unreliable",
                                            detail: detail,
                                            confidence: confidence))
@@ -782,7 +794,7 @@ final class NetworkAnalyzer: @unchecked Sendable {
 
         let detail = String(format: "Even the fastest resolver (\"%@\") averaged %.0f ms — above the 200 ms threshold. Slow DNS adds hidden latency to every new connection. %@",
                             bestName, bestRTT, recommendation)
-        return [NetworkFinding(category: .connectivity,
+        return [NetworkFinding(category: .dns,
                                title: "Slow DNS resolution",
                                detail: detail,
                                confidence: confidence)]
@@ -822,7 +834,7 @@ final class NetworkAnalyzer: @unchecked Sendable {
                             fastest.name, fastest.rtt,
                             sysRTT / fastest.rtt,
                             fastest.name)
-        return [NetworkFinding(category: .connectivity,
+        return [NetworkFinding(category: .dns,
                                title: "Faster DNS resolver available",
                                detail: detail,
                                confidence: 0.65)]
@@ -850,7 +862,7 @@ final class NetworkAnalyzer: @unchecked Sendable {
             : ""
 
         let detail = "All DNS resolvers (\(resolversWithData.count) monitored) were unreachable for most of this session. When all resolvers fail simultaneously, the cause is typically a complete network outage or severe connectivity degradation rather than a DNS-specific issue.\(crossRef)"
-        return [NetworkFinding(category: .connectivity,
+        return [NetworkFinding(category: .dns,
                                title: "Complete DNS failure — likely network outage",
                                detail: detail,
                                confidence: 0.80)]
@@ -882,7 +894,7 @@ final class NetworkAnalyzer: @unchecked Sendable {
 
         let detail = "Public DNS resolvers were unreachable on this network (%.0f%% failure rate) while your local/gateway resolver worked normally (%.0f%% failure rate). This pattern indicates that UDP port 53 is blocked for external destinations — common on enterprise, hotel, and some ISP networks. Only your network's configured resolver is usable here."
 
-        return [NetworkFinding(category: .connectivity,
+        return [NetworkFinding(category: .dns,
                                title: "External DNS blocked (UDP/53 filtered)",
                                detail: String(format: detail, avgExternalFail * 100, avgLocalFail * 100),
                                confidence: 0.80)]
@@ -1108,7 +1120,8 @@ final class NetworkAnalyzer: @unchecked Sendable {
             findings.append(NetworkFinding(category: .connectivity,
                                            title: "Traceroute snapshot",
                                            detail: detail,
-                                           confidence: 0.60))
+                                           confidence: 0.60,
+                                           expandedDetail: row.output.trimmingCharacters(in: .whitespacesAndNewlines)))
         }
         return findings
     }
