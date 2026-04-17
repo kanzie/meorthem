@@ -142,6 +142,35 @@ public final class SQLiteStore: @unchecked Sendable {
         queue.sync { _mtuRows(sessionID: sessionID.uuidString) }
     }
 
+    /// Insert a single DNS resolver probe result. Fire-and-forget.
+    public func insertDNSResolverSample(timestamp: Date,
+                                        resolverIP: String,
+                                        resolverName: String,
+                                        queryHost: String,
+                                        resolveMs: Double?,
+                                        rcode: Int?,
+                                        sessionID: UUID? = nil) {
+        let ts      = timestamp.timeIntervalSince1970
+        let sessStr = sessionID?.uuidString
+        queue.async { [weak self] in
+            self?._insertDNSResolverSample(ts: ts, resolverIP: resolverIP,
+                                           resolverName: resolverName, queryHost: queryHost,
+                                           resolveMs: resolveMs, rcode: rcode, sessionID: sessStr)
+        }
+    }
+
+    /// All DNS resolver samples for a session, ascending by timestamp.
+    public func dnsResolverRows(sessionID: UUID) -> [DNSResolverRow] {
+        queue.sync { _dnsResolverRows(sessionID: sessionID.uuidString) }
+    }
+
+    /// All DNS resolver samples in a time range (for export and graphs), ascending.
+    public func dnsResolverRows(from: Date, to: Date) -> [DNSResolverRow] {
+        let lo = from.timeIntervalSince1970
+        let hi = to.timeIntervalSince1970
+        return queue.sync { _dnsResolverRowsInRange(from: lo, to: hi) }
+    }
+
     public func insertWiFi(timestamp: Date,
                            rssi: Int,
                            noise: Int,
@@ -227,7 +256,8 @@ public final class SQLiteStore: @unchecked Sendable {
             self?._exec("DELETE FROM wifi_samples    WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM dns_samples       WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM interface_errors  WHERE timestamp < \(rawCutoff);")
-            self?._exec("DELETE FROM mtu_checks        WHERE timestamp < \(rawCutoff);")
+            self?._exec("DELETE FROM mtu_checks               WHERE timestamp < \(rawCutoff);")
+            self?._exec("DELETE FROM dns_resolver_samples     WHERE timestamp < \(rawCutoff);")
             self?._exec("DELETE FROM ping_aggregates WHERE timestamp_minute < \(aggCutoff);")
             self?._exec("DELETE FROM incidents WHERE ended_at IS NOT NULL AND ended_at < \(incCutoff);")
             self?._exec("PRAGMA wal_checkpoint(PASSIVE);")
@@ -289,6 +319,17 @@ public final class SQLiteStore: @unchecked Sendable {
         public let reachable:    Bool
         /// Round-trip time in milliseconds if reachable.
         public let rttMs:        Double?
+    }
+
+    public struct DNSResolverRow {
+        public let timestamp:    Date
+        public let resolverIP:   String
+        public let resolverName: String
+        public let queryHost:    String
+        /// Round-trip time in milliseconds. nil = timeout or SERVFAIL (check `rcode`).
+        public let resolveMs:    Double?
+        /// DNS RCODE: 0=NOERROR, 2=SERVFAIL, 3=NXDOMAIN. nil = socket timeout (no response).
+        public let rcode:        Int?
     }
 
     public struct NetworkSessionRow: Identifiable {
@@ -613,6 +654,19 @@ public final class SQLiteStore: @unchecked Sendable {
                 session_id   TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_mtu_session ON mtu_checks(session_id);
+            CREATE TABLE IF NOT EXISTS dns_resolver_samples (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp     REAL    NOT NULL,
+                resolver_ip   TEXT    NOT NULL,
+                resolver_name TEXT    NOT NULL,
+                query_host    TEXT    NOT NULL,
+                resolve_ms    REAL,
+                rcode         INTEGER,
+                session_id    TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_dnsres_session  ON dns_resolver_samples(session_id);
+            CREATE INDEX IF NOT EXISTS idx_dnsres_time     ON dns_resolver_samples(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_dnsres_ip_time  ON dns_resolver_samples(resolver_ip, timestamp);
             """)
     }
 
@@ -1077,6 +1131,71 @@ public final class SQLiteStore: @unchecked Sendable {
                               ? sqlite3_column_double(stmt, 4) : nil
             rows.append(MTURow(timestamp: ts, host: host, payloadBytes: payloadBytes,
                                reachable: reachable, rttMs: rttMs))
+        }
+        return rows
+    }
+
+    private func _insertDNSResolverSample(ts: Double, resolverIP: String, resolverName: String,
+                                           queryHost: String, resolveMs: Double?, rcode: Int?,
+                                           sessionID: String?) {
+        let sql = """
+            INSERT INTO dns_resolver_samples
+                (timestamp, resolver_ip, resolver_name, query_host, resolve_ms, rcode, session_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, ts)
+        _bindText(stmt, 2, resolverIP)
+        _bindText(stmt, 3, resolverName)
+        _bindText(stmt, 4, queryHost)
+        if let ms = resolveMs { sqlite3_bind_double(stmt, 5, ms) } else { sqlite3_bind_null(stmt, 5) }
+        if let rc = rcode     { sqlite3_bind_int(stmt, 6, Int32(rc)) } else { sqlite3_bind_null(stmt, 6) }
+        if let sid = sessionID { _bindText(stmt, 7, sid) } else { sqlite3_bind_null(stmt, 7) }
+        sqlite3_step(stmt)
+    }
+
+    private func _dnsResolverRows(sessionID: String) -> [DNSResolverRow] {
+        let sql = """
+            SELECT timestamp, resolver_ip, resolver_name, query_host, resolve_ms, rcode
+            FROM dns_resolver_samples
+            WHERE session_id = ?
+            ORDER BY timestamp ASC;
+            """
+        return _fetchDNSResolverRows(sql: sql, bind: { stmt in _bindText(stmt, 1, sessionID) })
+    }
+
+    private func _dnsResolverRowsInRange(from: Double, to: Double) -> [DNSResolverRow] {
+        let sql = """
+            SELECT timestamp, resolver_ip, resolver_name, query_host, resolve_ms, rcode
+            FROM dns_resolver_samples
+            WHERE timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp ASC;
+            """
+        return _fetchDNSResolverRows(sql: sql) { stmt in
+            sqlite3_bind_double(stmt, 1, from)
+            sqlite3_bind_double(stmt, 2, to)
+        }
+    }
+
+    /// Shared row-mapping logic for DNS resolver result sets.
+    private func _fetchDNSResolverRows(sql: String,
+                                        bind: (OpaquePointer) -> Void) -> [DNSResolverRow] {
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt)
+        var rows: [DNSResolverRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let ts   = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0))
+            let ip   = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+            let name = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+            let host = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+            let ms: Double? = sqlite3_column_type(stmt, 4) != SQLITE_NULL
+                            ? sqlite3_column_double(stmt, 4) : nil
+            let rc: Int?    = sqlite3_column_type(stmt, 5) != SQLITE_NULL
+                            ? Int(sqlite3_column_int(stmt, 5)) : nil
+            rows.append(DNSResolverRow(timestamp: ts, resolverIP: ip, resolverName: name,
+                                       queryHost: host, resolveMs: ms, rcode: rc))
         }
         return rows
     }

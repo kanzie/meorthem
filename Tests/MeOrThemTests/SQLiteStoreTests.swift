@@ -426,4 +426,62 @@ func runSQLiteStoreTests() {
         expectEqual(otherRows.count, 1, "other session has its own row")
         expectEqual(otherRows[0].host, "1.1.1.1", "other session host correct")
     }
+
+    suite("SQLiteStore — dns_resolver_samples round-trip") {
+        let store  = SQLiteStore(path: ":memory:")
+        let sessID = UUID()
+        let now    = Date()
+
+        // Successful probe (NOERROR, resolveMs set)
+        store.insertDNSResolverSample(timestamp: now, resolverIP: "1.1.1.1",
+                                      resolverName: "Cloudflare", queryHost: "example.com",
+                                      resolveMs: 12.4, rcode: 0, sessionID: sessID)
+        // SERVFAIL (rcode=2, no resolveMs)
+        store.insertDNSResolverSample(timestamp: now.addingTimeInterval(30), resolverIP: "8.8.8.8",
+                                      resolverName: "Google", queryHost: "example.com",
+                                      resolveMs: nil, rcode: 2, sessionID: sessID)
+        // Timeout (nil resolveMs AND nil rcode)
+        store.insertDNSResolverSample(timestamp: now.addingTimeInterval(60), resolverIP: "9.9.9.9",
+                                      resolverName: "Quad9", queryHost: "example.com",
+                                      resolveMs: nil, rcode: nil, sessionID: sessID)
+        // Different session — must not appear in sessID query
+        let otherSession = UUID()
+        store.insertDNSResolverSample(timestamp: now.addingTimeInterval(90), resolverIP: "1.0.0.1",
+                                      resolverName: "Cloudflare (alt)", queryHost: "example.com",
+                                      resolveMs: 11.0, rcode: 0, sessionID: otherSession)
+        store.waitForPendingOps()
+
+        let rows = store.dnsResolverRows(sessionID: sessID)
+        expectEqual(rows.count, 3, "three rows for sessID")
+
+        // Row 0: Cloudflare, NOERROR
+        expectEqual(rows[0].resolverIP,   "1.1.1.1",    "resolverIP preserved")
+        expectEqual(rows[0].resolverName, "Cloudflare",  "resolverName preserved")
+        expectEqual(rows[0].queryHost,    "example.com", "queryHost preserved")
+        expectEqual(rows[0].resolveMs,    12.4,           "resolveMs preserved")
+        expectEqual(rows[0].rcode,        0,              "rcode=0 (NOERROR) preserved")
+
+        // Row 1: Google, SERVFAIL
+        expectNil(rows[1].resolveMs, "SERVFAIL has nil resolveMs")
+        expectEqual(rows[1].rcode,   2, "rcode=2 (SERVFAIL) preserved")
+
+        // Row 2: Quad9, timeout
+        expectNil(rows[2].resolveMs, "timeout has nil resolveMs")
+        expectNil(rows[2].rcode,     "timeout has nil rcode")
+
+        // Session isolation
+        let otherRows = store.dnsResolverRows(sessionID: otherSession)
+        expectEqual(otherRows.count, 1, "other session has its own row")
+        expectEqual(otherRows[0].resolverIP, "1.0.0.1", "other session IP correct")
+
+        // Time-range query: only rows 0 and 1 (within ±70 s of `now`)
+        let rangeRows = store.dnsResolverRows(from: now.addingTimeInterval(-1),
+                                              to:   now.addingTimeInterval(45))
+        expectEqual(rangeRows.count, 2, "range query returns 2 rows")
+        expectEqual(rangeRows[0].resolverIP, "1.1.1.1", "first row in range is Cloudflare")
+        expectEqual(rangeRows[1].resolverIP, "8.8.8.8", "second row in range is Google")
+
+        // Ascending order guarantee
+        expect(rows[0].timestamp < rows[1].timestamp, "rows are ascending by timestamp")
+    }
 }
