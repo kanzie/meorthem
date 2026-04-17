@@ -4,6 +4,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
     case general    = "General"
     case targets    = "Targets"
     case thresholds = "Thresholds"
+    case dns        = "DNS Resolvers"
 
     var id: String { rawValue }
 
@@ -12,6 +13,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .general:    return "gear"
         case .targets:    return "server.rack"
         case .thresholds: return "dial.medium"
+        case .dns:        return "network"
         }
     }
 
@@ -20,6 +22,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         case .general:    return "Startup, monitoring & appearance"
         case .targets:    return "Hosts to ping"
         case .thresholds: return "Alert levels & evaluation windows"
+        case .dns:        return "Multi-resolver latency monitoring"
         }
     }
 }
@@ -96,6 +99,7 @@ struct SettingsView: View {
                 case .general:    GeneralTab()
                 case .targets:    TargetsTab()
                 case .thresholds: ThresholdsTab()
+                case .dns:        DNSResolversTab()
                 }
             }
             .frame(minWidth: 400, maxWidth: .infinity, maxHeight: .infinity)

@@ -20,6 +20,13 @@ public enum InputValidator {
         return isIPv4(trimmed) || isIPv6(trimmed) || isHostname(trimmed)
     }
 
+    /// Returns true if the input is a valid IPv4 or IPv6 address.
+    /// Rejects hostnames, URLs, and port numbers.
+    public static func isValidIP(_ input: String) -> Bool {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        return isIPv4(trimmed) || isIPv6(trimmed)
+    }
+
     public static func sanitizedLabel(_ input: String) -> String {
         input.trimmingCharacters(in: .whitespacesAndNewlines)
              .components(separatedBy: .controlCharacters).joined()
