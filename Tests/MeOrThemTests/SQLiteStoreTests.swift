@@ -484,4 +484,94 @@ func runSQLiteStoreTests() {
         // Ascending order guarantee
         expect(rows[0].timestamp < rows[1].timestamp, "rows are ascending by timestamp")
     }
+
+    suite("SQLiteStore — traceroute_events round-trip") {
+        let store  = SQLiteStore(path: ":memory:")
+        let sessID = UUID()
+        let now    = Date()
+
+        // Insert a successful traceroute snapshot with all fields
+        store.insertTracerouteEvent(sessionID: sessID, timestamp: now,
+                                    targetHost: "8.8.8.8",
+                                    output: "traceroute to 8.8.8.8\n 1  192.168.1.1  1.2 ms\n 2  * * *\n 3  8.8.8.8  15.4 ms",
+                                    hopCount: 3, triggerRTTMs: 120.5, triggerLossPct: 25.0)
+        // Insert a timeout snapshot (nil hopCount, nil trigger values)
+        store.insertTracerouteEvent(sessionID: sessID, timestamp: now.addingTimeInterval(300),
+                                    targetHost: "1.1.1.1",
+                                    output: "traceroute to 1.1.1.1\n 1  * * *",
+                                    hopCount: nil, triggerRTTMs: nil, triggerLossPct: nil)
+        // Insert an event for a different session
+        let otherSess = UUID()
+        store.insertTracerouteEvent(sessionID: otherSess, timestamp: now.addingTimeInterval(10),
+                                    targetHost: "1.0.0.1", output: "trace...",
+                                    hopCount: 5, triggerRTTMs: 50.0, triggerLossPct: 0.0)
+        store.waitForPendingOps()
+
+        let rows = store.tracerouteEvents(sessionID: sessID)
+        expectEqual(rows.count, 2, "two traceroute rows for sessID")
+
+        // First row — full data
+        expectEqual(rows[0].targetHost,     "8.8.8.8", "targetHost preserved")
+        expectEqual(rows[0].hopCount,        3,         "hopCount preserved")
+        expectEqual(rows[0].triggerRTTMs,   120.5,      "triggerRTTMs preserved")
+        expectEqual(rows[0].triggerLossPct, 25.0,       "triggerLossPct preserved")
+        expect(rows[0].output.contains("192.168.1.1"),  "output text preserved")
+
+        // Second row — nil optional fields
+        expectNil(rows[1].hopCount,       "nil hopCount preserved")
+        expectNil(rows[1].triggerRTTMs,   "nil triggerRTTMs preserved")
+        expectNil(rows[1].triggerLossPct, "nil triggerLossPct preserved")
+
+        // Session isolation
+        let otherRows = store.tracerouteEvents(sessionID: otherSess)
+        expectEqual(otherRows.count, 1, "other session has its own row")
+        expectEqual(otherRows[0].targetHost, "1.0.0.1", "other session host correct")
+
+        // Ascending order
+        expect(rows[0].timestamp < rows[1].timestamp, "rows ascending by timestamp")
+    }
+
+    suite("SQLiteStore — hourlyRTTAverages") {
+        let store = SQLiteStore(path: ":memory:")
+        // Use timestamps 10 days in the past so aggregateAndPrune picks them up
+        // (raw retention = 7 days; anything older gets aggregated and pruned)
+        let base = Date().addingTimeInterval(-10 * 86_400)
+        let tID  = UUID()
+
+        // Group A: 5 pings one minute apart — RTT ~80 ms
+        for i in 0..<5 {
+            let ts = base.addingTimeInterval(Double(i) * 60)
+            let p  = PingResult(timestamp: ts, rtt: 80.0 + Double(i), lossPercent: 0, jitter: nil)
+            store.insertPing(p, targetID: tID, targetLabel: "T", host: "h")
+        }
+        // Group B: 4 pings starting 2 hours later — RTT ~200 ms
+        // 2-hour offset guarantees a different hour-of-day bucket regardless of timezone
+        for i in 0..<4 {
+            let ts = base.addingTimeInterval(7200 + Double(i) * 60)
+            let p  = PingResult(timestamp: ts, rtt: 200.0 + Double(i), lossPercent: 0, jitter: nil)
+            store.insertPing(p, targetID: tID, targetLabel: "T", host: "h")
+        }
+        store.waitForPendingOps()
+
+        // Aggregate: moves old ping_samples into ping_aggregates
+        store.aggregateAndPrune(rawRetentionDays: 7, aggregateRetentionDays: 90, incidentRetentionDays: 365)
+        store.waitForPendingOps()
+
+        // Query with 20-day lookback and minSampleCount=1
+        let averages = store.hourlyRTTAverages(lookback: 20 * 86_400, minSampleCount: 1)
+
+        // Must see at least 2 distinct hour buckets (group A and group B are 2 h apart)
+        expect(averages.count >= 2, "at least 2 hour buckets found")
+
+        // The higher-RTT group's hour must be measurably worse
+        let rtts = averages.values.sorted()
+        if rtts.count >= 2 {
+            expect(rtts.last! > rtts.first! * 1.5,
+                   "high-RTT hour is significantly worse than low-RTT hour")
+        }
+
+        // minSampleCount filter: require more aggregate rows than any hour has
+        let filtered = store.hourlyRTTAverages(lookback: 20 * 86_400, minSampleCount: 50)
+        expect(filtered.isEmpty, "high minSampleCount filters all sparse hours")
+    }
 }

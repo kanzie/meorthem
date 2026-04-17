@@ -21,6 +21,10 @@ final class AppEnvironment {
     // Session tracking — persisted fingerprint and active session ID
     private var currentSessionFingerprint: String?
 
+    // Traceroute rate-limiting: don't fire more than once per 5 minutes
+    private var lastTracerouteDate: Date?
+    private let tracerouteDebounce: TimeInterval = 300
+
     init() {
         settings          = AppSettings.shared
         sqliteStore       = SQLiteStore.makeDefault()
@@ -37,6 +41,14 @@ final class AppEnvironment {
             .sink { [weak self] status in
                 self?.alertManager.handleStatusChange(status)
             }
+            .store(in: &cancellables)
+
+        // Traceroute trigger: fire when the connection degrades to red (confirmed outage).
+        // Debounced to at most once per 5 minutes to avoid hammering the network.
+        metricStore.$overallStatus
+            .scan((MetricStatus.green, MetricStatus.green)) { acc, new in (acc.1, new) }
+            .filter { prev, curr in prev == .green && curr == .red }
+            .sink { [weak self] _ in self?.triggerTraceroute() }
             .store(in: &cancellables)
 
         // Restart monitoring engine when poll interval changes.
@@ -177,6 +189,35 @@ final class AppEnvironment {
             aggregateRetentionDays: settings.aggregateRetentionDays,
             incidentRetentionDays:  settings.incidentRetentionDays
         )
+    }
+
+    // MARK: - Traceroute on degradation
+
+    private func triggerTraceroute() {
+        let now = Date()
+        if let last = lastTracerouteDate, now.timeIntervalSince(last) < tracerouteDebounce { return }
+        lastTracerouteDate = now
+
+        guard let host = settings.pingTargets.first?.host else { return }
+        let db        = sqliteStore
+        let sessionID = metricStore.currentSessionID
+        // Snapshot the current average RTT/loss across all monitored targets for context
+        let pings     = metricStore.latestPing.values
+        let trigRTT: Double?  = pings.compactMap(\.rtt).isEmpty ? nil
+                              : pings.compactMap(\.rtt).reduce(0, +) / Double(pings.compactMap(\.rtt).count)
+        let trigLoss: Double? = pings.isEmpty ? nil
+                              : pings.map(\.lossPercent).reduce(0, +) / Double(pings.count)
+
+        Task.detached(priority: .utility) {
+            guard let result = TracerouteRunner.run(host: host) else { return }
+            db.insertTracerouteEvent(sessionID: sessionID,
+                                     timestamp: Date(),
+                                     targetHost: host,
+                                     output: result.output,
+                                     hopCount: result.hopCount,
+                                     triggerRTTMs: trigRTT,
+                                     triggerLossPct: trigLoss)
+        }
     }
 
     // MARK: - Bandwidth scheduling

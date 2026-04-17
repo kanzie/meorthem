@@ -171,6 +171,42 @@ public final class SQLiteStore: @unchecked Sendable {
         return queue.sync { _dnsResolverRowsInRange(from: lo, to: hi) }
     }
 
+    // MARK: - Traceroute events
+
+    /// Persists a traceroute output snapshot (fire-and-forget, serialised on the storage queue).
+    public func insertTracerouteEvent(sessionID: UUID?,
+                                      timestamp: Date,
+                                      targetHost: String,
+                                      output: String,
+                                      hopCount: Int?,
+                                      triggerRTTMs: Double?,
+                                      triggerLossPct: Double?) {
+        let ts  = timestamp.timeIntervalSince1970
+        let sid = sessionID?.uuidString
+        queue.async { [weak self] in
+            self?._insertTracerouteEvent(sessionID: sid, timestamp: ts, targetHost: targetHost,
+                                         output: output, hopCount: hopCount,
+                                         triggerRTTMs: triggerRTTMs,
+                                         triggerLossPct: triggerLossPct)
+        }
+    }
+
+    /// All traceroute events for a session, ascending by timestamp.
+    public func tracerouteEvents(sessionID: UUID) -> [TracerouteEventRow] {
+        queue.sync { _tracerouteEvents(sessionID: sessionID.uuidString) }
+    }
+
+    // MARK: - Cross-session hourly RTT averages
+
+    /// Computes per-hour-of-day (0–23) average RTT across all ping_aggregates in the
+    /// lookback window. Used by the time-of-day congestion pattern in NetworkAnalyzer.
+    /// Returns only hours that have at least `minSampleCount` aggregate rows.
+    public func hourlyRTTAverages(lookback: TimeInterval,
+                                   minSampleCount: Int = 3) -> [Int: Double] {
+        let since = Date().addingTimeInterval(-lookback).timeIntervalSince1970
+        return queue.sync { _hourlyRTTAverages(since: since, minSampleCount: minSampleCount) }
+    }
+
     public func insertWiFi(timestamp: Date,
                            rssi: Int,
                            noise: Int,
@@ -330,6 +366,21 @@ public final class SQLiteStore: @unchecked Sendable {
         public let resolveMs:    Double?
         /// DNS RCODE: 0=NOERROR, 2=SERVFAIL, 3=NXDOMAIN. nil = socket timeout (no response).
         public let rcode:        Int?
+    }
+
+    public struct TracerouteEventRow {
+        public let id:             Int64
+        public let sessionID:      UUID?
+        public let timestamp:      Date
+        public let targetHost:     String
+        /// Raw text output from `/usr/sbin/traceroute`.
+        public let output:         String
+        /// Number of hops to the final destination (nil if not reached).
+        public let hopCount:       Int?
+        /// The session's ambient RTT at the moment the traceroute was triggered.
+        public let triggerRTTMs:   Double?
+        /// The session's loss percentage at the moment of trigger.
+        public let triggerLossPct: Double?
     }
 
     public struct NetworkSessionRow: Identifiable {
@@ -667,6 +718,19 @@ public final class SQLiteStore: @unchecked Sendable {
             CREATE INDEX IF NOT EXISTS idx_dnsres_session  ON dns_resolver_samples(session_id);
             CREATE INDEX IF NOT EXISTS idx_dnsres_time     ON dns_resolver_samples(timestamp);
             CREATE INDEX IF NOT EXISTS idx_dnsres_ip_time  ON dns_resolver_samples(resolver_ip, timestamp);
+
+            CREATE TABLE IF NOT EXISTS traceroute_events (
+                id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id        TEXT,
+                timestamp         REAL    NOT NULL,
+                target_host       TEXT    NOT NULL,
+                output            TEXT    NOT NULL,
+                hop_count         INTEGER,
+                trigger_rtt_ms    REAL,
+                trigger_loss_pct  REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_traceroute_session  ON traceroute_events(session_id);
+            CREATE INDEX IF NOT EXISTS idx_traceroute_time     ON traceroute_events(timestamp);
             """)
     }
 
@@ -1198,6 +1262,88 @@ public final class SQLiteStore: @unchecked Sendable {
                                        queryHost: host, resolveMs: ms, rcode: rc))
         }
         return rows
+    }
+
+    private func _insertTracerouteEvent(sessionID: String?, timestamp: Double,
+                                         targetHost: String, output: String,
+                                         hopCount: Int?, triggerRTTMs: Double?,
+                                         triggerLossPct: Double?) {
+        let sql = """
+            INSERT INTO traceroute_events
+                (session_id, timestamp, target_host, output,
+                 hop_count, trigger_rtt_ms, trigger_loss_pct)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        if let sid = sessionID { _bindText(stmt, 1, sid) } else { sqlite3_bind_null(stmt, 1) }
+        sqlite3_bind_double(stmt, 2, timestamp)
+        _bindText(stmt, 3, targetHost)
+        _bindText(stmt, 4, output)
+        if let hc = hopCount  { sqlite3_bind_int(stmt, 5, Int32(hc)) } else { sqlite3_bind_null(stmt, 5) }
+        if let rtt = triggerRTTMs  { sqlite3_bind_double(stmt, 6, rtt) } else { sqlite3_bind_null(stmt, 6) }
+        if let lp  = triggerLossPct { sqlite3_bind_double(stmt, 7, lp)  } else { sqlite3_bind_null(stmt, 7) }
+        sqlite3_step(stmt)
+    }
+
+    private func _tracerouteEvents(sessionID: String) -> [TracerouteEventRow] {
+        let sql = """
+            SELECT id, session_id, timestamp, target_host, output,
+                   hop_count, trigger_rtt_ms, trigger_loss_pct
+            FROM traceroute_events
+            WHERE session_id = ?
+            ORDER BY timestamp ASC;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, sessionID)
+        var rows: [TracerouteEventRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let rowID     = sqlite3_column_int64(stmt, 0)
+            let sidStr    = sqlite3_column_text(stmt, 1).map { String(cString: $0) }
+            let sessionUUID = sidStr.flatMap { UUID(uuidString: $0) }
+            let ts        = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 2))
+            let host      = sqlite3_column_text(stmt, 3).map { String(cString: $0) } ?? ""
+            let output    = sqlite3_column_text(stmt, 4).map { String(cString: $0) } ?? ""
+            let hc: Int?  = sqlite3_column_type(stmt, 5) != SQLITE_NULL
+                          ? Int(sqlite3_column_int(stmt, 5)) : nil
+            let rtt: Double? = sqlite3_column_type(stmt, 6) != SQLITE_NULL
+                             ? sqlite3_column_double(stmt, 6) : nil
+            let lp: Double?  = sqlite3_column_type(stmt, 7) != SQLITE_NULL
+                             ? sqlite3_column_double(stmt, 7) : nil
+            rows.append(TracerouteEventRow(id: rowID, sessionID: sessionUUID,
+                                           timestamp: ts, targetHost: host, output: output,
+                                           hopCount: hc, triggerRTTMs: rtt,
+                                           triggerLossPct: lp))
+        }
+        return rows
+    }
+
+    private func _hourlyRTTAverages(since: Double, minSampleCount: Int) -> [Int: Double] {
+        // Use localtime modifier so hours reflect the user's clock, not UTC.
+        // ping_aggregates columns: timestamp_minute (unix seconds), avg_rtt (nullable)
+        let sql = """
+            SELECT
+                CAST(strftime('%H', datetime(timestamp_minute, 'unixepoch', 'localtime')) AS INTEGER) AS hour,
+                AVG(avg_rtt) AS avg_rtt,
+                COUNT(*)     AS n
+            FROM ping_aggregates
+            WHERE timestamp_minute >= ? AND avg_rtt IS NOT NULL
+            GROUP BY hour
+            HAVING n >= ?
+            ORDER BY hour;
+            """
+        guard let stmt = _prepare(sql) else { return [:] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, since)
+        sqlite3_bind_int(stmt, 2, Int32(minSampleCount))
+        var result: [Int: Double] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let hour   = Int(sqlite3_column_int(stmt, 0))
+            let avgRTT = sqlite3_column_double(stmt, 1)
+            result[hour] = avgRTT
+        }
+        return result
     }
 
     private func _incidents(limit: Int) -> [IncidentRow] {

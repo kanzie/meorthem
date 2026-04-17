@@ -87,6 +87,11 @@ struct SessionAnalysisInput {
     let interfaceErrorRows: [SQLiteStore.InterfaceErrorRow]
     /// MTU probe results (~every 2.5 min). Used to detect path fragmentation.
     let mtuRows: [SQLiteStore.MTURow]
+    /// Cross-session hourly average RTTs keyed by hour-of-day (0–23). Sourced from
+    /// `ping_aggregates` across all historical sessions; used by the time-of-day pattern.
+    var crossSessionHourlyRTTs: [Int: Double] = [:]
+    /// Traceroute snapshots captured during detected degradation events for this session.
+    var tracerouteRows: [SQLiteStore.TracerouteEventRow] = []
 }
 
 // MARK: - Analyzer
@@ -134,6 +139,10 @@ final class NetworkAnalyzer: @unchecked Sendable {
         findings += checkDNSMultiResolver(input)                     // patterns 10a–10e
         findings += checkInterfaceErrors(input, sufficiency: sufficiency)
         findings += checkMTU(input, sufficiency: sufficiency)
+        findings += checkLatencyTrend(input, sufficiency: sufficiency)
+        findings += checkChannelSwitching(input, sufficiency: sufficiency)
+        findings += checkTimeOfDayPattern(input)
+        findings += checkTraceroute(input)
 
         return findings.filter { $0.confidence >= 0.40 }
     }
@@ -965,6 +974,223 @@ final class NetworkAnalyzer: @unchecked Sendable {
 
         return [NetworkFinding(category: .connectivity,
                                title: "Possible MTU / path fragmentation issue",
+                               detail: detail,
+                               confidence: confidence)]
+    }
+
+    // MARK: - Pattern 13: Latency trend (linear regression)
+
+    private func checkLatencyTrend(_ input: SessionAnalysisInput,
+                                    sufficiency: DataSufficiency) -> [NetworkFinding] {
+        let sorted = input.pingRows.sorted { $0.timestamp < $1.timestamp }
+        guard let origin = sorted.first else { return [] }
+
+        let pairs: [(x: Double, y: Double)] = sorted.compactMap { r in
+            guard let rtt = r.rttMs else { return nil }
+            return (r.timestamp.timeIntervalSince(origin.timestamp), rtt)
+        }
+        guard pairs.count >= 20 else { return [] }
+
+        // Ordinary least-squares regression: y = intercept + slope * x
+        let n     = Double(pairs.count)
+        let sumX  = pairs.reduce(0) { $0 + $1.x }
+        let sumY  = pairs.reduce(0) { $0 + $1.y }
+        let sumXY = pairs.reduce(0) { $0 + $1.x * $1.y }
+        let sumX2 = pairs.reduce(0) { $0 + $1.x * $1.x }
+        let denom = n * sumX2 - sumX * sumX
+        guard abs(denom) > 0 else { return [] }
+
+        let slope     = (n * sumXY - sumX * sumY) / denom   // ms per second
+        let intercept = (sumY - slope * sumX) / n
+        let slopePerMin = slope * 60.0
+
+        // Only surface meaningful upward trends (degradation over time)
+        guard slopePerMin > 0.30 else { return [] }
+
+        // R² measures how well the linear fit explains the variance; low R² means
+        // the "trend" is just noise.
+        let yMean     = sumY / n
+        let totalSS   = pairs.reduce(0) { $0 + pow($1.y - yMean, 2) }
+        let residualSS = pairs.reduce(0) { acc, p in
+            acc + pow(p.y - (intercept + slope * p.x), 2)
+        }
+        let r2 = totalSS > 0 ? max(0, 1.0 - residualSS / totalSS) : 0.0
+        guard r2 >= 0.20 else { return [] }
+
+        let sessionHours = (pairs.last?.x ?? 0) / 3600.0
+        let base: Double = slopePerMin >= 1.0 ? 0.80 : (slopePerMin >= 0.5 ? 0.65 : 0.50)
+        let confidence   = min(1.0, base * sufficiency.multiplier)
+
+        let detail = String(
+            format: "Latency increased steadily at %.1f ms per minute over %.1f hours " +
+                    "(R² = %.2f, indicating a %@ fit). This pattern can indicate " +
+                    "progressive router buffer saturation, thermal throttling on a " +
+                    "network device, or an application steadily increasing background " +
+                    "traffic throughout the session.",
+            slopePerMin, sessionHours, r2,
+            r2 >= 0.5 ? "strong linear" : "moderate")
+
+        return [NetworkFinding(category: .latency,
+                               title: "Latency trending upward",
+                               detail: detail,
+                               confidence: confidence)]
+    }
+
+    // MARK: - Pattern 14: Time-of-day congestion pattern (cross-session)
+
+    /// Uses cross-session hourly averages fetched from `ping_aggregates` to detect
+    /// recurring peak-hour congestion patterns across all historical sessions.
+    func checkTimeOfDayPattern(_ input: SessionAnalysisInput) -> [NetworkFinding] {
+        guard !input.crossSessionHourlyRTTs.isEmpty else { return [] }
+
+        let thresh = thresholds.latencyYellowMs
+        let overall = input.crossSessionHourlyRTTs.values.reduce(0, +)
+                      / Double(input.crossSessionHourlyRTTs.count)
+        guard overall > 0 else { return [] }
+
+        // Find hours where the average is > 1.5× overall average AND exceeds the
+        // latency threshold — hours that look bad relative to the user's baseline.
+        let peakHours = input.crossSessionHourlyRTTs
+            .filter { $0.value >= thresh && $0.value >= overall * 1.5 }
+            .sorted { $0.key < $1.key }
+
+        guard !peakHours.isEmpty else { return [] }
+
+        // Require at least 2 peak hours or one severely elevated hour
+        let severe = peakHours.filter { $0.value >= thresh * 2 }
+        guard peakHours.count >= 2 || !severe.isEmpty else { return [] }
+
+        // Confidence scales with how many hours show the pattern
+        let base: Double = peakHours.count >= 4 ? 0.75 : (peakHours.count >= 2 ? 0.65 : 0.55)
+        // No sufficiency multiplier — this uses historical aggregate data, not just
+        // the current session's sample count.
+        let confidence = base
+
+        let hourStrs = peakHours.map { (h, avg) in
+            String(format: "%02d:00 (avg %.0f ms)", h, avg)
+        }.joined(separator: ", ")
+
+        let detail = "Historical data shows recurring elevated latency during: \(hourStrs). " +
+            "This pattern typically indicates time-of-day congestion — either on your ISP's " +
+            "network during peak usage hours or on a shared local link (apartment building, " +
+            "campus, or cable segment). Consider scheduling large downloads outside these windows."
+
+        return [NetworkFinding(category: .latency,
+                               title: "Recurring peak-hour congestion",
+                               detail: detail,
+                               confidence: confidence)]
+    }
+
+    // MARK: - Pattern 15: Traceroute snapshot during degradation
+
+    /// Surfaces traceroute snapshots captured automatically when the connection degraded.
+    func checkTraceroute(_ input: SessionAnalysisInput) -> [NetworkFinding] {
+        guard !input.tracerouteRows.isEmpty else { return [] }
+
+        var findings: [NetworkFinding] = []
+        for row in input.tracerouteRows.prefix(3) {  // at most 3 snapshots per session
+            let summary = parseTracerouteSummary(row.output)
+            let timeStr = {
+                let f = DateFormatter(); f.timeStyle = .short; f.dateStyle = .none
+                return f.string(from: row.timestamp)
+            }()
+
+            let contextStr: String
+            if let rtt = row.triggerRTTMs, let loss = row.triggerLossPct {
+                contextStr = String(format: "Triggered at %@ when RTT was %.0f ms and loss %.1f%%.",
+                                    timeStr, rtt, loss)
+            } else {
+                contextStr = "Captured at \(timeStr) during a detected degradation event."
+            }
+
+            let detail = "\(contextStr) \(summary)"
+
+            findings.append(NetworkFinding(category: .connectivity,
+                                           title: "Traceroute snapshot",
+                                           detail: detail,
+                                           confidence: 0.60))
+        }
+        return findings
+    }
+
+    /// Parses `/usr/sbin/traceroute` output and returns a plain-English summary
+    /// highlighting the hop count and the highest-latency hop.
+    private func parseTracerouteSummary(_ output: String) -> String {
+        let lines = output.components(separatedBy: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        // Traceroute output lines look like: " 3  192.168.1.1  1.234 ms  ..."
+        // or " 3  * * *" for timeouts
+        var hopCount = 0
+        var maxRTT: Double = 0
+        var maxHop = 0
+
+        for line in lines.dropFirst() {  // first line is the header
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard let hopNum = parts.first.flatMap({ Int(String($0)) }) else { continue }
+            hopCount = hopNum
+            // Find the first ms value on the line
+            for (i, part) in parts.enumerated() {
+                if part == "ms", i > 0, let rtt = Double(String(parts[i - 1])), rtt > maxRTT {
+                    maxRTT = rtt
+                    maxHop = hopNum
+                }
+            }
+        }
+
+        if hopCount == 0 { return "Traceroute did not complete (all hops timed out)." }
+        if maxRTT > 0 {
+            return String(format: "Route reached %d hops. Highest latency at hop %d (%.0f ms). " +
+                          "High RTT at an early hop (1–3) points to the local network; " +
+                          "high RTT at a later hop points to ISP or internet routing.",
+                          hopCount, maxHop, maxRTT)
+        }
+        return "Route completed in \(hopCount) hops (all hops timed out — router may block ICMP TTL-exceeded messages)."
+    }
+
+    // MARK: - Pattern 16: Wi-Fi channel / band switching
+
+    private func checkChannelSwitching(_ input: SessionAnalysisInput,
+                                        sufficiency: DataSufficiency) -> [NetworkFinding] {
+        let sorted = input.wifiRows.sorted { $0.timestamp < $1.timestamp }
+        guard sorted.count >= 3 else { return [] }
+
+        var channelChanges = 0
+        var bandChanges    = 0
+        var channelSeq: [Int] = sorted.first.map { [$0.channelNumber] } ?? []
+
+        for i in 1..<sorted.count {
+            let prev = sorted[i - 1]
+            let curr = sorted[i]
+            // Skip gaps > 10 minutes — these represent session interruptions, not live switches
+            guard curr.timestamp.timeIntervalSince(prev.timestamp) < 600 else { continue }
+            if curr.channelNumber != prev.channelNumber {
+                channelChanges += 1
+                if channelSeq.last != curr.channelNumber { channelSeq.append(curr.channelNumber) }
+            }
+            if abs(curr.bandGHz - prev.bandGHz) > 0.5 {
+                bandChanges += 1
+            }
+        }
+
+        guard channelChanges >= 2 else { return [] }
+
+        let seqStr = channelSeq.map { String($0) }.joined(separator: " → ")
+        let base: Double = bandChanges > 0 ? 0.75 : (channelChanges >= 4 ? 0.70 : 0.60)
+        let confidence   = min(1.0, base * sufficiency.multiplier)
+
+        var detail = "Wi-Fi channel changed \(channelChanges) time(s) during this session " +
+            "(channel sequence: \(seqStr))."
+        if bandChanges > 0 {
+            detail += " The device also switched frequency band (2.4 GHz ↔ 5 GHz) " +
+                "\(bandChanges) time(s), which forces a full re-association and can cause " +
+                "brief connectivity interruptions."
+        }
+        detail += " Frequent channel changes suggest RF interference causing the access " +
+            "point to self-heal, the device roaming between access points, or DFS " +
+            "(Dynamic Frequency Selection) events on 5 GHz channels."
+
+        return [NetworkFinding(category: .wifi,
+                               title: "Wi-Fi channel switching detected",
                                detail: detail,
                                confidence: confidence)]
     }

@@ -5,6 +5,37 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.20.0 — 2026-04-17
+
+### New Features
+- **Latency trend detection** — The Network Analysis window now includes a finding
+  when your latency increases at a steady rate over a session. It uses ordinary
+  least-squares linear regression on the RTT sequence; the R² value is shown
+  alongside the slope so you can judge how reliable the trend is. A persistent
+  upward trend can indicate progressive router buffer saturation, thermal
+  throttling on a network device, or a background process steadily consuming
+  more bandwidth.
+- **Recurring peak-hour congestion detection** — The Network Analysis window
+  compares the selected session against up to 30 days of historical aggregate
+  data to detect hours of the day that are consistently slower than your
+  baseline. When specific hours show recurring elevated latency, the finding
+  names them and notes that the pattern is consistent with time-of-day ISP or
+  shared-segment congestion.
+- **Automatic traceroute on degradation** — When the connection degrades from
+  green to red (packet loss + high latency confirmed), the app automatically
+  runs a traceroute in the background (at most once every five minutes) and
+  saves the result. The Network Analysis window surfaces a Traceroute Snapshot
+  finding for the session, summarising the hop count and the highest-latency
+  hop to help pinpoint where on the path the problem is occurring.
+- **Wi-Fi channel switching detection** — The Network Analysis window now
+  detects when your Wi-Fi channel changed two or more times during a session.
+  Frequent channel changes suggest RF interference forcing the access point to
+  self-heal, the device roaming between access points, or DFS events on 5 GHz
+  channels. Band switches (2.4 GHz ↔ 5 GHz) are called out separately as they
+  force a full reassociation.
+
+---
+
 ## v2.16.0 — 2026-04-17
 
 ### New Features
