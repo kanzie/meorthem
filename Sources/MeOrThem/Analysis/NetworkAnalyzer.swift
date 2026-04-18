@@ -506,18 +506,29 @@ final class NetworkAnalyzer: @unchecked Sendable {
 
         // Build paired (RSSI, RTT) observations by matching each ping row to the
         // nearest WiFi sample within ±15 seconds.
+        // Pre-extract timestamps once so the binary search only touches a Double array.
+        let wifiTimestamps = input.wifiRows.map { $0.timestamp.timeIntervalSince1970 }
+
         var pairs: [(rssi: Double, rtt: Double)] = []
         for pingRow in input.pingRows {
             guard let rtt = pingRow.rttMs else { continue }
             let t = pingRow.timestamp.timeIntervalSince1970
-            // Binary-search-friendly: wifi rows are ascending by timestamp
-            let nearest = input.wifiRows.min(by: {
-                abs($0.timestamp.timeIntervalSince1970 - t) <
-                abs($1.timestamp.timeIntervalSince1970 - t)
-            })
-            guard let wifi = nearest,
-                  abs(wifi.timestamp.timeIntervalSince1970 - t) <= 15 else { continue }
-            pairs.append((Double(wifi.rssi), rtt))
+
+            // Binary search for the insertion point of t in the sorted wifiTimestamps array.
+            var lo = 0, hi = wifiTimestamps.count
+            while lo < hi {
+                let mid = (lo + hi) / 2
+                if wifiTimestamps[mid] < t { lo = mid + 1 } else { hi = mid }
+            }
+            // Check the two candidates around the insertion point and pick the closer one.
+            var bestIdx: Int? = nil
+            var bestDist = Double.infinity
+            for idx in [lo - 1, lo] where idx >= 0 && idx < wifiTimestamps.count {
+                let d = abs(wifiTimestamps[idx] - t)
+                if d < bestDist { bestDist = d; bestIdx = idx }
+            }
+            guard let idx = bestIdx, bestDist <= 15 else { continue }
+            pairs.append((Double(input.wifiRows[idx].rssi), rtt))
         }
         guard pairs.count >= 20 else { return [] }
 

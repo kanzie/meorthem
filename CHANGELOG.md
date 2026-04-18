@@ -5,6 +5,14 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.21.4 — 2026-04-18
+
+### Changes
+- **Smoother "Copied!" feedback** — The copy-to-clipboard button in the Ping Report window now resets using structured concurrency instead of a legacy GCD timer, keeping it consistent with the rest of the app's async model.
+- **Faster WiFi–latency correlation** — The network analyser now uses binary search to pair ping rows with their nearest WiFi sample, reducing the per-analysis cost from O(n²) to O(n log n) on large history windows.
+
+---
+
 ## v2.21.3 — 2026-04-18
 
 ### Bug Fixes

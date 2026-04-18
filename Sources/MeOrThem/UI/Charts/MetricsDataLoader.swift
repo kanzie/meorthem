@@ -81,6 +81,10 @@ final class MetricsDataLoader: ObservableObject {
         self.targets = targets
     }
 
+    deinit {
+        loadTask?.cancel()
+    }
+
     /// Probes every time window with a LIMIT-1 query and updates windowsWithData.
     /// Pass specific target IDs to check only those targets (e.g. when a single target
     /// is selected in the picker); pass nil to check across all targets.
@@ -127,9 +131,20 @@ final class MetricsDataLoader: ObservableObject {
             var jitter   = [ChartPoint]()
 
             for target in targets {
-                let rows = useAgg
-                    ? db.aggregatedPingRows(for: target.id, from: from, to: now)
-                    : db.pingRows(for: target.id, from: from, to: now)
+                // For wide windows we prefer aggregated minute-level rows, but also
+                // include raw samples for the recent period (data younger than the raw
+                // retention window hasn't been rolled up yet and lives only in ping_samples).
+                let rows: [SQLiteStore.PingRow]
+                if useAgg {
+                    let aggRows = db.aggregatedPingRows(for: target.id, from: from, to: now)
+                    let rawRows = db.pingRows(for: target.id, from: from, to: now)
+                    // Aggregates and raw rows cover disjoint time ranges in steady state
+                    // (aggregateAndPrune deletes raw rows after rolling them up). During the
+                    // first 7 days of operation only raw rows exist, so combining is safe.
+                    rows = (aggRows + rawRows).sorted { $0.timestamp < $1.timestamp }
+                } else {
+                    rows = db.pingRows(for: target.id, from: from, to: now)
+                }
 
                 let sampled = Self.downsample(rows, maxPoints: maxPts / max(targets.count, 1))
                 for r in sampled {
