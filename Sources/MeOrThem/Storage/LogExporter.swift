@@ -169,11 +169,13 @@ final class LogExporter {
         let maxFiles = settings.rawRetentionDays
         let csvFiles = files
             .filter { $0.pathExtension == "csv" }
-            .sorted { a, b in
-                let da = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-                let db = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
-                return da < db
-            }
+            // Sort by the date embedded in the filename (meorthem-yyyy-MM-dd.csv).
+            // Lexicographic order on ISO-date strings is chronological order.
+            // Using creationDate here was wrong: Time Machine restores reset the
+            // filesystem creation timestamp, causing current logs to be pruned
+            // while restored (old) files were kept.
+            .sorted { $0.deletingPathExtension().lastPathComponent
+                    < $1.deletingPathExtension().lastPathComponent }
         let excess = csvFiles.count - maxFiles
         guard excess > 0 else { return }
         for old in csvFiles.prefix(excess) {
