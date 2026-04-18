@@ -202,9 +202,10 @@ final class AppEnvironment {
         let db        = sqliteStore
         let sessionID = metricStore.currentSessionID
         // Snapshot the current average RTT/loss across all monitored targets for context
-        let pings     = metricStore.latestPing.values
-        let trigRTT: Double?  = pings.compactMap(\.rtt).isEmpty ? nil
-                              : pings.compactMap(\.rtt).reduce(0, +) / Double(pings.compactMap(\.rtt).count)
+        let pings      = metricStore.latestPing.values
+        let validRTTs  = pings.compactMap(\.rtt)
+        let trigRTT: Double?  = validRTTs.isEmpty ? nil
+                              : validRTTs.reduce(0, +) / Double(validRTTs.count)
         let trigLoss: Double? = pings.isEmpty ? nil
                               : pings.map(\.lossPercent).reduce(0, +) / Double(pings.count)
 
