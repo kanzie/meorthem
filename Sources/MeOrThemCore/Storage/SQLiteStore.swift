@@ -288,14 +288,22 @@ public final class SQLiteStore: @unchecked Sendable {
         let incCutoff  = now - Double(incidentRetentionDays)  * 86_400
         queue.async { [weak self] in
             self?._aggregate(before: rawCutoff)
-            self?._exec("DELETE FROM ping_samples    WHERE timestamp < \(rawCutoff);")
-            self?._exec("DELETE FROM wifi_samples    WHERE timestamp < \(rawCutoff);")
-            self?._exec("DELETE FROM dns_samples       WHERE timestamp < \(rawCutoff);")
-            self?._exec("DELETE FROM interface_errors  WHERE timestamp < \(rawCutoff);")
-            self?._exec("DELETE FROM mtu_checks               WHERE timestamp < \(rawCutoff);")
-            self?._exec("DELETE FROM dns_resolver_samples     WHERE timestamp < \(rawCutoff);")
-            self?._exec("DELETE FROM ping_aggregates WHERE timestamp_minute < \(aggCutoff);")
-            self?._exec("DELETE FROM incidents WHERE ended_at IS NOT NULL AND ended_at < \(incCutoff);")
+            self?._execDeleteBefore(table: "ping_samples",        column: "timestamp",        cutoff: rawCutoff)
+            self?._execDeleteBefore(table: "wifi_samples",        column: "timestamp",        cutoff: rawCutoff)
+            self?._execDeleteBefore(table: "dns_samples",         column: "timestamp",        cutoff: rawCutoff)
+            self?._execDeleteBefore(table: "interface_errors",    column: "timestamp",        cutoff: rawCutoff)
+            self?._execDeleteBefore(table: "mtu_checks",          column: "timestamp",        cutoff: rawCutoff)
+            self?._execDeleteBefore(table: "dns_resolver_samples",column: "timestamp",        cutoff: rawCutoff)
+            self?._execDeleteBefore(table: "ping_aggregates",     column: "timestamp_minute", cutoff: aggCutoff)
+            // Incidents: only prune rows that have already ended
+            if let self {
+                let sql = "DELETE FROM incidents WHERE ended_at IS NOT NULL AND ended_at < ?;"
+                if let stmt = self._prepare(sql) {
+                    defer { sqlite3_finalize(stmt) }
+                    sqlite3_bind_double(stmt, 1, incCutoff)
+                    sqlite3_step(stmt)
+                }
+            }
             self?._exec("PRAGMA wal_checkpoint(PASSIVE);")
         }
     }
@@ -495,8 +503,8 @@ public final class SQLiteStore: @unchecked Sendable {
         let f = from.timeIntervalSince1970
         let t = to.timeIntervalSince1970
         return queue.sync {
-            _scalar("SELECT 1 FROM ping_samples    WHERE timestamp         >= \(f) AND timestamp         <= \(t) LIMIT 1;") > 0
-         || _scalar("SELECT 1 FROM ping_aggregates WHERE timestamp_minute  >= \(f) AND timestamp_minute  <= \(t) LIMIT 1;") > 0
+            _scalarRange(table: "ping_samples",    column: "timestamp",        from: f, to: t) > 0
+         || _scalarRange(table: "ping_aggregates", column: "timestamp_minute", from: f, to: t) > 0
         }
     }
 
@@ -1406,5 +1414,27 @@ public final class SQLiteStore: @unchecked Sendable {
             sqlite3_free(err)
         }
         return rc == SQLITE_OK
+    }
+
+    /// Parameterized DELETE helper — avoids string interpolation for timestamp cutoffs.
+    /// Executes: DELETE FROM <table> WHERE <column> < ?
+    private func _execDeleteBefore(table: String, column: String, cutoff: Double) {
+        let sql = "DELETE FROM \(table) WHERE \(column) < ?;"
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, cutoff)
+        sqlite3_step(stmt)
+    }
+
+    /// Parameterized range-existence check — avoids string interpolation for timestamps.
+    /// Executes: SELECT 1 FROM <table> WHERE <column> >= ? AND <column> <= ? LIMIT 1
+    private func _scalarRange(table: String, column: String, from: Double, to: Double) -> Int {
+        let sql = "SELECT 1 FROM \(table) WHERE \(column) >= ? AND \(column) <= ? LIMIT 1;"
+        guard let stmt = _prepare(sql) else { return 0 }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, from)
+        sqlite3_bind_double(stmt, 2, to)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 0 }
+        return Int(sqlite3_column_int(stmt, 0))
     }
 }
