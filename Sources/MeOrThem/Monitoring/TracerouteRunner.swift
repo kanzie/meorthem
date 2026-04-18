@@ -12,9 +12,9 @@ enum TracerouteRunner {
         let hopCount: Int?
     }
 
-    /// Synchronously runs a traceroute to `host` and returns the result.
+    /// Runs a traceroute to `host` and returns the result.
     /// Returns `nil` if the binary is missing or the process cannot be started.
-    static func run(host: String) -> Result? {
+    static func run(host: String) async -> Result? {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/sbin/traceroute")
         // -n  skip reverse DNS (faster)
@@ -33,10 +33,12 @@ enum TracerouteRunner {
             return nil
         }
 
-        // Enforce a timeout — traceroute can hang when many hops time out
+        // Enforce a timeout — traceroute can hang when many hops time out.
+        // Use Task.sleep instead of Thread.sleep to avoid blocking a cooperative
+        // thread pool thread (Swift's pool is small; blocking for 60s starves other Tasks).
         let deadline = Date().addingTimeInterval(timeout)
         while proc.isRunning && Date() < deadline {
-            Thread.sleep(forTimeInterval: 0.5)
+            try? await Task.sleep(nanoseconds: 500_000_000)
         }
         if proc.isRunning { proc.terminate() }
 

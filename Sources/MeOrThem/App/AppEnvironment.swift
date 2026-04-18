@@ -209,7 +209,7 @@ final class AppEnvironment {
                               : pings.map(\.lossPercent).reduce(0, +) / Double(pings.count)
 
         Task.detached(priority: .utility) {
-            guard let result = TracerouteRunner.run(host: host) else { return }
+            guard let result = await TracerouteRunner.run(host: host) else { return }
             db.insertTracerouteEvent(sessionID: sessionID,
                                      timestamp: Date(),
                                      targetHost: host,
