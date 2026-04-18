@@ -5,6 +5,26 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.21.3 — 2026-04-18
+
+### Bug Fixes
+- **Loading animation on zero targets** — The status icon no longer skips its loading state when all ping targets have been removed; the loading blink now only stops once at least one target exists and has received its first result.
+- **Network session stability on 5 GHz WiFi** — Resolved a floating-point precision issue where `channelBandGHz` values like `2.3999999...` or `5.0000001...` could produce a different session fingerprint on each poll tick, silently opening a new network session row every few seconds. Session history now groups correctly across 2.4, 5, and 6 GHz bands.
+- **Sub-millisecond ping targets show correct loss** — Pings that return `time=0.000 ms` (localhost, loopback, very fast LAN) were previously treated as timeouts and recorded as 100% packet loss. They are now recorded correctly with 0 ms RTT and 0% loss.
+- **Log rotation preserves correct files after restore** — Log pruning now sorts by the date embedded in the filename rather than the filesystem creation timestamp. Restoring from Time Machine or copying log files no longer causes current logs to be deleted while old ones are kept.
+- **Interface error sampling on Ethernet-only Macs** — The interface error sampler now uses the active primary ethernet interface name when WiFi is off, rather than always falling back to `en0`. On Macs where `en0` is the WiFi adapter and `en1` is Ethernet, error deltas are now recorded correctly.
+
+---
+
+## v2.21.2 — 2026-04-17
+
+### Bug Fixes
+- **DNS menu item style** — The DNS row in the dropdown now uses the same non-selectable, non-hoverable style as the Latency, Packet Loss, and Jitter rows above it, matching their text colour and behaviour.
+- **Graphs window stays visible** — The Network History window no longer hides when the user switches to another application; it remains on screen until explicitly closed.
+- **Close button in Graphs window** — A Close button has been added at the bottom of the Network History window. The window can also be closed via the standard red traffic-light button in the title bar.
+
+---
+
 ## v2.21.1 — 2026-04-17
 
 ### Bug Fixes
