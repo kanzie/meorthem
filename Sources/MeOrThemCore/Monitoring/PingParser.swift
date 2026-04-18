@@ -23,7 +23,7 @@ enum PingParser {
         return matches.compactMap { match -> Double? in
             guard let r = Range(match.range(at: 1), in: text),
                   let v = Double(text[r]),
-                  v > 0 else { return nil }
+                  v >= 0 else { return nil }
             return v
         }
     }
