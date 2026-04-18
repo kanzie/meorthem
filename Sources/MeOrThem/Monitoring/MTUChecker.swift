@@ -55,9 +55,11 @@ enum MTUChecker {
 
         if reachable, let timeRange = output.range(of: "time=") {
             let afterTime = output[timeRange.upperBound...]
-            // Extract the numeric value up to the next space or " ms"
+            // Extract the numeric value up to the next space or " ms".
+            // Trim whitespace before converting so a space between "time=" and the
+            // digits (non-standard but defensive) does not silently produce nil.
             let rttString = afterTime.prefix(while: { $0.isNumber || $0 == "." })
-            rttMs = Double(rttString)
+            rttMs = Double(rttString.trimmingCharacters(in: .whitespaces))
         }
 
         return Result(payloadBytes: payloadBytes, reachable: reachable, rttMs: rttMs)
