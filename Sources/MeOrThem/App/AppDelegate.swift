@@ -7,9 +7,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
     private var environment: AppEnvironment!
-    private var settingsController:     SettingsWindowController?
-    private var pingReportController:   PingReportWindowController?
-    private var chartsWindowController: MetricsChartsWindowController?
+    private var settingsController:        SettingsWindowController?
+    private var pingReportController:      PingReportWindowController?
+    private var chartsWindowController:    MetricsChartsWindowController?
+    private var networkAnalysisController: NetworkAnalysisWindowController?
     private var cancellables = Set<AnyCancellable>()
     private var menuLiveUpdate: AnyCancellable?
     private var menuWifiUpdate: AnyCancellable?
@@ -105,6 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 guard let self else { return }
                 if !self.hasInitialData {
                     let targets = self.environment.settings.pingTargets
+                    // allSatisfy returns true vacuously on an empty collection, which would
+                    // stop the loading animation immediately before any data has arrived.
+                    guard !targets.isEmpty else { return }
                     if targets.allSatisfy({ latestPing[$0.id] != nil }) {
                         self.hasInitialData = true
                         self.stopLoadingBlink()
@@ -302,12 +306,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func makeMenuActions() -> MenuBuilder.Actions {
         MenuBuilder.Actions(
-            showAbout:          { AboutWindowController.shared.showAndFocus() },
-            openSettings:       { [weak self] in self?.showSettings() },
-            copyReport:         { [weak self] in self?.showPingReport() },
-            showNetworkHistory: { [weak self] in self?.showNetworkHistory() },
-            runSpeedtest:       { [weak self] in self?.environment.speedtestRunner.run() },
-            showHelp:           { HelpWindowController.shared.showAndFocus() },
+            showAbout:           { AboutWindowController.shared.showAndFocus() },
+            openSettings:        { [weak self] in self?.showSettings() },
+            copyReport:          { [weak self] in self?.showPingReport() },
+            showNetworkHistory:  { [weak self] in self?.showNetworkHistory() },
+            showNetworkAnalysis: { [weak self] in self?.showNetworkAnalysis() },
+            runSpeedtest:        { [weak self] in self?.environment.speedtestRunner.run() },
+            showHelp:            { HelpWindowController.shared.showAndFocus() },
             togglePause:        { [weak self] in self?.toggleManualPause() },
             quit:               { NSApp.terminate(nil) }
         )
@@ -386,9 +391,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func showPingReport() {
         if pingReportController == nil {
             pingReportController = PingReportWindowController(
-                store: environment.metricStore,
-                settings: environment.settings,
-                exporter: environment.exportCoordinator,
+                sqliteStore: environment.sqliteStore,
+                settings:    environment.settings,
+                exporter:    environment.exportCoordinator,
                 onShowCharts: { [weak self] in self?.showNetworkHistory() }
             )
         }
@@ -416,6 +421,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         chartsWindowController?.showAndFocus()
+    }
+
+    private func showNetworkAnalysis() {
+        if networkAnalysisController == nil {
+            networkAnalysisController = NetworkAnalysisWindowController(
+                sqliteStore: environment.sqliteStore,
+                settings:    environment.settings
+            )
+        }
+        networkAnalysisController?.showAndFocus()
     }
 
     private func toggleManualPause() {
