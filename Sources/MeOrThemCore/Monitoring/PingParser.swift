@@ -7,9 +7,21 @@ struct ParsedPing {
 
 enum PingParser {
 
-    // Pre-compiled patterns (static — avoids re-compilation on every parse)
-    private static let rttPattern  = try! NSRegularExpression(pattern: "time=(\\d+\\.?\\d*) ms")
-    private static let lossPattern = try! NSRegularExpression(pattern: "(\\d+\\.?\\d*)% packet loss")
+    // Pre-compiled patterns (static — avoids re-compilation on every parse).
+    // Using a closure with preconditionFailure rather than try! so that any future
+    // typo in a pattern produces a clear diagnostic instead of a bare EXC_BAD_INSTRUCTION.
+    private static let rttPattern: NSRegularExpression = {
+        guard let re = try? NSRegularExpression(pattern: "time=(\\d+\\.?\\d*) ms") else {
+            preconditionFailure("PingParser: invalid rttPattern regex")
+        }
+        return re
+    }()
+    private static let lossPattern: NSRegularExpression = {
+        guard let re = try? NSRegularExpression(pattern: "(\\d+\\.?\\d*)% packet loss") else {
+            preconditionFailure("PingParser: invalid lossPattern regex")
+        }
+        return re
+    }()
 
     static func parse(_ output: String) -> ParsedPing {
         let rtts = extractRTTs(from: output)

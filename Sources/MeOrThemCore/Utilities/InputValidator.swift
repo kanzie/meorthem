@@ -47,13 +47,23 @@ public enum InputValidator {
 
     // RFC 1123 hostname: labels separated by dots, each 1–63 chars,
     // alphanumeric + hyphens, no leading/trailing hyphens.
-    private static let hostnameLabel = try! NSRegularExpression(
-        pattern: "^[A-Za-z0-9]([A-Za-z0-9\\-]{0,61}[A-Za-z0-9])?$"
-    )
+    // Using closures with preconditionFailure rather than try! so any future typo
+    // in a pattern produces a named diagnostic instead of a bare EXC_BAD_INSTRUCTION.
+    private static let hostnameLabel: NSRegularExpression = {
+        guard let re = try? NSRegularExpression(
+            pattern: "^[A-Za-z0-9]([A-Za-z0-9\\-]{0,61}[A-Za-z0-9])?$") else {
+            preconditionFailure("InputValidator: invalid hostnameLabel regex")
+        }
+        return re
+    }()
     // Matches anything that looks like an IPv4 address (N.N.N.N)
-    private static let ipv4Like = try! NSRegularExpression(
-        pattern: "^\\d{1,5}\\.\\d{1,5}\\.\\d{1,5}\\.\\d{1,5}$"
-    )
+    private static let ipv4Like: NSRegularExpression = {
+        guard let re = try? NSRegularExpression(
+            pattern: "^\\d{1,5}\\.\\d{1,5}\\.\\d{1,5}\\.\\d{1,5}$") else {
+            preconditionFailure("InputValidator: invalid ipv4Like regex")
+        }
+        return re
+    }()
 
     private static func isHostname(_ s: String) -> Bool {
         // If it looks like an IPv4 address, require inet_pton to accept it.
