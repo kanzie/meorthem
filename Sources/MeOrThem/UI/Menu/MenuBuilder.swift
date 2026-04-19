@@ -358,6 +358,7 @@ enum MenuBuilder {
         attrs.append(restPart)
 
         let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.isEnabled = false
         item.attributedTitle = attrs
         return item
     }

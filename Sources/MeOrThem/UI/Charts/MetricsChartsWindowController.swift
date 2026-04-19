@@ -14,6 +14,7 @@ final class MetricsChartsWindowController: NSWindowController {
         window.title = "Network History"
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
+        window.collectionBehavior = [.moveToActiveSpace, .participatesInCycle]
         window.minSize = NSSize(width: 780, height: 500)
         window.toolbarStyle = .unified
         window.center()

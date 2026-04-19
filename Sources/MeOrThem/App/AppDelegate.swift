@@ -415,8 +415,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     forName: NSWindow.willCloseNotification,
                     object: win, queue: .main
                 ) { [weak self] _ in
-                    self?.chartsWindowController = nil
-                    self?.chartsWindowObserver = nil
+                    MainActor.assumeIsolated {
+                        self?.chartsWindowController = nil
+                        self?.chartsWindowObserver = nil
+                    }
                 }
             }
         }

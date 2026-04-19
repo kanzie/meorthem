@@ -105,8 +105,9 @@ final class MetricsDataLoader: ObservableObject {
                 }
                 if hasData { available.insert(window) }
             }
+            let result = available
             await MainActor.run { [weak self] in
-                self?.windowsWithData = available
+                self?.windowsWithData = result
             }
         }
     }

@@ -391,7 +391,7 @@ public final class SQLiteStore: @unchecked Sendable {
         public let triggerLossPct: Double?
     }
 
-    public struct NetworkSessionRow: Identifiable {
+    public struct NetworkSessionRow: Identifiable, Sendable {
         public let id: UUID
         public let fingerprint: String
         public let displayName: String

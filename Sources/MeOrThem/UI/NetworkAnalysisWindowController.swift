@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import MeOrThemCore
+@preconcurrency import MeOrThemCore
 
 final class NetworkAnalysisWindowController: NSWindowController {
 
@@ -64,7 +64,7 @@ private struct NetworkAnalysisView: View {
         .task {
             await loadSessions()
         }
-        .onChange(of: selectedSession?.id) { _ in
+        .onChange(of: selectedSession?.id) { _, _ in
             Task { await analyzeSelected() }
         }
     }

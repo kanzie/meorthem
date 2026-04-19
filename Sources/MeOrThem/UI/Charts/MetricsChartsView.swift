@@ -64,6 +64,8 @@ struct MetricsChartsView: View {
     @State private var hoveredDate: Date? = nil
     /// Throttles hover computation to ≤60 FPS across all charts.
     @State private var lastHoverCompute: Date = .distantPast
+    /// Hovered hour label for the daily-pattern bar chart (String categorical axis).
+    @State private var hoveredHourLabel: String? = nil
 
     private let thresholds: Thresholds
 
@@ -94,6 +96,10 @@ struct MetricsChartsView: View {
         Dictionary(uniqueKeysWithValues: zip(visibleTargetLabels, visibleTargetColors))
     }
 
+    private var dnsColorMap: [String: Color] {
+        Dictionary(uniqueKeysWithValues: dnsResolverNames.map { ($0, dnsColor(for: $0)) })
+    }
+
     private var filteredLatency: [ChartPoint] {
         let labels = Set(visibleTargetLabels)
         return loader.latencyPoints.filter { labels.contains($0.targetLabel) }
@@ -110,23 +116,38 @@ struct MetricsChartsView: View {
     // MARK: - Body
 
     var body: some View {
-        Group {
-            if loader.isLoading {
-                loadingView
-            } else {
-                ScrollView {
-                    VStack(spacing: 24) {
-                        latencyCard
-                        lossCard
-                        jitterCard
-                        if !loader.wifiRSSI.isEmpty { wifiCard }
-                        if !loader.dnsPoints.isEmpty { dnsCard }
-                        if loader.hourlyRTTAverages.count >= 4 { hourlyPatternCard }
-                        if !loader.incidents.isEmpty { incidentList }
+        VStack(spacing: 0) {
+            Group {
+                if loader.isLoading {
+                    loadingView
+                } else {
+                    ScrollView {
+                        VStack(spacing: 24) {
+                            latencyCard
+                            lossCard
+                            jitterCard
+                            if !loader.wifiRSSI.isEmpty { wifiCard }
+                            if !loader.dnsPoints.isEmpty { dnsCard }
+                            if loader.hourlyRTTAverages.count >= 4 { hourlyPatternCard }
+                            if !loader.incidents.isEmpty { incidentList }
+                        }
+                        .padding(20)
                     }
-                    .padding(20)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            Divider()
+            HStack {
+                Spacer()
+                Button("Close") {
+                    NSApplication.shared.keyWindow?.performClose(nil)
+                }
+                .keyboardShortcut(.escape, modifiers: [])
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(Color(NSColor.windowBackgroundColor))
         }
         .background(Color(NSColor.windowBackgroundColor))
         .frame(minWidth: 780, minHeight: 500)
@@ -267,9 +288,10 @@ struct MetricsChartsView: View {
         .sorted { $0.targetLabel < $1.targetLabel }
     }
 
-    private func tooltipEntries(snapped: [ChartPoint]) -> [(label: String, value: Double, color: Color)] {
+    private func tooltipEntries(snapped: [ChartPoint],
+                                using cm: [String: Color]) -> [(label: String, value: Double, color: Color)] {
         snapped.compactMap { p in
-            guard let color = colorMap[p.targetLabel] else { return nil }
+            guard let color = cm[p.targetLabel] else { return nil }
             return (p.targetLabel, p.value, color)
         }
     }
@@ -300,8 +322,10 @@ struct MetricsChartsView: View {
         proxy: ChartProxy,
         geometry: GeometryProxy,
         points: [ChartPoint],
-        unit: String
+        unit: String,
+        overrideColorMap: [String: Color]? = nil
     ) -> some View {
+        let cm     = overrideColorMap ?? colorMap
         let origin = proxy.plotFrame.map { geometry[$0].origin } ?? .zero
 
         // Transparent hit-test surface for hover detection
@@ -341,7 +365,7 @@ struct MetricsChartsView: View {
                     if let px = proxy.position(forX: p.timestamp),
                        let py = proxy.position(forY: p.value) {
                         Circle()
-                            .fill(colorMap[p.targetLabel] ?? .primary)
+                            .fill(cm[p.targetLabel] ?? .primary)
                             .overlay(Circle().stroke(Color.white, lineWidth: 1.5))
                             .frame(width: 10, height: 10)
                             .shadow(color: .black.opacity(0.15), radius: 2)
@@ -350,7 +374,7 @@ struct MetricsChartsView: View {
                 }
 
                 // Tooltip card — reuse already-computed snapped to avoid a second O(n) scan
-                let entries = tooltipEntries(snapped: snapped)
+                let entries = tooltipEntries(snapped: snapped, using: cm)
                 if !entries.isEmpty {
                     HoverTooltip(date: date, entries: entries, unit: unit)
                         .fixedSize()
@@ -382,7 +406,9 @@ struct MetricsChartsView: View {
                             .foregroundStyle(Color.red.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
 
-                        ForEach(loader.incidents) { inc in
+                        // Cap at 10 markers — more than that creates visual noise.
+                        // The full incident list is always shown in the Incidents card below.
+                        ForEach(loader.incidents.prefix(10)) { inc in
                             RuleMark(x: .value("Incident", inc.startedAt))
                                 .foregroundStyle(incidentColor(inc).opacity(0.35))
                                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
@@ -501,7 +527,9 @@ struct MetricsChartsView: View {
                             .foregroundStyle(Color.red.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
 
-                        ForEach(loader.incidents) { inc in
+                        // Cap at 10 markers — more than that creates visual noise.
+                        // The full incident list is always shown in the Incidents card below.
+                        ForEach(loader.incidents.prefix(10)) { inc in
                             RuleMark(x: .value("Incident", inc.startedAt))
                                 .foregroundStyle(incidentColor(inc).opacity(0.35))
                                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
@@ -571,7 +599,9 @@ struct MetricsChartsView: View {
                             .foregroundStyle(Color.red.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
 
-                        ForEach(loader.incidents) { inc in
+                        // Cap at 10 markers — more than that creates visual noise.
+                        // The full incident list is always shown in the Incidents card below.
+                        ForEach(loader.incidents.prefix(10)) { inc in
                             RuleMark(x: .value("Incident", inc.startedAt))
                                 .foregroundStyle(incidentColor(inc).opacity(0.35))
                                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
@@ -714,20 +744,7 @@ struct MetricsChartsView: View {
                     domain: dnsResolverNames,
                     range:  dnsResolverNames.map { dnsColor(for: $0) }
                 )
-                .chartLegend(position: .topLeading, alignment: .leading, spacing: 6) {
-                    HStack(spacing: 10) {
-                        ForEach(dnsResolverNames, id: \.self) { name in
-                            HStack(spacing: 4) {
-                                RoundedRectangle(cornerRadius: 2)
-                                    .fill(dnsColor(for: name))
-                                    .frame(width: 12, height: 3)
-                                Text(name)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                }
+                .chartLegend(.hidden)
                 .chartXAxis {
                     AxisMarks(values: .automatic(desiredCount: 6)) { _ in
                         AxisValueLabel().font(.caption).foregroundStyle(.secondary)
@@ -741,6 +758,28 @@ struct MetricsChartsView: View {
                     }
                 }
                 .frame(height: 180)
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        hoverOverlay(proxy: proxy, geometry: geo,
+                                     points: loader.dnsPoints, unit: "ms",
+                                     overrideColorMap: dnsColorMap)
+                    }
+                }
+
+                // Legend below the chart
+                HStack(spacing: 12) {
+                    ForEach(dnsResolverNames, id: \.self) { name in
+                        HStack(spacing: 4) {
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(dnsColor(for: name))
+                                .frame(width: 12, height: 3)
+                            Text(name)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .padding(.top, 2)
             }
         }
     }
@@ -785,6 +824,55 @@ struct MetricsChartsView: View {
                 }
                 .chartYScale(domain: 0...yMax)
                 .frame(height: 160)
+                .chartOverlay { proxy in
+                    GeometryReader { geo in
+                        let origin = proxy.plotFrame.map { geo[$0].origin } ?? .zero
+                        Rectangle().fill(.clear).contentShape(Rectangle())
+                            .onContinuousHover { phase in
+                                switch phase {
+                                case .active(let loc):
+                                    hoveredHourLabel = proxy.value(atX: loc.x - origin.x, as: String.self)
+                                case .ended:
+                                    hoveredHourLabel = nil
+                                }
+                            }
+                        if let label = hoveredHourLabel,
+                           let avg   = hours.first(where: { hourLabel($0.key) == label })?.value,
+                           let xPos  = proxy.position(forX: label) {
+                            let xInView = xPos + origin.x
+                            // Cursor line
+                            Path { p in
+                                p.move(to: CGPoint(x: xInView, y: 0))
+                                p.addLine(to: CGPoint(x: xInView, y: geo.size.height))
+                            }
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                            // Tooltip
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(label)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                Text(String(format: "%.1f ms", avg))
+                                    .font(.caption)
+                                    .bold()
+                                    .foregroundStyle(barColor(avg))
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(RoundedRectangle(cornerRadius: 8)
+                                .fill(Color(NSColor.controlBackgroundColor)))
+                            .overlay(RoundedRectangle(cornerRadius: 8)
+                                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.5))
+                            .shadow(color: .black.opacity(0.12), radius: 4, x: 0, y: 2)
+                            .fixedSize()
+                            .position(
+                                x: xInView < geo.size.width / 2
+                                    ? min(xInView + 60, geo.size.width - 60)
+                                    : max(xInView - 60, 60),
+                                y: origin.y + 28
+                            )
+                        }
+                    }
+                }
 
                 HStack(spacing: 12) {
                     legendDot(.green,  "Normal")

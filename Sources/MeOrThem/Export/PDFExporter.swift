@@ -30,7 +30,7 @@ enum PDFExporter {
     private static let margin: CGFloat = 40
     private static let scale:  CGFloat = 2
     nonisolated(unsafe) private static let iso = ISO8601DateFormatter()
-    nonisolated(unsafe) private static let localFmt: DateFormatter = {
+    private static let localFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .short

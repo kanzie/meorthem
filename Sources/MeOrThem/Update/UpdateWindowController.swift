@@ -250,7 +250,7 @@ private struct UpdateView: View {
         isDownloading = true
         downloadError = nil
 
-        Task {
+        Task { @MainActor in
             do {
                 let (localURL, _) = try await URLSession.shared.download(from: url)
                 let dest = FileManager.default.temporaryDirectory
@@ -258,6 +258,9 @@ private struct UpdateView: View {
                 try? FileManager.default.removeItem(at: dest)
                 try FileManager.default.moveItem(at: localURL, to: dest)
                 NSWorkspace.shared.open(dest)
+                // Brief pause so Finder has time to initiate the DMG mount
+                // before this process exits.
+                try? await Task.sleep(nanoseconds: 500_000_000)
                 onDismiss()
                 NSApp.terminate(nil)
             } catch {
