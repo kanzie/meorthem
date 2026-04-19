@@ -7,6 +7,63 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ## v2.21.4 — 2026-04-18
 
+### First public release since v1.11.6 — a major upgrade
+
+Me Or Them is still a circle in your menubar. Green means everything is
+fine, and you never need to touch a setting to get value from it. But
+almost everything underneath has changed.
+
+Since the last public release, Me Or Them has evolved from a lightweight
+network status indicator into a network intelligence platform. The app
+now runs 17 diagnostic algorithms continuously in the background. When
+your network misbehaves, it no longer just changes colour — it tells you
+why, with confidence scores and plain-English recommendations.
+
+What's new at a high level:
+
+- Network Analysis — A diagnostics engine that reviews each session
+  against 17 patterns: elevated latency with gateway attribution, packet
+  loss (burst vs. steady), jitter (congestion vs. instability), weak or
+  unstable WiFi signal, session fault profiling (local vs. ISP, minute by
+  minute), WiFi/latency correlation, per-target outlier detection,
+  bufferbloat, five DNS-specific findings (failure rate, elevated
+  latency, resolver divergence, complete failure, port 53 blocking),
+  hardware interface errors, MTU/path fragmentation, latency trend via
+  OLS regression, WiFi channel switching, recurring time-of-day
+  congestion against 30 days of history, and automatic traceroute
+  capture on degradation. Every finding is confidence-scored — only what
+  the data actually supports is surfaced.
+
+- Multi-Resolver DNS Monitoring — Raw UDP probes to up to 8 resolvers
+  (Cloudflare, Google, Quad9, OpenDNS, AdGuard, system, gateway, and
+  custom) bypass the OS cache entirely. Real resolver response times
+  appear in the dropdown and are charted over time. Failing resolvers are
+  auto-paused and re-probed in the background.
+
+- Hardware-Level Visibility — MTU path fragmentation detection
+  (1472-byte Don't-Fragment probes every ~2.5 min), kernel-level
+  interface error and drop counter sampling every ~30 s, and automatic
+  traceroute capture when connections degrade from green to red (at most
+  once every 5 minutes, stored and surfaced in the analysis window).
+
+- Network Session Tracking — Each network environment (gateway IP +
+  WiFi band + channel + subnet) is fingerprinted automatically with no
+  location permission required. Every sample is tagged to its session so
+  the analysis engine draws accurate per-network conclusions across weeks
+  of history.
+
+- Dramatically Smaller Footprint — CPU dropped from ~1% at 5 s polling
+  to ~0.4% at the new default 2 s interval. Memory fell from ~50 MB to
+  ~14 MB. Test coverage grew from 193 to 325 passing tests.
+
+If you're coming from v1.x: drag the new version to Applications and
+launch — the install experience is identical. The circle is still the
+circle. Everything new is waiting whenever you want it, quietly out of
+the way when you don't.
+
+The incremental changes across each release from v2.0.3 onward are
+documented below.
+
 ### Changes
 - **Smoother "Copied!" feedback** — The copy-to-clipboard button in the Ping Report window now resets using structured concurrency instead of a legacy GCD timer, keeping it consistent with the rest of the app's async model.
 - **Faster WiFi–latency correlation** — The network analyser now uses binary search to pair ping rows with their nearest WiFi sample, reducing the per-analysis cost from O(n²) to O(n log n) on large history windows.

@@ -55,11 +55,11 @@ DMG_PATH="$BUILD_DIR/${APP_NAME}-${VERSION}.dmg"
 TMP_DMG="$BUILD_DIR/${APP_NAME}_tmp.dmg"
 VOLUME_NAME="$APP_NAME"
 DMG_SIZE="80m"
-BG_PNG="$SCRIPT_DIR/assets/dmg_background.png"
+BG_SRC="$ROOT_DIR/images/0.png"
 
-if [ ! -f "$BG_PNG" ]; then
-    echo "==> Generating DMG background..."
-    python3 "$SCRIPT_DIR/generate_dmg_background.py"
+if [ ! -f "$BG_SRC" ]; then
+    echo "❌  DMG background not found: $BG_SRC"
+    exit 1
 fi
 
 if [ ! -d "$APP_PATH" ]; then
@@ -91,10 +91,13 @@ sleep 3
 echo "==> Mounted at: $MOUNT_POINT"
 
 ln -sf /Applications "$MOUNT_POINT/Applications"
-sips -z 686 1270 -s dpiWidth 72 -s dpiHeight 72 "$BG_PNG" > /dev/null
 
+# Convert the Retina source JPEG (2148×1008 @144 DPI) to a 72-DPI PNG at
+# half the pixel dimensions (1074×504) so Finder displays it at exactly
+# 1074×504 logical points on both Retina and non-Retina screens.
 mkdir -p "$MOUNT_POINT/.background"
-cp "$BG_PNG" "$MOUNT_POINT/.background/background.png"
+sips -z 504 1074 -s format png -s dpiWidth 72 -s dpiHeight 72 \
+    "$BG_SRC" --out "$MOUNT_POINT/.background/background.png" > /dev/null
 SetFile -a V "$MOUNT_POINT/.background" 2>/dev/null || \
     chflags hidden "$MOUNT_POINT/.background"
 
@@ -109,13 +112,13 @@ tell application "Finder"
         set current view of container window to icon view
         set toolbar visible of container window to false
         set statusbar visible of container window to false
-        set bounds of container window to {400, 100, 1060, 500}
+        set bounds of container window to {85, 80, 1359, 612}
         set viewOptions to icon view options of container window
         set arrangement of viewOptions to not arranged
         set icon size of viewOptions to 128
         set background picture of viewOptions to POSIX file "$MOUNT_POINT/.background/background.png"
-        set position of item "$APP_NAME.app" of container window to {165, 200}
-        set position of item "Applications" of container window to {495, 200}
+        set position of item "$APP_NAME.app" of container window to {270, 220}
+        set position of item "Applications" of container window to {815, 220}
         update without registering applications
         delay 5
     end tell
