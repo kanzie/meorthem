@@ -826,7 +826,7 @@ than running real subprocesses, similar to existing test patterns in the project
 
 ---
 
-## Task 14 — Tests (final pass)
+## Task 14 — Tests (final pass) ✅ DONE
 
 After all prior tasks are complete, run the full test suite one final time and confirm
 all tests pass. No code changes in this task — this is a verification checkpoint only.
