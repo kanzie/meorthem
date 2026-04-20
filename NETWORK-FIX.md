@@ -701,7 +701,7 @@ call `logExporter.appendInterfaceSnapshot(...)` when the connection type is not 
 
 ---
 
-## Task 12 — NetworkAnalysisWindowController: Connection type display + weak-fingerprint warning
+## Task 12 — NetworkAnalysisWindowController: Connection type display + weak-fingerprint warning ✅ DONE (v2.28.0)
 
 **File:** `Sources/MeOrThem/UI/NetworkAnalysisWindowController.swift`
 

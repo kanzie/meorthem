@@ -167,13 +167,19 @@ private struct SessionListPanel: View {
                     get: { selected?.id },
                     set: { newID in selected = sessions.first { $0.id == newID } }
                 )) { session in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(session.displayName)
-                            .font(.system(.body, design: .default))
-                            .lineLimit(1)
-                        Text(Self.dateFmt.string(from: session.startedAt))
-                            .font(.caption)
+                    HStack(spacing: 6) {
+                        Image(systemName: Self.connectionTypeIcon(session.connectionType))
                             .foregroundStyle(.secondary)
+                            .imageScale(.small)
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.displayName)
+                                .font(.system(.body, design: .default))
+                                .lineLimit(1)
+                            Text(Self.dateFmt.string(from: session.startedAt))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.vertical, 2)
                     .tag(session.id)
@@ -182,6 +188,15 @@ private struct SessionListPanel: View {
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private static func connectionTypeIcon(_ type: String) -> String {
+        switch type {
+        case "wifi":     return "wifi"
+        case "ethernet": return "cable.connector"
+        case "vpn":      return "lock.shield"
+        default:         return "network"
+        }
     }
 }
 
@@ -263,8 +278,39 @@ private struct FindingsPanel: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 10) {
+                        // Weak-fingerprint advisory for Ethernet sessions created without a router MAC
+                        if let s = session, s.weakFingerprint {
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundStyle(.orange)
+                                Text("Router hardware address was unavailable when this session was created. " +
+                                     "If you have connected to multiple different Ethernet networks sharing " +
+                                     "the same gateway IP (\(gatewayIPFromFingerprint(s.fingerprint))) " +
+                                     "and subnet, analysis data may combine measurements from more than one network.")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(12)
+                            .background(Color.orange.opacity(0.08))
+                            .cornerRadius(8)
+                        }
+
                         ForEach(findings) { finding in
                             FindingCard(finding: finding)
+                        }
+
+                        // WiFi-not-available notice for non-WiFi sessions
+                        if let s = session, s.connectionType != "wifi" {
+                            Divider()
+                            HStack(spacing: 6) {
+                                Image(systemName: "wifi.slash")
+                                    .foregroundStyle(.secondary)
+                                Text("Wi-Fi signal analysis not available — \(s.connectionType) connection.")
+                                    .font(.callout)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .padding(.top, 4)
+                            .padding(.bottom, 8)
                         }
                     }
                     .padding(16)
@@ -279,6 +325,12 @@ private struct FindingsPanel: View {
         let f = DateFormatter()
         f.dateStyle = .medium; f.timeStyle = .short
         return "\(f.string(from: s.startedAt)) — \(f.string(from: s.lastSeen))"
+    }
+
+    /// Extracts the gateway IP from an Ethernet fingerprint ("eth|<gatewayIP>|<subnet>...").
+    private func gatewayIPFromFingerprint(_ fp: String) -> String {
+        let parts = fp.split(separator: "|")
+        return parts.count >= 2 ? String(parts[1]) : "unknown"
     }
 }
 

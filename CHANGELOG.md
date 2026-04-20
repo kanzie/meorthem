@@ -5,6 +5,15 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.28.0 — 2026-04-20
+
+### New Features
+- **Network Analysis shows connection type per session** — The session list in Network Analysis now displays an icon indicating whether each session was recorded on Wi-Fi, Ethernet, or VPN.
+- **Network Analysis flags weak Ethernet fingerprints** — Sessions recorded without a router hardware address show an advisory warning that analysis data may combine measurements from multiple Ethernet networks sharing the same gateway IP.
+- **Network Analysis notes when Wi-Fi analysis is unavailable** — For Ethernet and VPN sessions, a note at the bottom of the findings panel explains that Wi-Fi signal analysis does not apply to the current connection type.
+
+---
+
 ## v2.27.0 — 2026-04-20
 
 ### New Features
