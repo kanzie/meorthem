@@ -26,6 +26,8 @@ enum WiFiMonitor {
             }
         }()
 
+        // CWInterface.interfaceName should never be nil when interface() returned non-nil,
+        // but guard against it defensively. "en0" is the canonical WiFi interface on Apple Silicon.
         let ifaceName = iface.interfaceName ?? "en0"
 
         return WiFiSnapshot(
