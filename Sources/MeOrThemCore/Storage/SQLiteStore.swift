@@ -392,11 +392,16 @@ public final class SQLiteStore: @unchecked Sendable {
     }
 
     public struct NetworkSessionRow: Identifiable, Sendable {
-        public let id: UUID
-        public let fingerprint: String
-        public let displayName: String
-        public let startedAt: Date
-        public let lastSeen: Date
+        public let id:              UUID
+        public let fingerprint:     String
+        public let displayName:     String
+        public let startedAt:       Date
+        public let lastSeen:        Date
+        /// Connection type string: "wifi", "ethernet", "vpn", or "unknown".
+        /// Pre-migration rows default to "wifi".
+        public let connectionType:  String
+        /// True when the Ethernet fingerprint was created without a resolved gateway MAC.
+        public let weakFingerprint: Bool
     }
 
     public struct IncidentRow: Identifiable {
@@ -442,12 +447,21 @@ public final class SQLiteStore: @unchecked Sendable {
     }
 
     /// Opens (or re-uses) a network session record. Fire-and-forget.
-    public func openSession(id: UUID, fingerprint: String, displayName: String, startTime: Date = .init()) {
-        let idStr = id.uuidString
-        let ts    = startTime.timeIntervalSince1970
+    /// Default values for `connectionType` and `weakFingerprint` preserve backwards
+    /// compatibility with all existing call sites.
+    public func openSession(id: UUID,
+                            fingerprint:     String,
+                            displayName:     String,
+                            connectionType:  String = "wifi",
+                            weakFingerprint: Bool   = false,
+                            startTime:       Date   = .init()) {
+        let idStr   = id.uuidString
+        let ts      = startTime.timeIntervalSince1970
+        let weakInt = weakFingerprint ? 1 : 0
         queue.async { [weak self] in
             self?._openSession(id: idStr, fingerprint: fingerprint,
-                               displayName: displayName, ts: ts)
+                               displayName: displayName, connectionType: connectionType,
+                               weakFingerprint: weakInt, ts: ts)
         }
     }
 
@@ -751,6 +765,10 @@ public final class SQLiteStore: @unchecked Sendable {
         _exec("ALTER TABLE wifi_samples  ADD COLUMN session_id TEXT;")
         _exec("CREATE INDEX IF NOT EXISTS idx_ping_session  ON ping_samples(session_id);")
         _exec("CREATE INDEX IF NOT EXISTS idx_wifi_session  ON wifi_samples(session_id);")
+        // v2.22.2: connection type and weak-fingerprint flag on network sessions.
+        // _exec silently discards SQLITE_ERROR when the column already exists — idempotent.
+        _exec("ALTER TABLE network_sessions ADD COLUMN connection_type  TEXT    NOT NULL DEFAULT 'wifi';")
+        _exec("ALTER TABLE network_sessions ADD COLUMN weak_fingerprint INTEGER NOT NULL DEFAULT 0;")
     }
 
     // MARK: - Private: insert implementations
@@ -1012,11 +1030,13 @@ public final class SQLiteStore: @unchecked Sendable {
 
     // MARK: - Private: session implementations
 
-    private func _openSession(id: String, fingerprint: String, displayName: String, ts: Double) {
+    private func _openSession(id: String, fingerprint: String, displayName: String,
+                               connectionType: String, weakFingerprint: Int, ts: Double) {
         let sql = """
             INSERT OR IGNORE INTO network_sessions
-                (id, fingerprint, display_name, started_at, last_seen)
-            VALUES (?, ?, ?, ?, ?);
+                (id, fingerprint, display_name, started_at, last_seen,
+                 connection_type, weak_fingerprint)
+            VALUES (?, ?, ?, ?, ?, ?, ?);
             """
         guard let stmt = _prepare(sql) else { return }
         defer { sqlite3_finalize(stmt) }
@@ -1025,6 +1045,8 @@ public final class SQLiteStore: @unchecked Sendable {
         _bindText(stmt, 3, displayName)
         sqlite3_bind_double(stmt, 4, ts)
         sqlite3_bind_double(stmt, 5, ts)
+        _bindText(stmt, 6, connectionType)
+        sqlite3_bind_int(stmt, 7, Int32(weakFingerprint))
         sqlite3_step(stmt)
     }
 
@@ -1039,7 +1061,8 @@ public final class SQLiteStore: @unchecked Sendable {
 
     private func _latestSession(fingerprint: String) -> NetworkSessionRow? {
         let sql = """
-            SELECT id, fingerprint, display_name, started_at, last_seen
+            SELECT id, fingerprint, display_name, started_at, last_seen,
+                   connection_type, weak_fingerprint
             FROM network_sessions
             WHERE fingerprint = ?
             ORDER BY started_at DESC
@@ -1055,7 +1078,8 @@ public final class SQLiteStore: @unchecked Sendable {
     private func _sessionsInRange(from: Double, to: Double) -> [NetworkSessionRow] {
         // A session overlaps [from, to] if it started before `to` and last_seen >= from.
         let sql = """
-            SELECT id, fingerprint, display_name, started_at, last_seen
+            SELECT id, fingerprint, display_name, started_at, last_seen,
+                   connection_type, weak_fingerprint
             FROM network_sessions
             WHERE started_at <= ? AND last_seen >= ?
             ORDER BY started_at ASC;
@@ -1074,12 +1098,15 @@ public final class SQLiteStore: @unchecked Sendable {
     private func _sessionRow(_ stmt: OpaquePointer) -> NetworkSessionRow? {
         guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),
               let id    = UUID(uuidString: idStr) else { return nil }
-        let fp   = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
-        let name = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
-        let startedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
-        let lastSeen  = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
+        let fp             = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+        let name           = sqlite3_column_text(stmt, 2).map { String(cString: $0) } ?? ""
+        let startedAt      = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 3))
+        let lastSeen       = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
+        let connType       = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? "wifi"
+        let weakFP         = sqlite3_column_int(stmt, 6) != 0
         return NetworkSessionRow(id: id, fingerprint: fp, displayName: name,
-                                 startedAt: startedAt, lastSeen: lastSeen)
+                                 startedAt: startedAt, lastSeen: lastSeen,
+                                 connectionType: connType, weakFingerprint: weakFP)
     }
 
     private func _pingRows(targetID: String, sessionID: String) -> [PingRow] {

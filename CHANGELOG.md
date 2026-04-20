@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.22.2 — 2026-04-20
+
+### New Features
+- **Session connection type stored in database** — Each network session now records its connection type (Wi-Fi, Ethernet, VPN) and whether the Ethernet fingerprint was created without a router hardware address, enabling connection-aware display in analysis and export features.
+
+---
+
 ## v2.22.1 — 2026-04-20
 
 ### New Features

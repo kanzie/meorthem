@@ -252,7 +252,7 @@ uniquely identifies the network, that is fine for session change detection.
 
 ---
 
-## Task 3 — SQLiteStore: Add `connection_type` to `network_sessions`
+## Task 3 — SQLiteStore: Add `connection_type` to `network_sessions` ✅ DONE (v2.22.2)
 
 **File:** `Sources/MeOrThemCore/Storage/SQLiteStore.swift`
 
