@@ -13,6 +13,7 @@ runBugFixTests()
 runConnectionHistoryTests()
 runSQLiteStoreTests()
 runDNSProberTests()
+runNetworkInfoTests()
 
 printSummary()
 exit(_failCount > 0 ? 1 : 0)

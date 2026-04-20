@@ -10,10 +10,16 @@ public enum NetworkInfo {
     private static let kCacheTTL: TimeInterval = 30
     private static let cacheLock = NSLock()
 
-    nonisolated(unsafe) private static var _cachedGateway: String?  = nil
-    nonisolated(unsafe) private static var _gatewayFetchedAt: Date  = .distantPast
+    nonisolated(unsafe) private static var _cachedGateway: String?          = nil
+    nonisolated(unsafe) private static var _cachedGatewayInterface: String? = nil
+    nonisolated(unsafe) private static var _gatewayFetchedAt: Date          = .distantPast
 
     nonisolated(unsafe) private static var _lastIPQuery: (interface: String, ip: String?, fetchedAt: Date)?
+
+    // MAC cache — keyed on the queried IP to invalidate when the gateway IP changes.
+    nonisolated(unsafe) private static var _cachedMAC: String?  = nil
+    nonisolated(unsafe) private static var _macCacheKey: String = ""
+    nonisolated(unsafe) private static var _macFetchedAt: Date  = .distantPast
 
     // MARK: - Public API
 
@@ -46,10 +52,60 @@ public enum NetworkInfo {
             return gw
         }
         cacheLock.unlock()
-        let result = fetchDefaultGateway()
+        let (gw, iface) = fetchDefaultRouteInfo()
         cacheLock.lock()
-        _gatewayFetchedAt = now
-        _cachedGateway = result
+        _gatewayFetchedAt       = now
+        _cachedGateway          = gw
+        _cachedGatewayInterface = iface
+        cacheLock.unlock()
+        return gw
+    }
+
+    /// Returns the network interface name used for the default route, or nil.
+    /// Examples: "en0" (WiFi), "en1" (Ethernet), "utun3" (VPN), "ppp0" (PPP/VPN).
+    /// Shares the gateway cache — calling both defaultGateway() and defaultGatewayInterface()
+    /// within the same 30-second window spawns only one subprocess.
+    public static func defaultGatewayInterface() -> String? {
+        cacheLock.lock()
+        let now = Date()
+        if now.timeIntervalSince(_gatewayFetchedAt) < kCacheTTL {
+            let iface = _cachedGatewayInterface
+            cacheLock.unlock()
+            return iface
+        }
+        cacheLock.unlock()
+        let (gw, iface) = fetchDefaultRouteInfo()
+        cacheLock.lock()
+        _gatewayFetchedAt       = now
+        _cachedGateway          = gw
+        _cachedGatewayInterface = iface
+        cacheLock.unlock()
+        return iface
+    }
+
+    /// Returns the MAC address of the specified IPv4 gateway from the ARP cache.
+    /// Runs `arp -n <ip>` — the IP is validated via inet_pton before use to prevent injection.
+    /// Returns nil on ARP miss, incomplete entry, invalid input, or subprocess failure.
+    /// Results are cached for 30 seconds; the cache is invalidated when the queried IP changes.
+    public static func gatewayMACAddress(for ip: String) -> String? {
+        // Validate: must be a well-formed IPv4 address.
+        var dummy = in_addr()
+        guard inet_pton(AF_INET, ip, &dummy) == 1 else { return nil }
+
+        cacheLock.lock()
+        let now = Date()
+        if _macCacheKey == ip, now.timeIntervalSince(_macFetchedAt) < kCacheTTL {
+            let mac = _cachedMAC
+            cacheLock.unlock()
+            return mac
+        }
+        cacheLock.unlock()
+
+        let result = fetchGatewayMAC(ip: ip)
+        cacheLock.lock()
+        _macCacheKey  = ip
+        _macFetchedAt = now
+        _cachedMAC    = result
         cacheLock.unlock()
         return result
     }
@@ -100,7 +156,84 @@ public enum NetworkInfo {
         return (found.name, found.ip, macMap[found.name] ?? "—")
     }
 
-    // MARK: - Private
+    // MARK: - Internal parsing helpers (exposed for unit testing)
+
+    /// Parses `gateway:` and `interface:` values from `/sbin/route -n get default` output.
+    /// Separated from subprocess invocation so tests can pass mock strings directly.
+    static func parseRouteInfo(from output: String) -> (gateway: String?, interface: String?) {
+        var gateway:   String?
+        var interface: String?
+        for line in output.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("gateway:") {
+                gateway = String(trimmed.dropFirst("gateway:".count))
+                    .trimmingCharacters(in: .whitespaces)
+            } else if trimmed.hasPrefix("interface:") {
+                interface = String(trimmed.dropFirst("interface:".count))
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            if gateway != nil, interface != nil { break }
+        }
+        return (gateway, interface)
+    }
+
+    /// Parses a MAC address from `/usr/sbin/arp -n <ip>` output.
+    /// Expected line: `? (192.168.1.1) at aa:bb:cc:dd:ee:ff on en0 ifscope [ethernet]`
+    /// Returns nil for ARP misses (`at (incomplete)`) or unparseable output.
+    /// Separated from subprocess invocation so tests can pass mock strings directly.
+    static func parseMACFromARPOutput(_ output: String) -> String? {
+        for line in output.components(separatedBy: "\n") {
+            guard line.contains(" at ") else { continue }
+            let parts = line.components(separatedBy: " at ")
+            guard parts.count >= 2 else { continue }
+            let candidate = parts[1].components(separatedBy: " on ")[0]
+                .trimmingCharacters(in: .whitespaces)
+            // Reject ARP miss / incomplete / empty entries
+            if candidate.isEmpty || candidate.hasPrefix("(") { return nil }
+            return candidate
+        }
+        return nil
+    }
+
+    // MARK: - Private subprocess helpers
+
+    /// Runs `/sbin/route -n get default` and returns both the gateway IP and interface name.
+    private static func fetchDefaultRouteInfo() -> (gateway: String?, interface: String?) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/sbin/route")
+        task.arguments = ["-n", "get", "default"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError  = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            return (nil, nil)
+        }
+        let data   = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        return parseRouteInfo(from: output)
+    }
+
+    /// Runs `/usr/sbin/arp -n <ip>` and returns the gateway's MAC address, or nil.
+    private static func fetchGatewayMAC(ip: String) -> String? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/arp")
+        task.arguments = ["-n", ip]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError  = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            return nil
+        }
+        let data   = pipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: data, encoding: .utf8) ?? ""
+        return parseMACFromARPOutput(output)
+    }
 
     private static func fetchIPAddress(for interfaceName: String) -> String? {
         var ifaddr: UnsafeMutablePointer<ifaddrs>?
@@ -120,32 +253,6 @@ public enum NetworkInfo {
                 return String(cString: buf)
             }
             ptr = iface.pointee.ifa_next
-        }
-        return nil
-    }
-
-    private static func fetchDefaultGateway() -> String? {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/sbin/route")
-        task.arguments = ["-n", "get", "default"]
-        let pipe = Pipe()
-        task.standardOutput = pipe
-        task.standardError  = Pipe()
-        do {
-            try task.run()
-            task.waitUntilExit()
-        } catch {
-            return nil
-        }
-        let data   = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
-        for line in output.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("gateway:") {
-                return trimmed
-                    .dropFirst("gateway:".count)
-                    .trimmingCharacters(in: .whitespaces)
-            }
         }
         return nil
     }

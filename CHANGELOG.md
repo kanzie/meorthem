@@ -5,6 +5,14 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.22.0 — 2026-04-20
+
+### New Features
+- **Default route interface detection** — The app can now identify which network interface carries the active default route (Wi-Fi, Ethernet, VPN tunnel, or PPP), enabling connection-type-aware behaviour throughout.
+- **Gateway router hardware address lookup** — The gateway's MAC address is resolved from the ARP cache, providing a reliable hardware-level identifier for the connected router that distinguishes different routers even when they share the same IP address.
+
+---
+
 ## v2.21.4 — 2026-04-18
 
 ### First public release since v1.11.6 — a major upgrade
