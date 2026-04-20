@@ -545,7 +545,7 @@ during menu construction does not spawn a subprocess on every menu open.
 
 ---
 
-## Task 8 — CSVExporter: Non-WiFi interface metadata
+## Task 8 — CSVExporter: Non-WiFi interface metadata ✅ DONE (v2.25.0)
 
 **File:** `Sources/MeOrThem/Export/CSVExporter.swift`
 

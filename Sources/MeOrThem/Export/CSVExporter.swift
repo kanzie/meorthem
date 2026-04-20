@@ -13,6 +13,12 @@ enum CSVExporter {
 
         lines.append("# Me Or Them Ping Report — \(isoFormatter.string(from: Date()))")
         lines.append("# Period: \(isoFormatter.string(from: from)) — \(isoFormatter.string(from: to))")
+
+        let sessions = sqliteStore.sessionsInRange(from: from, to: to)
+        if !sessions.isEmpty {
+            let summary = sessions.map { "\($0.displayName) (\($0.connectionType))" }.joined(separator: ", ")
+            lines.append("# Sessions: \(summary)")
+        }
         lines.append("")
 
         // ── Ping samples ───────────────────────────────────────────────────
@@ -39,13 +45,19 @@ enum CSVExporter {
         }
 
         // ── Wi-Fi history ──────────────────────────────────────────────────
-        lines.append("")
-        lines.append("# Wi-Fi History")
-        lines.append("Timestamp,RSSI_dBm,SNR_dB,Channel,Band_GHz,TxRate_Mbps")
         let wifiRows = sqliteStore.wifiRows(from: from, to: to)
-        for w in wifiRows {
-            let ts = isoFormatter.string(from: w.timestamp)
-            lines.append("\(ts),\(w.rssi),\(w.snr),\(w.channelNumber),\(String(format:"%.1f",w.bandGHz)),\(String(format:"%.0f",w.txRateMbps))")
+        if !wifiRows.isEmpty {
+            lines.append("")
+            lines.append("# Wi-Fi History")
+            lines.append("Timestamp,RSSI_dBm,SNR_dB,Channel,Band_GHz,TxRate_Mbps")
+            for w in wifiRows {
+                let ts = isoFormatter.string(from: w.timestamp)
+                lines.append("\(ts),\(w.rssi),\(w.snr),\(w.channelNumber),\(String(format:"%.1f",w.bandGHz)),\(String(format:"%.0f",w.txRateMbps))")
+            }
+        } else {
+            lines.append("")
+            lines.append("# Wi-Fi History")
+            lines.append("# No Wi-Fi data in this period (Ethernet or VPN connection)")
         }
 
         // ── DNS resolver samples ───────────────────────────────────────────

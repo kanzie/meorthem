@@ -5,6 +5,14 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.25.0 — 2026-04-20
+
+### New Features
+- **CSV export includes connection session summary** — Exported CSV reports now list the network sessions active during the export period (with connection type) in a comment header, making it easy to see what kind of connection was in use.
+- **CSV export handles non-WiFi connections** — The Wi-Fi History section in CSV reports is now omitted when no Wi-Fi data is present, replaced by a note indicating an Ethernet or VPN connection was in use during the period.
+
+---
+
 ## v2.24.0 — 2026-04-20
 
 ### New Features
