@@ -310,7 +310,7 @@ so old sessions silently inherit `connectionType = "wifi"` which is correct for 
 
 ---
 
-## Task 4 — AppEnvironment: Rewire session tracking for all connection types
+## Task 4 — AppEnvironment: Rewire session tracking for all connection types ✅ DONE (v2.23.0)
 
 **File:** `Sources/MeOrThem/App/AppEnvironment.swift`
 

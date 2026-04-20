@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.23.0 — 2026-04-20
+
+### New Features
+- **Network sessions for Ethernet and VPN** — Session tracking now works for all connection types, not just Wi-Fi. Ethernet sessions are fingerprinted by gateway IP, subnet, and router hardware address; VPN sessions by tunnel interface, gateway IP, and subnet. Network Analysis history is now populated for Ethernet and VPN users.
+
+---
+
 ## v2.22.3 — 2026-04-20
 
 ### Bug Fixes

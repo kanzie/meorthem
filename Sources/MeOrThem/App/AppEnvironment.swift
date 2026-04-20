@@ -21,6 +21,10 @@ final class AppEnvironment {
     // Session tracking — persisted fingerprint and active session ID
     private var currentSessionFingerprint: String?
 
+    // Non-WiFi session guard: avoids spawning ARP/route subprocesses on every tick
+    // when the gateway IP hasn't changed since the last non-WiFi session was established.
+    private var lastNonWifiGatewayIP: String?
+
     // Traceroute rate-limiting: don't fire more than once per 5 minutes
     private var lastTracerouteDate: Date?
     private let tracerouteDebounce: TimeInterval = 300
@@ -67,31 +71,15 @@ final class AppEnvironment {
             }
             .store(in: &cancellables)
 
-        // Track network sessions: open a new session whenever the WiFi fingerprint changes.
-        // The fingerprint encodes gateway IP + channel + band + subnet prefix, giving us
-        // SSID-like session grouping without requiring Location Services.
-        metricStore.$latestWifi
-            .sink { [weak self] snapshot in
+        // Track network sessions: open a new session whenever the network fingerprint changes.
+        // Reacts to both WiFi state changes and gateway IP changes so that Ethernet and VPN
+        // users get sessions too. CombineLatest fires whenever either upstream updates;
+        // the fingerprint equality check in applySessionKey() acts as the gate — only a real
+        // network change (new gateway IP, subnet, MAC, or WiFi channel) opens a new session.
+        Publishers.CombineLatest(metricStore.$latestWifi, metricStore.$latestGatewayIP)
+            .sink { [weak self] wifi, gatewayIP in
                 guard let self else { return }
-                guard let snapshot,
-                      let key = NetworkSessionKey.from(wifi: snapshot) else { return }
-                guard key.fingerprint != self.currentSessionFingerprint else {
-                    // Same network — just touch the session to keep last_seen current
-                    if let sid = self.metricStore.currentSessionID {
-                        self.sqliteStore.touchSession(id: sid)
-                    }
-                    return
-                }
-                // New network fingerprint — open a fresh session
-                let newID = UUID()
-                self.currentSessionFingerprint   = key.fingerprint
-                self.metricStore.currentSessionID = newID
-                self.sqliteStore.openSession(id: newID,
-                                             fingerprint: key.fingerprint,
-                                             displayName: key.displayName)
-                // Reset DNS resolver failure counts — a resolver unreachable on one
-                // network may be fine on another.
-                self.settings.resetDNSResolverFailureCounts()
+                self.updateNetworkSession(wifi: wifi, gatewayIP: gatewayIP)
             }
             .store(in: &cancellables)
 
@@ -181,6 +169,88 @@ final class AppEnvironment {
         mt.tolerance = 300   // ±5 min jitter is fine for housekeeping
         RunLoop.main.add(mt, forMode: .common)
         maintenanceTimer = mt
+    }
+
+    // MARK: - Network session tracking
+
+    /// Derives the correct session key for the current network state and applies it.
+    /// Handles WiFi, Ethernet, and VPN connection types.
+    private func updateNetworkSession(wifi: WiFiSnapshot?, gatewayIP: String?) {
+        if let wifi {
+            // WiFi: fingerprint encodes gateway IP + channel + band + subnet.
+            if let key = NetworkSessionKey.from(wifi: wifi) {
+                applySessionKey(key)
+            }
+            return
+        }
+
+        guard let gatewayIP else { return }  // No connectivity — nothing to track.
+
+        // Non-WiFi path: determine interface type via routing table.
+        // Guard against spawning ARP/route subprocesses every tick when the gateway IP
+        // is unchanged and a non-WiFi session is already established.
+        guard gatewayIP != lastNonWifiGatewayIP ||
+              currentSessionFingerprint?.hasPrefix("eth|") == false &&
+              currentSessionFingerprint?.hasPrefix("vpn|") == false
+        else {
+            // Same gateway as last tick — keep last_seen current without re-probing.
+            if let sid = metricStore.currentSessionID {
+                sqliteStore.touchSession(id: sid)
+            }
+            return
+        }
+        lastNonWifiGatewayIP = gatewayIP
+
+        // Run ARP and routing lookups off the MainActor — cached (30 s TTL), but the
+        // first call in a cache window can spawn a short subprocess.
+        Task { [weak self] in
+            guard let self else { return }
+            let (ifaceName, gatewayMAC) = await Task.detached(priority: .utility) {
+                let iface = NetworkInfo.defaultGatewayInterface()
+                let mac   = NetworkInfo.gatewayMACAddress(for: gatewayIP)
+                return (iface, mac)
+            }.value
+
+            await MainActor.run {
+                let key: NetworkSessionKey
+                if let iface = ifaceName,
+                   iface.hasPrefix("utun") || iface.hasPrefix("ppp") || iface.hasPrefix("tap") {
+                    // VPN tunnel interface
+                    let localIP = NetworkInfo.ipAddress(for: iface)
+                    key = NetworkSessionKey.fromVPN(
+                        gatewayIP: gatewayIP, localIP: localIP, interfaceName: iface)
+                } else {
+                    // Ethernet or unrecognised interface type
+                    let wifiIfaceName = WiFiMonitor.interfaceName()
+                    let ethInfo = NetworkInfo.ethernetInfo(excluding: wifiIfaceName)
+                    key = NetworkSessionKey.fromEthernet(
+                        gatewayIP: gatewayIP, localIP: ethInfo?.ip, gatewayMAC: gatewayMAC)
+                }
+                self.applySessionKey(key)
+            }
+        }
+    }
+
+    /// Opens a new session or touches the existing one, depending on whether the
+    /// fingerprint has changed since the last call.
+    private func applySessionKey(_ key: NetworkSessionKey) {
+        guard key.fingerprint != currentSessionFingerprint else {
+            if let sid = metricStore.currentSessionID {
+                sqliteStore.touchSession(id: sid)
+            }
+            return
+        }
+        let newID = UUID()
+        currentSessionFingerprint    = key.fingerprint
+        metricStore.currentSessionID = newID
+        sqliteStore.openSession(id: newID,
+                                fingerprint:     key.fingerprint,
+                                displayName:     key.displayName,
+                                connectionType:  key.connectionType.rawValue,
+                                weakFingerprint: key.hasWeakFingerprint)
+        // Reset DNS resolver failure counts — a resolver unreachable on one network
+        // may be fully functional on another.
+        settings.resetDNSResolverFailureCounts()
     }
 
     private func runSQLiteMaintenance() {
