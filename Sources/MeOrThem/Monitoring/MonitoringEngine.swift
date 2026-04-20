@@ -245,13 +245,13 @@ final class MonitoringEngine {
         // Interface error sample — every 6th tick, offset by 3 ticks (~30 s, staggered from DNS).
         // Reads cumulative netstat counters and stores the delta since the last reading.
         if tickCount % 6 == 3 {
-            // Prefer the interface name recorded in the latest WiFi snapshot (most reliable).
-            // If WiFi is not active, ask NetworkInfo for the primary ethernet interface.
-            // Hard-coding "en0" was wrong for Macs where en0 is WiFi and en1 is the
-            // active Ethernet adapter (or vice-versa on some Mac models).
-            let iface = store.latestWifi?.interfaceName
-                     ?? NetworkInfo.ethernetInfo()?.interface
-                     ?? "en0"
+            // Prefer the interface name from the latest WiFi snapshot (most reliable).
+            // If WiFi is not active, ask the routing table which interface carries the
+            // default route — this correctly handles Ethernet (en1, etc.), VPN (utun/ppp),
+            // and any other interface type. Do NOT fall back to a hardcoded "en0"; if no
+            // interface is found skip this sample rather than reading the wrong adapter.
+            guard let iface = store.latestWifi?.interfaceName
+                           ?? NetworkInfo.defaultGatewayInterface() else { return }
             Task { [weak self] in
                 guard let self else { return }
                 let counters = await Task.detached(priority: .utility) {

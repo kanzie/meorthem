@@ -434,7 +434,7 @@ lastNonWifiGatewayIP = gatewayIP
 
 ---
 
-## Task 5 — MonitoringEngine: Remove `?? "en0"` interface fallback
+## Task 5 — MonitoringEngine: Remove `?? "en0"` interface fallback ✅ DONE (v2.22.3)
 
 **File:** `Sources/MeOrThem/Monitoring/MonitoringEngine.swift`
 

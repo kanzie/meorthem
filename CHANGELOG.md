@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.22.3 — 2026-04-20
+
+### Bug Fixes
+- **Interface error monitoring uses correct adapter** — Interface error and drop counters now sample the interface that actually carries the default route (via the routing table), instead of falling back to the hardcoded `en0`. On Macs where the active Ethernet adapter is `en1` or where a VPN tunnel is active, the correct interface is now monitored.
+
+---
+
 ## v2.22.2 — 2026-04-20
 
 ### New Features
