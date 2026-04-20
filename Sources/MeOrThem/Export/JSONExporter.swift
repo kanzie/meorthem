@@ -80,11 +80,27 @@ enum JSONExporter {
                 return obj
             }
 
+        let sessionsJSON: [[String: Any]] = sqliteStore.sessionsInRange(from: from, to: to).map { s in
+            var obj: [String: Any] = [
+                "id":             s.id.uuidString,
+                "displayName":    s.displayName,
+                "connectionType": s.connectionType,
+                "startedAt":      iso.string(from: s.startedAt),
+                "lastSeen":       iso.string(from: s.lastSeen),
+            ]
+            if s.weakFingerprint {
+                obj["weakFingerprintWarning"] = "Ethernet session without router hardware address — " +
+                    "may contain data from multiple networks with the same gateway IP and subnet."
+            }
+            return obj
+        }
+
         let root: [String: Any] = [
             "exportedAt":     iso.string(from: Date()),
             "periodFrom":     iso.string(from: from),
             "periodTo":       iso.string(from: to),
             "appVersion":     Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?",
+            "sessions":       sessionsJSON,
             "targets":        targetsJSON,
             "bandwidthTests": speedtestJSON,
             "wifi":           wifiJSON,

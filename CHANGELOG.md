@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.26.0 — 2026-04-20
+
+### New Features
+- **JSON export includes network session metadata** — Exported JSON reports now contain a `sessions` array with each network session active during the export period, including connection type, display name, start and end times, and a warning for Ethernet sessions recorded without a router hardware address.
+
+---
+
 ## v2.25.0 — 2026-04-20
 
 ### New Features

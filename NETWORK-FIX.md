@@ -591,7 +591,7 @@ This requires `sessionsInRange(from:to:)` to be publicly available — confirm i
 
 ---
 
-## Task 9 — JSONExporter: Add `connectionType` and session metadata
+## Task 9 — JSONExporter: Add `connectionType` and session metadata ✅ DONE (v2.26.0)
 
 **File:** `Sources/MeOrThem/Export/JSONExporter.swift`
 
