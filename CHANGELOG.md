@@ -5,6 +5,14 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.22.1 — 2026-04-20
+
+### New Features
+- **Ethernet and VPN session fingerprinting** — Network sessions are now correctly created for Ethernet and VPN connections, not only for Wi-Fi. Ethernet sessions use the gateway IP, subnet, and router hardware address as the fingerprint; VPN sessions use the tunnel interface name, gateway IP, and subnet.
+- **Weak fingerprint advisory** — When the router hardware address is unavailable at session creation time (ARP cache miss), the session is flagged so the Network Analysis window can warn that data from different Ethernet networks sharing the same IP and subnet may have been combined.
+
+---
+
 ## v2.22.0 — 2026-04-20
 
 ### New Features

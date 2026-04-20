@@ -163,7 +163,7 @@ static func gatewayMACAddress(for ip: String) -> String?
 
 ---
 
-## Task 2 — NetworkSessionKey: Add ConnectionType, VPN factory, hasWeakFingerprint
+## Task 2 — NetworkSessionKey: Add ConnectionType, VPN factory, hasWeakFingerprint ✅ DONE (v2.22.1)
 
 **File:** `Sources/MeOrThem/Models/NetworkSessionKey.swift`
 
