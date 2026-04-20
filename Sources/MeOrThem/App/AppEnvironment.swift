@@ -248,6 +248,19 @@ final class AppEnvironment {
                                 displayName:     key.displayName,
                                 connectionType:  key.connectionType.rawValue,
                                 weakFingerprint: key.hasWeakFingerprint)
+        // Log non-WiFi interface details on session open (WiFi rows are logged per-tick
+        // via appendWiFi; Ethernet/VPN sessions only need a snapshot at session creation).
+        if key.connectionType != .wifi {
+            let ifaceParts = key.fingerprint.split(separator: "|")
+            let ifaceName  = key.connectionType == .vpn
+                ? (ifaceParts.count >= 2 ? String(ifaceParts[1]) : key.displayName)
+                : key.displayName
+            logExporter.appendInterfaceSnapshot(
+                interfaceName:  ifaceName,
+                connectionType: key.connectionType.rawValue,
+                localIP:        nil,
+                gatewayIP:      metricStore.latestGatewayIP)
+        }
         // Reset DNS resolver failure counts — a resolver unreachable on one network
         // may be fully functional on another.
         settings.resetDNSResolverFailureCounts()

@@ -673,7 +673,7 @@ if !sessions.isEmpty {
 
 ---
 
-## Task 11 — LogExporter: Add `appendInterfaceSnapshot()` for non-WiFi
+## Task 11 — LogExporter: Add `appendInterfaceSnapshot()` for non-WiFi ✅ DONE (v2.24.0)
 
 **File:** `Sources/MeOrThem/Storage/LogExporter.swift`
 

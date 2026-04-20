@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.24.0 — 2026-04-20
+
+### New Features
+- **Ethernet and VPN connections logged to daily CSV** — When using Ethernet or VPN, the daily activity log now records a snapshot row at each session start, capturing the connection type, interface name, and gateway IP for complete audit trails on non-WiFi connections.
+
+---
+
 ## v2.23.1 — 2026-04-20
 
 ### Bug Fixes

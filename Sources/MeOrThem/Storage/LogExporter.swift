@@ -61,6 +61,22 @@ final class LogExporter {
         writeRow(row, to: fh)
     }
 
+    /// Appends a non-WiFi interface snapshot row to the CSV log.
+    /// Called once per session open for Ethernet/VPN sessions so the log
+    /// contains a record of the connection type and IP at the time of the switch.
+    func appendInterfaceSnapshot(interfaceName: String,
+                                  connectionType: String,
+                                  localIP: String?,
+                                  gatewayIP: String?) {
+        guard settings.enableLogRotation, let fh = fileHandle else { return }
+        let ts  = Self._isoFormatter.string(from: Date())
+        let ip  = localIP  ?? ""
+        let gw  = gatewayIP ?? ""
+        let row = "\(ts),interface,\(csvQuote(interfaceName)),\(csvQuote(connectionType))," +
+                  "\(csvQuote(ip)),\(csvQuote(gw)),,\n"
+        writeRow(row, to: fh)
+    }
+
     func appendWiFi(_ snapshot: WiFiSnapshot) {
         guard settings.enableLogRotation, let fh = fileHandle else { return }
         let ts   = Self._isoFormatter.string(from: snapshot.timestamp)
