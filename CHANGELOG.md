@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.23.1 — 2026-04-20
+
+### Bug Fixes
+- **Network Details menu shows VPN and unknown connection types** — The Network Details submenu now correctly identifies VPN connections (utun/ppp/tap interfaces) and displays tunnel interface name, IP address, and router. Unknown connection types show basic IP and router information. Non-WiFi connections explicitly note that Wi-Fi signal is not available.
+
+---
+
 ## v2.23.0 — 2026-04-20
 
 ### New Features

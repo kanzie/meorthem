@@ -485,7 +485,7 @@ let ifaceName = iface.interfaceName ?? "en0"
 
 ---
 
-## Task 7 — MenuBuilder: Add VPN branch in `networkDetailsSubmenu()`
+## Task 7 — MenuBuilder: Add VPN branch in `networkDetailsSubmenu()` ✅ DONE (v2.23.1)
 
 **File:** `Sources/MeOrThem/UI/Menu/MenuBuilder.swift`
 

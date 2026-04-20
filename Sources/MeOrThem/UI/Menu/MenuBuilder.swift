@@ -463,7 +463,25 @@ enum MenuBuilder {
             sub.addItem(infoItem("PHY Mode:    \(w.phyMode)"))
         } else {
             let wifiIfaceName = WiFiMonitor.interfaceName()
-            if let eth = NetworkInfo.ethernetInfo(excluding: wifiIfaceName) {
+            // Check the active default-route interface — covers VPN, Ethernet, and unusual setups.
+            // Cached (30 s TTL) so this does not spawn a subprocess on every menu open.
+            let activeIface = NetworkInfo.defaultGatewayInterface()
+            let isVPN = activeIface.map {
+                $0.hasPrefix("utun") || $0.hasPrefix("ppp") || $0.hasPrefix("tap")
+            } ?? false
+
+            if isVPN, let vpnIface = activeIface {
+                sub.addItem(infoItem("VPN — \(vpnIface)", bold: true))
+                sub.addItem(.separator())
+                if let localIP = NetworkInfo.ipAddress(for: vpnIface) {
+                    sub.addItem(infoItem("IP Address:  \(localIP)"))
+                }
+                if let gw = NetworkInfo.defaultGateway() {
+                    sub.addItem(infoItem("Router:      \(gw)"))
+                }
+                sub.addItem(infoItem("WiFi signal: Not available (VPN)"))
+
+            } else if let eth = NetworkInfo.ethernetInfo(excluding: wifiIfaceName) {
                 sub.addItem(infoItem("Ethernet — \(eth.interface)", bold: true))
                 sub.addItem(.separator())
                 sub.addItem(infoItem("IP Address:  \(eth.ip)"))
@@ -471,6 +489,19 @@ enum MenuBuilder {
                     sub.addItem(infoItem("Router:      \(gw)"))
                 }
                 sub.addItem(infoItem("MAC Address: \(eth.mac)"))
+                sub.addItem(infoItem("WiFi signal: Not available (Ethernet)"))
+
+            } else if let iface = activeIface {
+                // Unknown interface type (bridge, cellular USB modem, etc.)
+                sub.addItem(infoItem("Connected — \(iface)", bold: true))
+                sub.addItem(.separator())
+                if let ip = NetworkInfo.ipAddress(for: iface) {
+                    sub.addItem(infoItem("IP Address:  \(ip)"))
+                }
+                if let gw = NetworkInfo.defaultGateway() {
+                    sub.addItem(infoItem("Router:      \(gw)"))
+                }
+
             } else {
                 sub.addItem(infoItem("No network connection"))
             }
