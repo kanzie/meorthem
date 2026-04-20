@@ -5,6 +5,14 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.27.0 — 2026-04-20
+
+### New Features
+- **PDF export shows network session history** — PDF reports now include a Network Sessions section listing each session in the export period with connection type, display name, and start/end times. Sessions recorded without a router hardware address (weak Ethernet fingerprint) are flagged with a warning.
+- **PDF export handles non-WiFi connections** — The Wi-Fi History section in PDF reports now shows an informational message when no Wi-Fi data is present, rather than rendering an empty section.
+
+---
+
 ## v2.26.0 — 2026-04-20
 
 ### New Features

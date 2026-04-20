@@ -53,6 +53,25 @@ enum PDFExporter {
         page.subtitle("Period: \(localFmt.string(from: from)) — \(localFmt.string(from: to))")
         page.gap(14); page.hline(); page.gap(14)
 
+        // ── Network sessions ───────────────────────────────────────────────
+        let sessionRows = sqliteStore.sessionsInRange(from: from, to: to)
+        if !sessionRows.isEmpty {
+            if !page.hasRoom(30) { pages.append(page.finish()); page = PageCanvas(w: pageW, h: pageH, margin: margin, scale: scale) }
+            page.sectionHeader("NETWORK SESSIONS")
+            for s in sessionRows {
+                if !page.hasRoom(PageCanvas.rowH) { pages.append(page.finish()); page = PageCanvas(w: pageW, h: pageH, margin: margin, scale: scale) }
+                let start = localFmt.string(from: s.startedAt)
+                let end   = localFmt.string(from: s.lastSeen)
+                page.dotRow(color: .secondaryLabelColor,
+                            text: "\(s.displayName)  [\(s.connectionType)]  \(start) – \(end)")
+                if s.weakFingerprint {
+                    page.dotRow(color: .systemOrange,
+                                text: "  ⚠ Router hardware address unavailable — session may combine multiple networks.")
+                }
+            }
+            page.gap(8); page.hline(); page.gap(12)
+        }
+
         // ── Ping summary per target ────────────────────────────────────────
         page.sectionHeader("PING TARGETS")
         for target in targets {
@@ -142,6 +161,11 @@ enum PDFExporter {
                     String(format: "%.0f", w.txRateMbps),
                 ], cols: wifiCols)
             }
+            page.gap(6); page.hline(); page.gap(10)
+        } else {
+            if !page.hasRoom(30) { pages.append(page.finish()); page = PageCanvas(w: pageW, h: pageH, margin: margin, scale: scale) }
+            page.sectionHeader("WI-FI HISTORY")
+            page.bodyLine("No Wi-Fi data in this period. Connection type: Ethernet or VPN.")
             page.gap(6); page.hline(); page.gap(10)
         }
 

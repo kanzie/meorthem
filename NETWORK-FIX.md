@@ -629,7 +629,7 @@ let root: [String: Any] = [
 
 ---
 
-## Task 10 — PDFExporter: Replace WiFi-only section with conditional block
+## Task 10 — PDFExporter: Replace WiFi-only section with conditional block ✅ DONE (v2.27.0)
 
 **File:** `Sources/MeOrThem/Export/PDFExporter.swift`
 
