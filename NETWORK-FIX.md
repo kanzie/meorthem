@@ -778,7 +778,7 @@ if session.connectionType != "wifi" {
 
 ---
 
-## Task 13 — Tests
+## Task 13 — Tests ✅ DONE (v2.29.0)
 
 **Location:** `Tests/MeOrThemTests/` (or wherever existing tests live — check with Glob).
 
