@@ -3,7 +3,7 @@ import SwiftUI
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case general    = "General"
     case targets    = "Targets"
-    case thresholds = "Thresholds"
+    case thresholds = "Global Thresholds"
     case dns        = "DNS Resolvers"
 
     var id: String { rawValue }
@@ -21,7 +21,7 @@ private enum SettingsTab: String, CaseIterable, Identifiable {
         switch self {
         case .general:    return "Startup, monitoring & appearance"
         case .targets:    return "Hosts to ping"
-        case .thresholds: return "Alert levels & evaluation windows"
+        case .thresholds: return "Default alert levels & evaluation windows"
         case .dns:        return "Multi-resolver latency monitoring"
         }
     }

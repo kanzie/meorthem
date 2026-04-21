@@ -6,23 +6,28 @@ struct PingTarget: Identifiable, Codable, Equatable, Hashable {
     var host: String
     /// System targets (e.g., Gateway) are not editable or removable by the user.
     var isSystem: Bool
+    /// Optional per-target threshold overrides. When non-nil, used instead of global thresholds.
+    var thresholdOverride: Thresholds?
 
-    init(id: UUID = UUID(), label: String, host: String, isSystem: Bool = false) {
-        self.id = id
-        self.label = label
-        self.host = host
-        self.isSystem = isSystem
+    init(id: UUID = UUID(), label: String, host: String, isSystem: Bool = false,
+         thresholdOverride: Thresholds? = nil) {
+        self.id                = id
+        self.label             = label
+        self.host              = host
+        self.isSystem          = isSystem
+        self.thresholdOverride = thresholdOverride
     }
 
     // Custom Codable: isSystem is never persisted — user targets are always non-system.
-    enum CodingKeys: String, CodingKey { case id, label, host }
+    enum CodingKeys: String, CodingKey { case id, label, host, thresholdOverride }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id       = try c.decode(UUID.self,   forKey: .id)
-        label    = try c.decode(String.self, forKey: .label)
-        host     = try c.decode(String.self, forKey: .host)
-        isSystem = false
+        id                = try c.decode(UUID.self,   forKey: .id)
+        label             = try c.decode(String.self, forKey: .label)
+        host              = try c.decode(String.self, forKey: .host)
+        isSystem          = false
+        thresholdOverride = try? c.decodeIfPresent(Thresholds.self, forKey: .thresholdOverride) ?? nil
     }
 
     func encode(to encoder: Encoder) throws {
@@ -30,6 +35,7 @@ struct PingTarget: Identifiable, Codable, Equatable, Hashable {
         try c.encode(id,    forKey: .id)
         try c.encode(label, forKey: .label)
         try c.encode(host,  forKey: .host)
+        try c.encodeIfPresent(thresholdOverride, forKey: .thresholdOverride)
     }
 
     /// Fixed ID used for the gateway system target (consistent across sessions).

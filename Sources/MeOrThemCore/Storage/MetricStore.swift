@@ -103,7 +103,9 @@ final class MetricStore: ObservableObject {
     /// brief single-poll spikes (AWDL, roaming) without needing a separate debounce.
     private func windowedStatus(for targetID: UUID) -> MetricStatus {
         guard let history = pingHistory[targetID] else { return .red }
-        let t    = settings.thresholds
+        // Use per-target threshold override when set, otherwise fall back to global thresholds.
+        let t    = settings.pingTargets.first(where: { $0.id == targetID })?.thresholdOverride
+                   ?? settings.thresholds
         let poll = settings.pollIntervalSecs
 
         let latencyN = max(1, Int(ceil(settings.latencyWindowSecs / poll)))
@@ -127,10 +129,24 @@ final class MetricStore: ObservableObject {
             effectiveStatuses[targetID] = windowedStatus(for: targetID)
         }
 
-        // Use a trimmed mean of actual metric values across targets for the overall status.
-        // If ≥3 targets, the best and worst per metric are discarded before averaging,
-        // preventing a consistently-bad outlier from dominating the result.
-        let worst = trimmedMeanStatus()
+        // Overall status:
+        // - Targets with per-target threshold overrides are evaluated individually.
+        //   Their status feeds directly into the worst-case without participating in the
+        //   trimmed mean (overrides are intentional, not outliers to be discarded).
+        // - Targets without overrides use the global trimmed-mean approach (prevents an
+        //   outlier target from dominating when ≥3 non-override targets are present).
+        let overrideTargetIDs = Set(settings.pingTargets
+            .filter { $0.thresholdOverride != nil }
+            .map(\.id))
+
+        let overrideWorst: MetricStatus = effectiveStatuses
+            .filter { overrideTargetIDs.contains($0.key) }
+            .values
+            .max() ?? .green
+
+        let globalWorst = trimmedMeanStatus(excluding: overrideTargetIDs)
+
+        let worst = max(overrideWorst, globalWorst)
 
         let prev = previousOverallStatus
         previousOverallStatus = worst
@@ -270,8 +286,8 @@ final class MetricStore: ObservableObject {
     }
 
     /// Computes overall status using a trimmed mean of metric averages across all non-gateway targets.
-    private func trimmedMeanStatus() -> MetricStatus {
-        let ids = latestPing.keys.filter { $0 != PingTarget.gatewayID }
+    private func trimmedMeanStatus(excluding: Set<UUID> = []) -> MetricStatus {
+        let ids = latestPing.keys.filter { $0 != PingTarget.gatewayID && !excluding.contains($0) }
         guard !ids.isEmpty else { return .green }
 
         var losses:    [Double] = []

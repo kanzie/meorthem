@@ -81,7 +81,7 @@ extension MetricStatus {
     }
 }
 
-struct Thresholds: Codable {
+struct Thresholds: Codable, Equatable, Hashable {
     // ── Alarm thresholds (tuned for video conferencing) ──────────────────────
     var latencyYellowMs: Double = 60    // noticeable lag on calls
     var latencyRedMs:    Double = 150   // severe call degradation

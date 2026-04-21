@@ -5,6 +5,16 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.32.0 — 2026-04-21
+
+### New Features
+- **Per-target custom thresholds** — Each ping target can now have its own latency, packet loss, and jitter alert thresholds. When custom thresholds are set, that target's status is evaluated against its own values instead of the global defaults. Configure them in Settings → Targets by selecting a target and expanding "Custom Thresholds". Targets with active overrides show a "custom" badge in the list.
+
+### Changes
+- **Thresholds tab renamed to "Global Thresholds"** — The Settings tab previously labelled "Thresholds" is now "Global Thresholds" to clarify that it controls the defaults, not per-target overrides.
+
+---
+
 ## v2.31.0 — 2026-04-21
 
 ### New Features

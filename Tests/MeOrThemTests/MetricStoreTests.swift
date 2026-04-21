@@ -1,3 +1,4 @@
+import Foundation
 @testable import MeOrThemCore
 
 func runMetricStoreTests() {
@@ -200,6 +201,42 @@ func runMetricStoreTests() {
             // Trimmed mean: remove 190 and 210, remaining = 200ms → red (≥150ms red threshold)
             expectEqual(storeAllBad.overallStatus, .red,
                         "3 targets all bad: trimmed mean 200ms ≥ 150ms red threshold → red")
+
+            // ── Per-target threshold overrides ──────────────────────────────
+            // tightTarget has a very tight override (latency red = 5ms).
+            // normalTarget uses global thresholds (latency red = 150ms).
+            // Both receive 10ms RTT → tight target should trigger red, normal stays green.
+            var strictOverride = Thresholds.default
+            strictOverride.latencyRedMs    = 5
+            strictOverride.latencyYellowMs = 3
+            let tightID  = UUID()
+            let normalID = UUID()
+            let savedTargets = settings.pingTargets
+            settings.pingTargets = [
+                PingTarget(id: tightID,  label: "TightTarget",  host: "1.1.1.1",
+                           thresholdOverride: strictOverride),
+                PingTarget(id: normalID, label: "NormalTarget", host: "8.8.8.8",
+                           thresholdOverride: nil)
+            ]
+
+            let storeOverride = MetricStore(settings: settings)
+            for _ in 0..<3 {
+                storeOverride.record(result: PingResult(timestamp: .now, rtt: 10, lossPercent: 0, jitter: 1), for: tightID)
+            }
+            // tightID: 10ms avg ≥ 5ms red → red per override.
+            expectEqual(storeOverride.overallStatus, .red,
+                        "target with 5ms red override: 10ms RTT → red")
+
+            // normalID alone: 10ms < 150ms global red → green
+            let storeNoOverride = MetricStore(settings: settings)
+            for _ in 0..<3 {
+                storeNoOverride.record(result: PingResult(timestamp: .now, rtt: 10, lossPercent: 0, jitter: 1), for: normalID)
+            }
+            expectEqual(storeNoOverride.overallStatus, .green,
+                        "target without override, global 150ms threshold: 10ms RTT → green")
+
+            // Restore original targets
+            settings.pingTargets = savedTargets
         }
     }
 }
