@@ -1,9 +1,10 @@
 import AppKit
 import Combine
+import UserNotifications
 import MeOrThemCore   // for AppearanceObserver
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUserNotificationCenterDelegate {
 
     private var statusItem: NSStatusItem!
     private var environment: AppEnvironment!
@@ -49,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let isFirstLaunch = UserDefaults.standard.object(forKey: "launchAtLogin") == nil
 
         environment = AppEnvironment()
+        UNUserNotificationCenter.current().delegate = self
         setupStatusItem()
         observeStatusChanges()
         observeAppearance()
@@ -403,9 +405,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func showNetworkHistory() {
         if chartsWindowController == nil {
             chartsWindowController = MetricsChartsWindowController(
-                db:         environment.sqliteStore,
-                targets:    environment.settings.pingTargets,
-                thresholds: environment.settings.thresholds
+                db:                  environment.sqliteStore,
+                targets:             environment.settings.pingTargets,
+                thresholds:          environment.settings.thresholds,
+                bandwidthRedMbps:    environment.settings.bandwidthBarRedMbps,
+                bandwidthYellowMbps: environment.settings.bandwidthBarYellowMbps
             )
             // Release on close so the SwiftUI hosting controller doesn't linger in the compositor.
             // The token must be stored — discarding it causes ARC to remove the observer
@@ -447,6 +451,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MenuBuilder.rebuild(menu, environment: environment, actions: makeMenuActions())
         }
         updateIcon(status: environment.metricStore.overallStatus)
+    }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        if response.actionIdentifier == AlertManager.actionViewCharts {
+            Task { @MainActor in
+                self.showNetworkHistory()
+            }
+        }
+        completionHandler()
     }
 
     // MARK: - Dummy @objc selector required by NSMenuItem

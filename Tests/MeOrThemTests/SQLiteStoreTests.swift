@@ -574,4 +574,49 @@ func runSQLiteStoreTests() {
         let filtered = store.hourlyRTTAverages(lookback: 20 * 86_400, minSampleCount: 50)
         expect(filtered.isEmpty, "high minSampleCount filters all sparse hours")
     }
+
+    suite("SQLiteStore — speedtest rows round-trip") {
+        let store = SQLiteStore(path: ":memory:")
+        let now   = Date()
+
+        // Insert 5 speedtest results at 1-hour intervals
+        for i in 0..<5 {
+            let ts = now.addingTimeInterval(Double(i) * 3600)
+            store.insertSpeedtest(timestamp:    ts,
+                                  downloadMbps: Double(100 + i * 10),
+                                  uploadMbps:   Double(20 + i * 5),
+                                  latencyMs:    Double(15 + i),
+                                  jitterMs:     Double(2 + i),
+                                  isp:          "TestISP",
+                                  serverName:   "test-server-\(i)")
+        }
+        store.waitForPendingOps()
+
+        // Full range query returns all 5 rows
+        let from = now.addingTimeInterval(-1)
+        let to   = now.addingTimeInterval(5 * 3600 + 1)
+        let rows = store.speedtestRows(from: from, to: to)
+        expectEqual(rows.count, 5, "speedtestRows returns all 5 rows")
+
+        // Fields are preserved on first row
+        expectEqual(rows[0].downloadMbps, 100.0, "download Mbps preserved")
+        expectEqual(rows[0].uploadMbps,   20.0,  "upload Mbps preserved")
+        expectEqual(rows[0].latencyMs,    15.0,  "latency ms preserved")
+        expectEqual(rows[0].jitterMs,     2.0,   "jitter ms preserved")
+        expectEqual(rows[0].isp,          "TestISP", "ISP preserved")
+        expectEqual(rows[0].serverName,   "test-server-0", "server name preserved")
+
+        // Last row has incremented values
+        expectEqual(rows[4].downloadMbps, 140.0, "last row download Mbps")
+        expectEqual(rows[4].uploadMbps,   40.0,  "last row upload Mbps")
+
+        // Ascending order by timestamp
+        expect(rows[0].timestamp < rows[4].timestamp, "rows ascending by timestamp")
+
+        // Narrow range returns subset: rows at 1h and 2h offsets
+        let narrowRows = store.speedtestRows(from: now.addingTimeInterval(1800),
+                                              to:   now.addingTimeInterval(9000))
+        expectEqual(narrowRows.count, 2, "narrow range returns 2 rows (index 1 and 2)")
+        expectEqual(narrowRows[0].downloadMbps, 110.0, "first in narrow range has correct Mbps")
+    }
 }

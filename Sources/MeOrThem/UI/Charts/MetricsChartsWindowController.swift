@@ -4,7 +4,8 @@ import MeOrThemCore
 
 final class MetricsChartsWindowController: NSWindowController {
 
-    init(db: SQLiteStore, targets: [PingTarget], thresholds: Thresholds) {
+    init(db: SQLiteStore, targets: [PingTarget], thresholds: Thresholds,
+         bandwidthRedMbps: Double = 10, bandwidthYellowMbps: Double = 25) {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1000, height: 720),
             styleMask:   [.titled, .closable, .resizable, .miniaturizable],
@@ -21,7 +22,9 @@ final class MetricsChartsWindowController: NSWindowController {
 
         super.init(window: window)
 
-        let view = MetricsChartsView(db: db, targets: targets, thresholds: thresholds)
+        let view = MetricsChartsView(db: db, targets: targets, thresholds: thresholds,
+                                     bandwidthRedMbps: bandwidthRedMbps,
+                                     bandwidthYellowMbps: bandwidthYellowMbps)
         window.contentViewController = NSHostingController(rootView: view)
     }
 

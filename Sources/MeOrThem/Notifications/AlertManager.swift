@@ -8,12 +8,27 @@ final class AlertManager {
     private let cooldownSeconds: TimeInterval = 60
     private let settings: AppSettings
 
+    static let categoryID       = "com.meorthem.degradation"
+    static let actionViewCharts = "VIEW_CHARTS"
+
     init(settings: AppSettings) {
         self.settings = settings
     }
 
     func requestPermission() {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        let action = UNNotificationAction(
+            identifier: Self.actionViewCharts,
+            title: "View Charts",
+            options: [.foreground]
+        )
+        let category = UNNotificationCategory(
+            identifier: Self.categoryID,
+            actions: [action],
+            intentIdentifiers: [],
+            options: []
+        )
+        UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
     func handleStatusChange(_ newStatus: MetricStatus) {
@@ -36,6 +51,7 @@ final class AlertManager {
         content.body  = status == .red
             ? "Your connection is poor. Video calls may be affected."
             : "Your connection quality has degraded."
+        content.categoryIdentifier = Self.categoryID
         if settings.enableNotificationSound {
             content.sound = .default
         }

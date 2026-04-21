@@ -61,6 +61,7 @@ final class MetricsDataLoader: ObservableObject {
     @Published private(set) var wifiRSSI:        [ChartPoint] = []
     /// Per-resolver RTT points. `targetLabel` = resolver name for color-coding.
     @Published private(set) var dnsPoints:         [ChartPoint] = []
+    @Published private(set) var speedtestPoints:   [SQLiteStore.SpeedtestRow] = []
     @Published private(set) var incidents:         [SQLiteStore.IncidentRow] = []
     /// Cross-session average RTT per hour-of-day (0–23) from the last 30 days of aggregates.
     @Published private(set) var hourlyRTTAverages: [Int: Double] = [:]
@@ -189,27 +190,31 @@ final class MetricsDataLoader: ObservableObject {
                 dnsDownsampled = dnsPoints
             }
 
+            let speedtestRows = db.speedtestRows(from: from, to: now)
+
             guard !Task.isCancelled else { return }
 
             // Capture computed values as let bindings for safe transfer across isolation
-            let finalLatency   = latency
-            let finalLoss      = loss
-            let finalJitter    = jitter
-            let finalWifi      = wifiPoints
-            let finalDNS       = dnsDownsampled
-            let finalIncidents = recentIncidents
+            let finalLatency    = latency
+            let finalLoss       = loss
+            let finalJitter     = jitter
+            let finalWifi       = wifiPoints
+            let finalDNS        = dnsDownsampled
+            let finalSpeedtest  = speedtestRows
+            let finalIncidents  = recentIncidents
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.rangeStart    = from
-                self.rangeEnd      = now
-                self.latencyPoints = finalLatency
-                self.lossPoints    = finalLoss
-                self.jitterPoints  = finalJitter
-                self.wifiRSSI      = finalWifi
-                self.dnsPoints     = finalDNS
-                self.incidents     = finalIncidents
-                self.isLoading     = false
+                self.rangeStart       = from
+                self.rangeEnd         = now
+                self.latencyPoints    = finalLatency
+                self.lossPoints       = finalLoss
+                self.jitterPoints     = finalJitter
+                self.wifiRSSI         = finalWifi
+                self.dnsPoints        = finalDNS
+                self.speedtestPoints  = finalSpeedtest
+                self.incidents        = finalIncidents
+                self.isLoading        = false
             }
         }
 

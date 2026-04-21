@@ -68,10 +68,15 @@ struct MetricsChartsView: View {
     @State private var hoveredHourLabel: String? = nil
 
     private let thresholds: Thresholds
+    private let bandwidthRedMbps:    Double
+    private let bandwidthYellowMbps: Double
 
-    init(db: SQLiteStore, targets: [PingTarget], thresholds: Thresholds) {
+    init(db: SQLiteStore, targets: [PingTarget], thresholds: Thresholds,
+         bandwidthRedMbps: Double = 10, bandwidthYellowMbps: Double = 25) {
         _loader     = StateObject(wrappedValue: MetricsDataLoader(db: db, targets: targets))
-        self.thresholds = thresholds
+        self.thresholds          = thresholds
+        self.bandwidthRedMbps    = bandwidthRedMbps
+        self.bandwidthYellowMbps = bandwidthYellowMbps
     }
 
     // MARK: - Derived target data
@@ -128,6 +133,7 @@ struct MetricsChartsView: View {
                             jitterCard
                             if !loader.wifiRSSI.isEmpty { wifiCard }
                             if !loader.dnsPoints.isEmpty { dnsCard }
+                            speedtestCard
                             if loader.hourlyRTTAverages.count >= 4 { hourlyPatternCard }
                             if !loader.incidents.isEmpty { incidentList }
                         }
@@ -780,6 +786,95 @@ struct MetricsChartsView: View {
                     }
                 }
                 .padding(.top, 2)
+            }
+        }
+    }
+
+    // MARK: - Speedtest Card
+
+    private var speedtestCard: some View {
+        ChartCard(title: "Bandwidth",
+                  subtitle: "Download and upload speed from speed tests (Mbps)") {
+            if loader.speedtestPoints.isEmpty {
+                emptyView(icon: "bolt.fill", message: "No bandwidth tests recorded")
+            } else {
+                let dlPoints  = loader.speedtestPoints.map { ChartPoint(timestamp: $0.timestamp, value: $0.downloadMbps, targetLabel: "Download") }
+                let ulPoints  = loader.speedtestPoints.map { ChartPoint(timestamp: $0.timestamp, value: $0.uploadMbps,   targetLabel: "Upload") }
+                let allPoints = dlPoints + ulPoints
+                let peak      = allPoints.map(\.value).max() ?? 100
+                let yMax      = max(peak * 1.2, bandwidthYellowMbps * 1.5)
+                let stColorMap: [String: Color] = ["Download": .blue, "Upload": .orange]
+                VStack(alignment: .leading, spacing: 6) {
+                    Chart {
+                        // Threshold reference lines
+                        RuleMark(y: .value("Yellow", bandwidthYellowMbps))
+                            .foregroundStyle(Color.orange.opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        RuleMark(y: .value("Red", bandwidthRedMbps))
+                            .foregroundStyle(Color.red.opacity(0.4))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+                        // Lines + point marks (speedtests are sparse)
+                        ForEach(dlPoints) { p in
+                            LineMark(x: .value("Time", p.timestamp), y: .value("Mbps", p.value))
+                                .foregroundStyle(Color.blue)
+                                .lineStyle(StrokeStyle(lineWidth: 2))
+                            PointMark(x: .value("Time", p.timestamp), y: .value("Mbps", p.value))
+                                .foregroundStyle(Color.blue)
+                                .symbolSize(50)
+                        }
+                        ForEach(ulPoints) { p in
+                            LineMark(x: .value("Time", p.timestamp), y: .value("Mbps", p.value))
+                                .foregroundStyle(Color.orange)
+                                .lineStyle(StrokeStyle(lineWidth: 2))
+                            PointMark(x: .value("Time", p.timestamp), y: .value("Mbps", p.value))
+                                .foregroundStyle(Color.orange)
+                                .symbolSize(50)
+                        }
+                    }
+                    .chartLegend(.hidden)
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 6)) { _ in
+                            AxisValueLabel().font(.caption).foregroundStyle(.secondary)
+                            AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks(position: .leading) { _ in
+                            AxisValueLabel().font(.caption).foregroundStyle(.secondary)
+                            AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
+                        }
+                    }
+                    .chartYScale(domain: 0...yMax)
+                    .frame(height: 200)
+                    .chartOverlay { proxy in
+                        GeometryReader { geo in
+                            hoverOverlay(proxy: proxy, geometry: geo,
+                                         points: allPoints, unit: "Mbps",
+                                         overrideColorMap: stColorMap)
+                        }
+                    }
+
+                    // ISP info from most recent test
+                    if let latest = loader.speedtestPoints.last, !latest.isp.isEmpty {
+                        Text("ISP: \(latest.isp)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    // Legend
+                    HStack(spacing: 12) {
+                        HStack(spacing: 4) {
+                            RoundedRectangle(cornerRadius: 2).fill(Color.blue).frame(width: 12, height: 3)
+                            Text("Download").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        HStack(spacing: 4) {
+                            RoundedRectangle(cornerRadius: 2).fill(Color.orange).frame(width: 12, height: 3)
+                            Text("Upload").font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 2)
+                }
             }
         }
     }

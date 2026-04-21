@@ -5,6 +5,14 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.30.0 — 2026-04-21
+
+### New Features
+- **Bandwidth history chart** — The Network History window now includes a Bandwidth chart showing download and upload speed from past speed tests, with per-data-point markers, download/upload threshold reference lines, and hover tooltips. Shows "No bandwidth tests recorded" when no speed tests have been run.
+- **"View Charts" notification action** — Degradation alerts now include a "View Charts" action button. Tapping it brings the app to the foreground and opens the Network History charts window directly.
+
+---
+
 ## v2.28.0 — 2026-04-20
 
 ### New Features
