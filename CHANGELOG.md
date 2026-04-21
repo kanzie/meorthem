@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.31.0 — 2026-04-21
+
+### New Features
+- **Incident History window** — A new "Incident History…" entry in the Advanced submenu opens a dedicated window listing all recorded network degradation incidents. Each row shows start time, severity, cause, and duration. Includes date-range filtering, a "Clear All" button with confirmation, and a "View" button per incident that opens the Network History charts window.
+
+---
+
 ## v2.30.0 — 2026-04-21
 
 ### New Features

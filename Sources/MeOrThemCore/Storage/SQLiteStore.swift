@@ -511,6 +511,18 @@ public final class SQLiteStore: @unchecked Sendable {
         queue.sync { _incidents(limit: limit) }
     }
 
+    /// All incidents (open or resolved), newest first, up to `limit` rows.
+    public func allIncidentRows(limit: Int = 500) -> [IncidentRow] {
+        queue.sync { _incidents(limit: limit) }
+    }
+
+    /// Incidents whose started_at falls within [from, to], newest first.
+    public func incidentRows(from: Date, to: Date, limit: Int = 500) -> [IncidentRow] {
+        let f = from.timeIntervalSince1970
+        let t = to.timeIntervalSince1970
+        return queue.sync { _incidentsInRange(from: f, to: t, limit: limit) }
+    }
+
     /// Returns true if any ping data (raw or aggregated) exists in the given time range.
     /// Uses a LIMIT 1 query so it short-circuits immediately on the first matching row.
     public func hasPingData(from: Date, to: Date) -> Bool {
@@ -1391,6 +1403,26 @@ public final class SQLiteStore: @unchecked Sendable {
         guard let stmt = _prepare(sql) else { return [] }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_int(stmt, 1, Int32(limit))
+        return _collectIncidentRows(stmt: stmt)
+    }
+
+    private func _incidentsInRange(from: Double, to: Double, limit: Int) -> [IncidentRow] {
+        let sql = """
+            SELECT id, started_at, ended_at, severity_raw, peak_severity_raw, cause
+            FROM incidents
+            WHERE started_at >= ? AND started_at <= ?
+            ORDER BY started_at DESC
+            LIMIT ?;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, from)
+        sqlite3_bind_double(stmt, 2, to)
+        sqlite3_bind_int(stmt, 3, Int32(limit))
+        return _collectIncidentRows(stmt: stmt)
+    }
+
+    private func _collectIncidentRows(stmt: OpaquePointer) -> [IncidentRow] {
         var rows: [IncidentRow] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             guard let idStr = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }),

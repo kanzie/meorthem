@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var pingReportController:      PingReportWindowController?
     private var chartsWindowController:    MetricsChartsWindowController?
     private var networkAnalysisController: NetworkAnalysisWindowController?
+    private var incidentHistoryController: IncidentHistoryWindowController?
     private var cancellables = Set<AnyCancellable>()
     private var menuLiveUpdate: AnyCancellable?
     private var menuWifiUpdate: AnyCancellable?
@@ -19,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     private var menuHistoryUpdate: AnyCancellable?
     private var countdownTimer: Timer?
     private var chartsWindowObserver: NSObjectProtocol?
+    private var incidentHistoryObserver: NSObjectProtocol?
     private var isPulsing = false
     private var hasInitialData = false
     private var loadingBlinkTimer: Timer?
@@ -308,15 +310,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     private func makeMenuActions() -> MenuBuilder.Actions {
         MenuBuilder.Actions(
-            showAbout:           { AboutWindowController.shared.showAndFocus() },
-            openSettings:        { [weak self] in self?.showSettings() },
-            copyReport:          { [weak self] in self?.showPingReport() },
-            showNetworkHistory:  { [weak self] in self?.showNetworkHistory() },
-            showNetworkAnalysis: { [weak self] in self?.showNetworkAnalysis() },
-            runSpeedtest:        { [weak self] in self?.environment.speedtestRunner.run() },
-            showHelp:            { HelpWindowController.shared.showAndFocus() },
-            togglePause:        { [weak self] in self?.toggleManualPause() },
-            quit:               { NSApp.terminate(nil) }
+            showAbout:            { AboutWindowController.shared.showAndFocus() },
+            openSettings:         { [weak self] in self?.showSettings() },
+            copyReport:           { [weak self] in self?.showPingReport() },
+            showNetworkHistory:   { [weak self] in self?.showNetworkHistory() },
+            showNetworkAnalysis:  { [weak self] in self?.showNetworkAnalysis() },
+            showIncidentHistory:  { [weak self] in self?.showIncidentHistory() },
+            runSpeedtest:         { [weak self] in self?.environment.speedtestRunner.run() },
+            showHelp:             { HelpWindowController.shared.showAndFocus() },
+            togglePause:          { [weak self] in self?.toggleManualPause() },
+            quit:                 { NSApp.terminate(nil) }
         )
     }
 
@@ -437,6 +440,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             )
         }
         networkAnalysisController?.showAndFocus()
+    }
+
+    private func showIncidentHistory() {
+        if incidentHistoryController == nil {
+            incidentHistoryController = IncidentHistoryWindowController(
+                sqliteStore: environment.sqliteStore
+            )
+            if let win = incidentHistoryController?.window {
+                incidentHistoryObserver = NotificationCenter.default.addObserver(
+                    forName: NSWindow.willCloseNotification,
+                    object: win, queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.incidentHistoryController = nil
+                        self?.incidentHistoryObserver   = nil
+                    }
+                }
+            }
+        }
+        incidentHistoryController?.showAndFocus(onShowCharts: { [weak self] start, end in
+            self?.showNetworkHistory()
+            // Note: charts window doesn't currently support pre-jumping to a time range,
+            // but the window opens so user can manually navigate.
+        })
     }
 
     private func toggleManualPause() {

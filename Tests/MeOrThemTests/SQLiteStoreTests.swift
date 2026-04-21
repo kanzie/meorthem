@@ -575,6 +575,39 @@ func runSQLiteStoreTests() {
         expect(filtered.isEmpty, "high minSampleCount filters all sparse hours")
     }
 
+    suite("SQLiteStore — allIncidentRows and incidentRows(from:to:)") {
+        let store = SQLiteStore(path: ":memory:")
+        let now   = Date()
+
+        // Insert 3 incidents at different times
+        let ids   = [UUID(), UUID(), UUID()]
+        let times = [now.addingTimeInterval(-7200), now.addingTimeInterval(-3600), now]
+        for (i, (id, ts)) in zip(ids, times).enumerated() {
+            store.openIncident(id: id, severity: i == 2 ? .red : .yellow,
+                               cause: "incident \(i)", startTime: ts)
+        }
+        store.closeIncident(id: ids[0], endTime: times[0].addingTimeInterval(120), peakSeverity: .yellow)
+        store.closeIncident(id: ids[1], endTime: times[1].addingTimeInterval(60),  peakSeverity: .yellow)
+        store.waitForPendingOps()
+
+        // allIncidentRows returns all 3, newest first
+        let all = store.allIncidentRows(limit: 500)
+        expectEqual(all.count, 3, "allIncidentRows returns all 3 incidents")
+        expectEqual(all[0].cause, "incident 2", "newest incident is first")
+        expectEqual(all[2].cause, "incident 0", "oldest incident is last")
+
+        // incidentRows(from:to:) filters by start time
+        let ranged = store.incidentRows(from: now.addingTimeInterval(-4000),
+                                         to:   now.addingTimeInterval(-2000))
+        expectEqual(ranged.count, 1, "range query returns only incident at -3600s")
+        expectEqual(ranged[0].cause, "incident 1", "correct incident in range")
+
+        // Open incident (no endedAt) is included
+        let openInc = all.first { $0.isActive }
+        expectEqual(openInc != nil, true, "open incident present in allIncidentRows")
+        expectEqual(openInc?.cause, "incident 2", "open incident is the red one")
+    }
+
     suite("SQLiteStore — speedtest rows round-trip") {
         let store = SQLiteStore(path: ":memory:")
         let now   = Date()
