@@ -652,4 +652,99 @@ func runSQLiteStoreTests() {
         expectEqual(narrowRows.count, 2, "narrow range returns 2 rows (index 1 and 2)")
         expectEqual(narrowRows[0].downloadMbps, 110.0, "first in narrow range has correct Mbps")
     }
+
+    suite("SQLiteStore — connection profile upsert and read") {
+        let store = SQLiteStore(path: ":memory:")
+        let fp    = "wifi|192.168.1.1|6|2.4|192.168.1"
+        let name  = "Home WiFi"
+
+        store.upsertConnectionProfile(fingerprint: fp, displayName: name)
+        store.waitForPendingOps()
+
+        let profile = store.connectionProfile(fingerprint: fp)
+        expectEqual(profile != nil,            true,  "profile exists after upsert")
+        expectEqual(profile?.fingerprint,      fp,    "fingerprint preserved")
+        expectEqual(profile?.displayName,      name,  "displayName preserved")
+        expectEqual(profile?.stealthMode,      false, "stealthMode defaults to false")
+        expectEqual(profile?.icmpThrottled,    false, "icmpThrottled defaults to false")
+        expectEqual(profile?.totalSessions,    1,     "totalSessions starts at 1")
+        expectEqual(profile?.stealthProbePort, nil,   "stealthProbePort nil by default")
+        expectEqual(profile?.stealthDetectedAt, nil,  "stealthDetectedAt nil by default")
+
+        // Second upsert increments totalSessions
+        store.upsertConnectionProfile(fingerprint: fp, displayName: name)
+        store.waitForPendingOps()
+        let profile2 = store.connectionProfile(fingerprint: fp)
+        expectEqual(profile2?.totalSessions, 2, "totalSessions increments on re-upsert")
+    }
+
+    suite("SQLiteStore — connection profile stealth mode CRUD") {
+        let store = SQLiteStore(path: ":memory:")
+        let fp    = "wifi|10.0.0.1|1|5.0|10.0.0"
+        store.upsertConnectionProfile(fingerprint: fp, displayName: "Office")
+        store.waitForPendingOps()
+
+        // Enable stealth mode
+        store.setStealthMode(true, probePort: 443, source: "auto", fingerprint: fp)
+        store.waitForPendingOps()
+        let stealthOn = store.connectionProfile(fingerprint: fp)
+        expectEqual(stealthOn?.stealthMode,              true,   "stealth mode enabled")
+        expectEqual(stealthOn?.stealthProbePort,         443,    "probe port stored")
+        expectEqual(stealthOn?.stealthSource,            "auto", "source stored")
+        expectEqual(stealthOn?.stealthDetectedAt != nil, true,   "detectedAt set when enabling")
+
+        // Mark ICMP throttled
+        store.setICMPThrottled(true, fingerprint: fp)
+        store.waitForPendingOps()
+        let throttled = store.connectionProfile(fingerprint: fp)
+        expectEqual(throttled?.icmpThrottled,          true, "icmpThrottled set to true")
+        expectEqual(throttled?.icmpThrottledAt != nil, true, "icmpThrottledAt set")
+
+        // Update ICMP last-ok
+        store.updateICMPLastOk(fingerprint: fp)
+        store.waitForPendingOps()
+        let withOk = store.connectionProfile(fingerprint: fp)
+        expectEqual(withOk?.icmpLastOkAt != nil, true, "icmpLastOkAt updated")
+
+        // Disable stealth mode
+        store.setStealthMode(false, probePort: nil, source: nil, fingerprint: fp)
+        store.waitForPendingOps()
+        let stealthOff = store.connectionProfile(fingerprint: fp)
+        expectEqual(stealthOff?.stealthMode,      false, "stealth mode disabled")
+        expectEqual(stealthOff?.stealthDetectedAt, nil,  "detectedAt cleared on disable")
+    }
+
+    suite("SQLiteStore — allConnectionProfiles returns all rows") {
+        let store = SQLiteStore(path: ":memory:")
+        store.upsertConnectionProfile(fingerprint: "fp-A", displayName: "Network A")
+        store.upsertConnectionProfile(fingerprint: "fp-B", displayName: "Network B")
+        store.upsertConnectionProfile(fingerprint: "fp-C", displayName: "Network C")
+        store.waitForPendingOps()
+
+        let all = store.allConnectionProfiles()
+        expectEqual(all.count, 3, "allConnectionProfiles returns all 3 profiles")
+        let names = all.map(\.displayName)
+        expectEqual(names.contains("Network A"), true, "Network A present")
+        expectEqual(names.contains("Network B"), true, "Network B present")
+        expectEqual(names.contains("Network C"), true, "Network C present")
+    }
+
+    suite("SQLiteStore — preferredPollInterval CRUD") {
+        let store = SQLiteStore(path: ":memory:")
+        let fp = "eth|00:11:22:33:44:55|192.168.0.1|192.168.0"
+        store.upsertConnectionProfile(fingerprint: fp, displayName: "Ethernet")
+        store.setPreferredPollInterval(2.0, source: "user", fingerprint: fp)
+        store.waitForPendingOps()
+
+        let p = store.connectionProfile(fingerprint: fp)
+        expectEqual(p?.preferredPollInterval, 2.0,   "preferredPollInterval stored")
+        expectEqual(p?.pollIntervalSource,    "user", "pollIntervalSource stored")
+
+        // Clear it
+        store.setPreferredPollInterval(nil, source: nil, fingerprint: fp)
+        store.waitForPendingOps()
+        let p2 = store.connectionProfile(fingerprint: fp)
+        expectEqual(p2?.preferredPollInterval, nil, "preferredPollInterval cleared")
+        expectEqual(p2?.pollIntervalSource,    nil, "pollIntervalSource cleared")
+    }
 }

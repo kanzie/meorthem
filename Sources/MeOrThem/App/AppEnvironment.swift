@@ -29,6 +29,14 @@ final class AppEnvironment {
     private var lastTracerouteDate: Date?
     private let tracerouteDebounce: TimeInterval = 300
 
+    // Stealth mode detection state
+    /// Consecutive polls where ALL external (non-gateway) targets have 100% loss.
+    private var consecutiveTotalLossPolls: Int = 0
+    /// Prevents concurrent TCP probe tasks when detection is already in-flight.
+    private var stealthProbeInFlight: Bool = false
+    /// Number of consecutive total-loss polls required before TCP probe fires.
+    private let stealthDetectionThreshold: Int = 5
+
     init() {
         settings          = AppSettings.shared
         sqliteStore       = SQLiteStore.makeDefault()
@@ -161,6 +169,11 @@ final class AppEnvironment {
             self?.logExporter.appendWiFi(snapshot)
         }
 
+        // Stealth mode detection — runs after every tick when all external targets have 100% loss.
+        monitoringEngine.onTickCompleted = { [weak self] in
+            Task { @MainActor [weak self] in self?.evaluateStealthMode() }
+        }
+
         // SQLite maintenance: aggregate + prune on launch, then every hour.
         runSQLiteMaintenance()
         let mt = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -248,6 +261,20 @@ final class AppEnvironment {
                                 displayName:     key.displayName,
                                 connectionType:  key.connectionType.rawValue,
                                 weakFingerprint: key.hasWeakFingerprint)
+
+        // Upsert connection profile and restore stealth mode from stored state.
+        let fp = key.fingerprint
+        let db = sqliteStore
+        sqliteStore.upsertConnectionProfile(fingerprint: fp, displayName: key.displayName)
+        Task.detached(priority: .utility) { [weak self] in
+            let profile = db.connectionProfile(fingerprint: fp)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.monitoringEngine.stealthModeActive = profile?.stealthMode ?? false
+                self.consecutiveTotalLossPolls = 0
+                self.stealthProbeInFlight = false
+            }
+        }
         // Log non-WiFi interface details on session open (WiFi rows are logged per-tick
         // via appendWiFi; Ethernet/VPN sessions only need a snapshot at session creation).
         if key.connectionType != .wifi {
@@ -264,6 +291,65 @@ final class AppEnvironment {
         // Reset DNS resolver failure counts — a resolver unreachable on one network
         // may be fully functional on another.
         settings.resetDNSResolverFailureCounts()
+    }
+
+    // MARK: - Stealth mode detection
+
+    /// Called after every monitoring tick. Detects ICMP throttling by checking for 5 consecutive
+    /// polls with 100% loss on all external targets, then confirming TCP reachability.
+    private func evaluateStealthMode() {
+        let externalIDs = settings.pingTargets.map(\.id)
+        guard !externalIDs.isEmpty else { return }
+
+        let allTotalLoss = externalIDs.allSatisfy {
+            metricStore.latestPing[$0]?.lossPercent == 100
+        }
+
+        if allTotalLoss {
+            consecutiveTotalLossPolls += 1
+        } else {
+            consecutiveTotalLossPolls = 0
+            // Pings are working — record ICMP last-ok timestamp.
+            if let fp = currentSessionFingerprint {
+                sqliteStore.updateICMPLastOk(fingerprint: fp)
+            }
+        }
+
+        // When stealth mode is already active and pings recover, disable it.
+        if monitoringEngine.stealthModeActive && !allTotalLoss {
+            monitoringEngine.stealthModeActive = false
+            if let fp = currentSessionFingerprint {
+                sqliteStore.setStealthMode(false, probePort: nil, source: nil, fingerprint: fp)
+            }
+        }
+
+        // Trigger TCP probe after threshold consecutive total-loss ticks.
+        guard consecutiveTotalLossPolls == stealthDetectionThreshold,
+              !stealthProbeInFlight,
+              !monitoringEngine.stealthModeActive,
+              let host = settings.pingTargets.first?.host,
+              let fp = currentSessionFingerprint else { return }
+
+        stealthProbeInFlight = true
+        let db = sqliteStore
+
+        Task.detached(priority: .utility) { [weak self] in
+            let probeResult = await TCPProber.probeAny(host: host)
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.stealthProbeInFlight = false
+
+                if let (_, port) = probeResult {
+                    // TCP succeeded but ICMP failed → ICMP is being throttled.
+                    self.monitoringEngine.stealthModeActive = true
+                    db.setStealthMode(true, probePort: port, source: "auto", fingerprint: fp)
+                    db.setICMPThrottled(true, fingerprint: fp)
+                    self.alertManager.fireStealthModeDetected()
+                }
+                // If TCP also fails: genuine outage — don't enable stealth mode.
+            }
+        }
     }
 
     private func runSQLiteMaintenance() {

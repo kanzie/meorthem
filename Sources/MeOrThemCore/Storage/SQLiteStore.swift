@@ -415,6 +415,26 @@ public final class SQLiteStore: @unchecked Sendable {
         public var isActive: Bool { endedAt == nil }
     }
 
+    /// Per-network-fingerprint profile storing stealth mode and ICMP health state.
+    public struct ConnectionProfile: Identifiable, Sendable {
+        public let fingerprint:           String
+        public let displayName:           String
+        public let stealthMode:           Bool
+        public let stealthProbePort:      Int?
+        public let stealthDetectedAt:     Date?
+        public let stealthSource:         String?
+        public let icmpLastOkAt:          Date?
+        public let icmpThrottled:         Bool
+        public let icmpThrottledAt:       Date?
+        public let preferredPollInterval: Double?
+        public let pollIntervalSource:    String?
+        public let firstSeen:             Date
+        public let lastSeen:              Date
+        public let totalSessions:         Int
+
+        public var id: String { fingerprint }
+    }
+
     /// Raw ping samples in the given time range (ascending).
     public func pingRows(for targetID: UUID, from: Date, to: Date) -> [PingRow] {
         queue.sync { _pingRows(targetID: targetID.uuidString,
@@ -765,6 +785,24 @@ public final class SQLiteStore: @unchecked Sendable {
             );
             CREATE INDEX IF NOT EXISTS idx_traceroute_session  ON traceroute_events(session_id);
             CREATE INDEX IF NOT EXISTS idx_traceroute_time     ON traceroute_events(timestamp);
+
+            CREATE TABLE IF NOT EXISTS connection_profiles (
+                fingerprint              TEXT    PRIMARY KEY,
+                display_name             TEXT    NOT NULL,
+                stealth_mode             INTEGER NOT NULL DEFAULT 0,
+                stealth_probe_port       INTEGER,
+                stealth_detected_at      REAL,
+                stealth_source           TEXT,
+                icmp_last_ok_at          REAL,
+                icmp_throttled           INTEGER NOT NULL DEFAULT 0,
+                icmp_throttled_at        REAL,
+                preferred_poll_interval  REAL,
+                poll_interval_source     TEXT,
+                first_seen               REAL    NOT NULL,
+                last_seen                REAL    NOT NULL,
+                total_sessions           INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE INDEX IF NOT EXISTS idx_connprofile_lastseen ON connection_profiles(last_seen);
             """)
     }
 
@@ -1440,6 +1478,239 @@ public final class SQLiteStore: @unchecked Sendable {
             ))
         }
         return rows
+    }
+
+    // MARK: - Connection profiles (public API)
+
+    /// Upsert a connection profile — creates or updates, preserving stealth/icmp state if already set.
+    public func upsertConnectionProfile(fingerprint: String, displayName: String, now: Date = Date()) {
+        let ts = now.timeIntervalSince1970
+        queue.async { [weak self] in
+            self?._upsertConnectionProfile(fingerprint: fingerprint, displayName: displayName, now: ts)
+        }
+    }
+
+    /// Returns the profile for the given fingerprint, or nil if not found.
+    public func connectionProfile(fingerprint: String) -> ConnectionProfile? {
+        queue.sync { _connectionProfile(fingerprint: fingerprint) }
+    }
+
+    /// Returns all profiles, newest last_seen first.
+    public func allConnectionProfiles() -> [ConnectionProfile] {
+        queue.sync { _allConnectionProfiles() }
+    }
+
+    /// Enable or disable stealth mode for a network.
+    public func setStealthMode(_ enabled: Bool, probePort: Int?, source: String?,
+                               fingerprint: String, now: Date = Date()) {
+        let ts = now.timeIntervalSince1970
+        queue.async { [weak self] in
+            self?._setStealthMode(enabled, probePort: probePort, source: source,
+                                  fingerprint: fingerprint, now: ts)
+        }
+    }
+
+    /// Record that ICMP is (or is not) throttled for a network.
+    public func setICMPThrottled(_ throttled: Bool, fingerprint: String, now: Date = Date()) {
+        let ts = now.timeIntervalSince1970
+        queue.async { [weak self] in
+            self?._setICMPThrottled(throttled, fingerprint: fingerprint, now: ts)
+        }
+    }
+
+    /// Update the preferred poll interval override.
+    public func setPreferredPollInterval(_ interval: Double?, source: String?,
+                                        fingerprint: String) {
+        queue.async { [weak self] in
+            self?._setPreferredPollInterval(interval, source: source, fingerprint: fingerprint)
+        }
+    }
+
+    /// Advance last_seen and increment total_sessions for an existing profile.
+    public func touchConnectionProfile(fingerprint: String, now: Date = Date()) {
+        let ts = now.timeIntervalSince1970
+        queue.async { [weak self] in
+            self?._touchConnectionProfile(fingerprint: fingerprint, now: ts)
+        }
+    }
+
+    /// Record that ICMP last responded successfully.
+    public func updateICMPLastOk(fingerprint: String, now: Date = Date()) {
+        let ts = now.timeIntervalSince1970
+        queue.async { [weak self] in
+            self?._updateICMPLastOk(fingerprint: fingerprint, now: ts)
+        }
+    }
+
+    // MARK: - Connection profiles (private implementations)
+
+    private func _upsertConnectionProfile(fingerprint: String, displayName: String, now: Double) {
+        let sql = """
+            INSERT INTO connection_profiles
+                (fingerprint, display_name, first_seen, last_seen)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(fingerprint) DO UPDATE SET
+                display_name   = excluded.display_name,
+                last_seen      = excluded.last_seen,
+                total_sessions = total_sessions + 1;
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, fingerprint)
+        _bindText(stmt, 2, displayName)
+        sqlite3_bind_double(stmt, 3, now)
+        sqlite3_bind_double(stmt, 4, now)
+        sqlite3_step(stmt)
+    }
+
+    private func _connectionProfile(fingerprint: String) -> ConnectionProfile? {
+        let sql = """
+            SELECT fingerprint, display_name, stealth_mode, stealth_probe_port,
+                   stealth_detected_at, stealth_source, icmp_last_ok_at,
+                   icmp_throttled, icmp_throttled_at, preferred_poll_interval,
+                   poll_interval_source, first_seen, last_seen, total_sessions
+            FROM connection_profiles WHERE fingerprint = ? LIMIT 1;
+            """
+        guard let stmt = _prepare(sql) else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, fingerprint)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+        return _collectConnectionProfile(stmt: stmt)
+    }
+
+    private func _allConnectionProfiles() -> [ConnectionProfile] {
+        let sql = """
+            SELECT fingerprint, display_name, stealth_mode, stealth_probe_port,
+                   stealth_detected_at, stealth_source, icmp_last_ok_at,
+                   icmp_throttled, icmp_throttled_at, preferred_poll_interval,
+                   poll_interval_source, first_seen, last_seen, total_sessions
+            FROM connection_profiles ORDER BY last_seen DESC;
+            """
+        guard let stmt = _prepare(sql) else { return [] }
+        defer { sqlite3_finalize(stmt) }
+        var rows: [ConnectionProfile] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            if let p = _collectConnectionProfile(stmt: stmt) { rows.append(p) }
+        }
+        return rows
+    }
+
+    private func _collectConnectionProfile(stmt: OpaquePointer) -> ConnectionProfile? {
+        guard let fp = sqlite3_column_text(stmt, 0).map({ String(cString: $0) }) else { return nil }
+        let displayName = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? fp
+        let stealthMode = sqlite3_column_int(stmt, 2) != 0
+        let probePort: Int? = sqlite3_column_type(stmt, 3) != SQLITE_NULL
+            ? Int(sqlite3_column_int(stmt, 3)) : nil
+        let detectedAt: Date? = sqlite3_column_type(stmt, 4) != SQLITE_NULL
+            ? Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4)) : nil
+        let source = sqlite3_column_text(stmt, 5).map { String(cString: $0) }
+        let icmpLastOk: Date? = sqlite3_column_type(stmt, 6) != SQLITE_NULL
+            ? Date(timeIntervalSince1970: sqlite3_column_double(stmt, 6)) : nil
+        let icmpThrottled = sqlite3_column_int(stmt, 7) != 0
+        let throttledAt: Date? = sqlite3_column_type(stmt, 8) != SQLITE_NULL
+            ? Date(timeIntervalSince1970: sqlite3_column_double(stmt, 8)) : nil
+        let pollInterval: Double? = sqlite3_column_type(stmt, 9) != SQLITE_NULL
+            ? sqlite3_column_double(stmt, 9) : nil
+        let pollSource = sqlite3_column_text(stmt, 10).map { String(cString: $0) }
+        let firstSeen = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 11))
+        let lastSeen  = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 12))
+        let totalSessions = Int(sqlite3_column_int(stmt, 13))
+        return ConnectionProfile(
+            fingerprint:           fp,
+            displayName:           displayName,
+            stealthMode:           stealthMode,
+            stealthProbePort:      probePort,
+            stealthDetectedAt:     detectedAt,
+            stealthSource:         source,
+            icmpLastOkAt:          icmpLastOk,
+            icmpThrottled:         icmpThrottled,
+            icmpThrottledAt:       throttledAt,
+            preferredPollInterval: pollInterval,
+            pollIntervalSource:    pollSource,
+            firstSeen:             firstSeen,
+            lastSeen:              lastSeen,
+            totalSessions:         totalSessions
+        )
+    }
+
+    private func _setStealthMode(_ enabled: Bool, probePort: Int?, source: String?,
+                                  fingerprint: String, now: Double) {
+        let sql = """
+            UPDATE connection_profiles SET
+                stealth_mode        = ?,
+                stealth_probe_port  = ?,
+                stealth_detected_at = ?,
+                stealth_source      = ?
+            WHERE fingerprint = ?;
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, enabled ? 1 : 0)
+        if let p = probePort { sqlite3_bind_int(stmt, 2, Int32(p)) }
+        else                  { sqlite3_bind_null(stmt, 2) }
+        if enabled { sqlite3_bind_double(stmt, 3, now) }
+        else       { sqlite3_bind_null(stmt, 3) }
+        if let s = source { _bindText(stmt, 4, s) }
+        else               { sqlite3_bind_null(stmt, 4) }
+        _bindText(stmt, 5, fingerprint)
+        sqlite3_step(stmt)
+    }
+
+    private func _setICMPThrottled(_ throttled: Bool, fingerprint: String, now: Double) {
+        let sql = """
+            UPDATE connection_profiles SET
+                icmp_throttled    = ?,
+                icmp_throttled_at = ?
+            WHERE fingerprint = ?;
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int(stmt, 1, throttled ? 1 : 0)
+        if throttled { sqlite3_bind_double(stmt, 2, now) }
+        else         { sqlite3_bind_null(stmt, 2) }
+        _bindText(stmt, 3, fingerprint)
+        sqlite3_step(stmt)
+    }
+
+    private func _setPreferredPollInterval(_ interval: Double?, source: String?,
+                                           fingerprint: String) {
+        let sql = """
+            UPDATE connection_profiles SET
+                preferred_poll_interval = ?,
+                poll_interval_source    = ?
+            WHERE fingerprint = ?;
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        if let i = interval { sqlite3_bind_double(stmt, 1, i) }
+        else                 { sqlite3_bind_null(stmt, 1) }
+        if let s = source { _bindText(stmt, 2, s) }
+        else               { sqlite3_bind_null(stmt, 2) }
+        _bindText(stmt, 3, fingerprint)
+        sqlite3_step(stmt)
+    }
+
+    private func _touchConnectionProfile(fingerprint: String, now: Double) {
+        let sql = """
+            UPDATE connection_profiles SET
+                last_seen      = ?,
+                total_sessions = total_sessions + 1
+            WHERE fingerprint = ?;
+            """
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, now)
+        _bindText(stmt, 2, fingerprint)
+        sqlite3_step(stmt)
+    }
+
+    private func _updateICMPLastOk(fingerprint: String, now: Double) {
+        let sql = "UPDATE connection_profiles SET icmp_last_ok_at = ? WHERE fingerprint = ?;"
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, now)
+        _bindText(stmt, 2, fingerprint)
+        sqlite3_step(stmt)
     }
 
     private func _scalar(_ sql: String) -> Int {

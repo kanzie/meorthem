@@ -30,6 +30,15 @@ final class MonitoringEngine {
     private var isAdaptiveMode = false
     private var adaptiveResetGreenCount = 0
 
+    // MARK: - Stealth mode
+    /// When true, TCP probing is used instead of ICMP for external targets.
+    /// Set by AppEnvironment when the current network profile has ICMP throttling detected.
+    var stealthModeActive: Bool = false
+
+    /// Fires after each tick's pings and gateway probe complete.
+    /// Used by AppEnvironment to run stealth-mode detection.
+    var onTickCompleted: (() -> Void)?
+
     // MARK: - Periodic sampling counter (DNS, interface errors, MTU)
     private var tickCount = 0
 
@@ -141,13 +150,14 @@ final class MonitoringEngine {
 
         // Run pings concurrently, capped at 5 simultaneous tasks to avoid process exhaustion.
         let concurrencyCap = min(targets.count, 5)
+        let useStealthMode = stealthModeActive
         await withTaskGroup(of: (UUID, PingResult).self) { group in
             var pending = targets[...]
             // Seed up to the cap
             for _ in 0..<concurrencyCap {
                 guard let target = pending.popFirst() else { break }
                 group.addTask {
-                    let result = await Self.pingTarget(target)
+                    let result = await Self.pingTarget(target, stealth: useStealthMode)
                     return (target.id, result)
                 }
             }
@@ -156,7 +166,7 @@ final class MonitoringEngine {
                 // Start next pending target as a slot becomes free
                 if let target = pending.popFirst() {
                     group.addTask {
-                        let result = await Self.pingTarget(target)
+                        let result = await Self.pingTarget(target, stealth: useStealthMode)
                         return (target.id, result)
                     }
                 }
@@ -165,6 +175,10 @@ final class MonitoringEngine {
 
         // Gateway ping for fault isolation — detect local vs ISP issues
         await pingGateway()
+
+        // Notify AppEnvironment that the full tick (pings + gateway) is complete.
+        // This is the correct moment for stealth-mode detection — all latestPing values are fresh.
+        onTickCompleted?()
 
         // Adaptive polling — speed up when degraded, restore when healthy
         adaptPollInterval()
@@ -342,8 +356,11 @@ final class MonitoringEngine {
 
     // MARK: - Ping helpers
 
-    private static func pingTarget(_ target: PingTarget) async -> PingResult {
-        await pingHost(target.host)
+    private static func pingTarget(_ target: PingTarget, stealth: Bool) async -> PingResult {
+        if stealth {
+            return await tcpProbeTarget(target.host)
+        }
+        return await pingHost(target.host)
     }
 
     private static func pingHost(_ host: String) async -> PingResult {
@@ -361,5 +378,14 @@ final class MonitoringEngine {
         } catch {
             return PingResult(timestamp: Date(), rtt: nil, lossPercent: 100, jitter: nil)
         }
+    }
+
+    /// TCP-based reachability probe used in stealth mode (ICMP blocked).
+    /// Tries ports 443, 80, 53. Reports 0% loss on connect, 100% on failure.
+    private static func tcpProbeTarget(_ host: String) async -> PingResult {
+        if let (rttMs, _) = await TCPProber.probeAny(host: host) {
+            return PingResult(timestamp: Date(), rtt: rttMs, lossPercent: 0, jitter: nil)
+        }
+        return PingResult(timestamp: Date(), rtt: nil, lossPercent: 100, jitter: nil)
     }
 }

@@ -5,6 +5,14 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.33.0 — 2026-04-21
+
+### New Features
+- **Stealth Mode (ICMP throttling detection)** — Me Or Them now automatically detects when ICMP pings are blocked by a network (e.g. hotel or corporate Wi-Fi). After five consecutive all-target loss polls it runs a TCP probe (ports 443, 80, 53). If TCP succeeds while ICMP fails, it switches to TCP-based latency measurement and fires a "Stealth Mode Activated" notification. The per-network ICMP/stealth state persists across sessions.
+- **Connection Profiles window** — A new "Connection Profiles…" entry in the Advanced submenu opens a window listing every network fingerprint the app has seen, including stealth mode status, ICMP health, probe port, session count, and last-seen time.
+
+---
+
 ## v2.32.0 — 2026-04-21
 
 ### New Features

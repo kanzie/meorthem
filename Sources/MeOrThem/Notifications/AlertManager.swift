@@ -63,4 +63,20 @@ final class AlertManager {
         )
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
+
+    /// Fires when ICMP throttling is auto-detected and stealth (TCP) mode is activated.
+    func fireStealthModeDetected() {
+        guard settings.enableNotificationBanner else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Me Or Them — Stealth Mode Activated"
+        content.body  = "ICMP pings appear to be blocked on this network. Switched to TCP probing."
+        content.categoryIdentifier = Self.categoryID
+        if settings.enableNotificationSound { content.sound = .default }
+        let request = UNNotificationRequest(
+            identifier: "com.meorthem.stealth.\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+    }
 }
