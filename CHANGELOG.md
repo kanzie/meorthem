@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.36.0 — 2026-04-26
+
+### New Features
+- **Uptime / Availability percentage** — Me Or Them now computes connection availability as a percentage of time spent in a non-degraded state, derived from the existing incidents journal. A "Uptime (24h)" row appears in the menu dropdown (green ≥ 99%, orange ≥ 95%, red below), and the Charts window shows an uptime badge next to the time window picker reflecting the selected window's availability. Updated hourly alongside existing maintenance.
+
+---
+
 ## v2.35.0 — 2026-04-26
 
 ### New Features

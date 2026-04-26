@@ -164,7 +164,17 @@ struct MetricsChartsView: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                windowPicker
+                HStack(spacing: 8) {
+                    windowPicker
+                    if let avail = loader.availabilityFraction {
+                        let pctStr   = String(format: "%.1f%%", avail * 100)
+                        let color: Color = avail >= 0.99 ? .green
+                                        : avail >= 0.95 ? .orange : .red
+                        Text("\(pctStr) uptime")
+                            .font(.caption)
+                            .foregroundStyle(color)
+                    }
+                }
             }
             ToolbarItem(placement: .primaryAction) {
                 Button { loader.load(window: selectedWindow) } label: {

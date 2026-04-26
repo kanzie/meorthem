@@ -802,4 +802,68 @@ func runSQLiteStoreTests() {
         let rows = store.systemEventRows(from: Date.distantPast, to: Date.distantFuture)
         expectEqual(rows.count, 1, "system_events table exists and accepts rows")
     }
+
+    suite("SQLiteStore — availabilityFraction basic calculation") {
+        let store = SQLiteStore(path: ":memory:")
+        let base  = Date(timeIntervalSince1970: 1_700_000_000)
+        let window: TimeInterval = 86_400  // 24 hours
+
+        // Insert a 10-minute incident within the window
+        let incID = UUID()
+        let incStart = base.addingTimeInterval(3600)        // 1h in
+        let incEnd   = incStart.addingTimeInterval(600)     // 10 minutes long
+
+        store.openIncident(id: incID, severityRaw: 2, cause: "test", startTime: incStart)
+        store.waitForPendingOps()
+        store.closeIncident(id: incID, endTime: incEnd, peakSeverityRaw: 2)
+        store.waitForPendingOps()
+
+        let result = store.availabilityFraction(from: base, to: base.addingTimeInterval(window))
+        guard let avail = result else {
+            expectEqual(false, true, "availabilityFraction should not be nil with incident data")
+            return
+        }
+
+        // Expected: 1 - 600/86400 ≈ 0.993056
+        let expected = 1.0 - 600.0 / 86_400.0
+        expectEqual(abs(avail - expected) < 0.0001, true, "availability matches expected fraction")
+    }
+
+    suite("SQLiteStore — availabilityFraction overlapping incidents merged") {
+        let store = SQLiteStore(path: ":memory:")
+        let base  = Date(timeIntervalSince1970: 1_700_000_000)
+
+        // Two overlapping incidents: total unique degraded time = 15 minutes (not 20)
+        let id1 = UUID(); let id2 = UUID()
+        let s1 = base.addingTimeInterval(3600); let e1 = s1.addingTimeInterval(600)  // 10min
+        let s2 = base.addingTimeInterval(4000); let e2 = s2.addingTimeInterval(500)  // overlaps, +5min unique
+
+        store.openIncident(id: id1, severityRaw: 2, cause: "a", startTime: s1)
+        store.waitForPendingOps()
+        store.closeIncident(id: id1, endTime: e1, peakSeverityRaw: 2)
+        store.waitForPendingOps()
+        store.openIncident(id: id2, severityRaw: 2, cause: "b", startTime: s2)
+        store.waitForPendingOps()
+        store.closeIncident(id: id2, endTime: e2, peakSeverityRaw: 2)
+        store.waitForPendingOps()
+
+        let window: TimeInterval = 86_400
+        let result = store.availabilityFraction(from: base, to: base.addingTimeInterval(window))
+        guard let avail = result else {
+            expectEqual(false, true, "should return non-nil availability")
+            return
+        }
+
+        // Unique degraded: from s1 to max(e1, e2) = s1 to e2 = 3600 to 4500 = 900s
+        let uniqueDegraded = e2.timeIntervalSince(s1)  // 900s
+        let expected = 1.0 - uniqueDegraded / window
+        expectEqual(abs(avail - expected) < 0.0001, true, "overlapping incidents merged correctly")
+    }
+
+    suite("SQLiteStore — availabilityFraction returns nil with no incidents") {
+        let store = SQLiteStore(path: ":memory:")
+        let base  = Date(timeIntervalSince1970: 1_700_000_000)
+        let result = store.availabilityFraction(from: base, to: base.addingTimeInterval(86_400))
+        expectEqual(result, nil, "nil when no incidents in range")
+    }
 }

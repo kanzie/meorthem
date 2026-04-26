@@ -553,6 +553,59 @@ public final class SQLiteStore: @unchecked Sendable {
         return queue.sync { _incidentsInRange(from: f, to: t, limit: limit) }
     }
 
+    /// Returns the fraction of time [0.0–1.0] spent in a non-degraded state over the given window.
+    /// 1.0 means 100% uptime. Returns nil when the window is empty or no incident data exists.
+    ///
+    /// Algorithm: fetch all closed incidents that overlap [from, to], merge overlapping intervals
+    /// in Swift (sweep-line), sum degraded seconds, return 1 − (degraded / total).
+    public func availabilityFraction(from: Date, to: Date) -> Double? {
+        let fromTs = from.timeIntervalSince1970
+        let toTs   = to.timeIntervalSince1970
+        let total  = toTs - fromTs
+        guard total > 0 else { return nil }
+
+        // Fetch closed incidents that overlap the window.
+        let rows: [(Double, Double)] = queue.sync {
+            let sql = """
+                SELECT started_at, ended_at FROM incidents
+                WHERE ended_at IS NOT NULL
+                  AND ended_at > ? AND started_at < ?
+                ORDER BY started_at ASC;
+                """
+            guard let stmt = _prepare(sql) else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, fromTs)
+            sqlite3_bind_double(stmt, 2, toTs)
+            var pairs: [(Double, Double)] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let s = max(sqlite3_column_double(stmt, 0), fromTs)
+                let e = min(sqlite3_column_double(stmt, 1), toTs)
+                if e > s { pairs.append((s, e)) }
+            }
+            return pairs
+        }
+
+        guard !rows.isEmpty else { return nil }
+
+        // Sweep-line merge of overlapping intervals to avoid double-counting.
+        var merged: [(Double, Double)] = []
+        var curStart = rows[0].0
+        var curEnd   = rows[0].1
+        for (s, e) in rows.dropFirst() {
+            if s <= curEnd {
+                curEnd = max(curEnd, e)
+            } else {
+                merged.append((curStart, curEnd))
+                curStart = s
+                curEnd   = e
+            }
+        }
+        merged.append((curStart, curEnd))
+
+        let degraded = merged.reduce(0.0) { $0 + ($1.1 - $1.0) }
+        return max(0.0, 1.0 - (degraded / total))
+    }
+
     /// Returns true if any ping data (raw or aggregated) exists in the given time range.
     /// Uses a LIMIT 1 query so it short-circuits immediately on the first matching row.
     public func hasPingData(from: Date, to: Date) -> Bool {

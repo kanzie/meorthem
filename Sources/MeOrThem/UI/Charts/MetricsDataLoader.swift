@@ -61,9 +61,11 @@ final class MetricsDataLoader: ObservableObject {
     @Published private(set) var wifiRSSI:        [ChartPoint] = []
     /// Per-resolver RTT points. `targetLabel` = resolver name for color-coding.
     @Published private(set) var dnsPoints:         [ChartPoint] = []
-    @Published private(set) var speedtestPoints:   [SQLiteStore.SpeedtestRow] = []
-    @Published private(set) var incidents:         [SQLiteStore.IncidentRow] = []
-    @Published private(set) var systemEvents:      [SQLiteStore.SystemEventRow] = []
+    @Published private(set) var speedtestPoints:     [SQLiteStore.SpeedtestRow] = []
+    @Published private(set) var incidents:           [SQLiteStore.IncidentRow] = []
+    @Published private(set) var systemEvents:        [SQLiteStore.SystemEventRow] = []
+    /// Availability fraction [0–1] for the currently loaded time window. nil if no data.
+    @Published private(set) var availabilityFraction: Double? = nil
     /// Cross-session average RTT per hour-of-day (0–23) from the last 30 days of aggregates.
     @Published private(set) var hourlyRTTAverages: [Int: Double] = [:]
     @Published private(set) var isLoading        = false
@@ -191,34 +193,37 @@ final class MetricsDataLoader: ObservableObject {
                 dnsDownsampled = dnsPoints
             }
 
-            let speedtestRows  = db.speedtestRows(from: from, to: now)
-            let sysEventRows   = db.systemEventRows(from: from, to: now)
+            let speedtestRows   = db.speedtestRows(from: from, to: now)
+            let sysEventRows    = db.systemEventRows(from: from, to: now)
+            let availFraction   = db.availabilityFraction(from: from, to: now)
 
             guard !Task.isCancelled else { return }
 
             // Capture computed values as let bindings for safe transfer across isolation
-            let finalLatency    = latency
-            let finalLoss       = loss
-            let finalJitter     = jitter
-            let finalWifi       = wifiPoints
-            let finalDNS        = dnsDownsampled
-            let finalSpeedtest  = speedtestRows
-            let finalIncidents  = recentIncidents
-            let finalSysEvents  = sysEventRows
+            let finalLatency      = latency
+            let finalLoss         = loss
+            let finalJitter       = jitter
+            let finalWifi         = wifiPoints
+            let finalDNS          = dnsDownsampled
+            let finalSpeedtest    = speedtestRows
+            let finalIncidents    = recentIncidents
+            let finalSysEvents    = sysEventRows
+            let finalAvailability = availFraction
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                self.rangeStart       = from
-                self.rangeEnd         = now
-                self.latencyPoints    = finalLatency
-                self.lossPoints       = finalLoss
-                self.jitterPoints     = finalJitter
-                self.wifiRSSI         = finalWifi
-                self.dnsPoints        = finalDNS
-                self.speedtestPoints  = finalSpeedtest
-                self.incidents        = finalIncidents
-                self.systemEvents     = finalSysEvents
-                self.isLoading        = false
+                self.rangeStart          = from
+                self.rangeEnd            = now
+                self.latencyPoints       = finalLatency
+                self.lossPoints          = finalLoss
+                self.jitterPoints        = finalJitter
+                self.wifiRSSI            = finalWifi
+                self.dnsPoints           = finalDNS
+                self.speedtestPoints     = finalSpeedtest
+                self.incidents           = finalIncidents
+                self.systemEvents        = finalSysEvents
+                self.availabilityFraction = finalAvailability
+                self.isLoading           = false
             }
         }
 

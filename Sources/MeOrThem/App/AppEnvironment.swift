@@ -420,6 +420,19 @@ final class AppEnvironment {
             aggregateRetentionDays: settings.aggregateRetentionDays,
             incidentRetentionDays:  settings.incidentRetentionDays
         )
+        updateAvailabilityStats()
+    }
+
+    private func updateAvailabilityStats() {
+        let db    = sqliteStore
+        let store = metricStore
+        Task.detached(priority: .utility) {
+            let now   = Date()
+            let h24   = db.availabilityFraction(from: now.addingTimeInterval(-86_400), to: now)
+            let d7    = db.availabilityFraction(from: now.addingTimeInterval(-7 * 86_400), to: now)
+            let d30   = db.availabilityFraction(from: now.addingTimeInterval(-30 * 86_400), to: now)
+            await MainActor.run { store.recordAvailability(h24: h24, d7: d7, d30: d30) }
+        }
     }
 
     // MARK: - Traceroute on degradation

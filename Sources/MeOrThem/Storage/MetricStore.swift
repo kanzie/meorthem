@@ -29,6 +29,17 @@ final class MetricStore: ObservableObject {
     /// Timestamp of the last system wake event. Used to annotate post-wake incidents.
     var lastWakeDate: Date? = nil
 
+    // MARK: - Availability (uptime percentage, updated hourly by AppEnvironment)
+    @Published private(set) var availability24h: Double? = nil
+    @Published private(set) var availability7d:  Double? = nil
+    @Published private(set) var availability30d: Double? = nil
+
+    func recordAvailability(h24: Double?, d7: Double?, d30: Double?) {
+        availability24h = h24
+        availability7d  = d7
+        availability30d = d30
+    }
+
     // MARK: - Current network session (set by AppEnvironment on WiFi fingerprint change)
     var currentSessionID: UUID?
 

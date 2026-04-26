@@ -32,6 +32,7 @@ enum MenuBuilder {
     static let tagPreviousDisturbances   = 12
     static let tagCPUAdvisory            = 13
     static let tagAdvanced               = 15
+    static let tagUptime                 = 16
     static let tagTargetBase             = 100
     static let tagGatewayTarget          = 200
     static let tagUpdateAvailable        = 14
@@ -108,6 +109,10 @@ enum MenuBuilder {
                                       color: jitterColor)
         jitterItem.tag = tagJitter
         menu.addItem(jitterItem)
+
+        let uptimeItem = uptimeMenuItem(store: store, paused: paused)
+        uptimeItem.tag = tagUptime
+        menu.addItem(uptimeItem)
 
         let dnsItem = dnsSummaryItem(store: store, paused: paused)
         dnsItem.tag = tagDNSSummary
@@ -250,6 +255,12 @@ enum MenuBuilder {
                 attributes: [.foregroundColor: jitterColor, .font: _menuFont])
         }
 
+        if let item = menu.item(withTag: tagUptime) {
+            let updated = uptimeMenuItem(store: store, paused: paused)
+            item.attributedTitle = updated.attributedTitle
+            item.isHidden        = updated.isHidden
+        }
+
         if let item = menu.item(withTag: tagDNSSummary) {
             let updated = dnsSummaryItem(store: store, paused: paused)
             item.attributedTitle = updated.attributedTitle
@@ -325,6 +336,39 @@ enum MenuBuilder {
                                   pollSecs: settings.pollIntervalSecs, countdown: remaining,
                                   paused: paused),
             attributes: _labelAttrs)
+    }
+
+    // MARK: - Uptime summary item (tag 16)
+
+    /// Builds a single-line uptime percentage item.
+    /// Format: "Uptime (24h): 99.4%  ●"
+    /// Hidden when paused or no availability data is available yet.
+    @MainActor
+    private static func uptimeMenuItem(store: MetricStore, paused: Bool) -> NSMenuItem {
+        guard !paused, let pct = store.availability24h else {
+            return hiddenItem()
+        }
+
+        let dot: String
+        let dotColor: NSColor
+        if pct >= 0.99 { dot = "●"; dotColor = .systemGreen }
+        else if pct >= 0.95 { dot = "●"; dotColor = .systemOrange }
+        else { dot = "●"; dotColor = .systemRed }
+
+        let pctStr = String(format: "%.1f%%", pct * 100)
+
+        let attrs = NSMutableAttributedString(
+            string: "Uptime (24h):  \(pctStr)  ",
+            attributes: [.foregroundColor: NSColor.labelColor, .font: _menuFont])
+        let dotPart = NSAttributedString(
+            string: dot,
+            attributes: [.foregroundColor: dotColor, .font: _menuFont])
+        attrs.append(dotPart)
+
+        let item = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        item.isEnabled = false
+        item.attributedTitle = attrs
+        return item
     }
 
     // MARK: - DNS summary item (tag 6)
