@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.38.0 — 2026-04-26
+
+### New Features
+- **HTTP/HTTPS endpoint monitoring** — Ping targets can now be configured to use HTTP or HTTPS probing instead of ICMP. HTTP/HTTPS probes measure time-to-first-byte via a HEAD request (5-second timeout, ephemeral session, no cookies or cache). 2xx/3xx responses count as success; 4xx/5xx and network errors count as 100% loss. The probe mode (ICMP/TCP/HTTP/HTTPS) is selectable per target in Settings → Targets.
+
+---
+
 ## v2.37.0 — 2026-04-26
 
 ### New Features

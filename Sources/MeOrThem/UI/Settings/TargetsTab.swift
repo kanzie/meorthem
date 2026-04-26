@@ -4,8 +4,9 @@ import MeOrThemCore   // for InputValidator (Bug 15: removed duplicate from MeOr
 struct TargetsTab: View {
     @EnvironmentObject private var settings: AppSettings
 
-    @State private var newLabel    = ""
-    @State private var newHost     = ""
+    @State private var newLabel     = ""
+    @State private var newHost      = ""
+    @State private var newProbeMode: ProbeMode = .icmp
     @State private var editingIndex: Int?
     @State private var errorMsg: String?
     @State private var gatewayIP: String = "—"
@@ -56,12 +57,19 @@ struct TargetsTab: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     TextField("Label", text: $newLabel)
-                        .frame(width: 120)
+                        .frame(width: 100)
                         .textFieldStyle(.roundedBorder)
                     TextField("IP or hostname", text: $newHost)
                         .frame(maxWidth: .infinity)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commit)
+                    Picker("", selection: $newProbeMode) {
+                        ForEach(ProbeMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .frame(width: 80)
+                    .labelsHidden()
 
                     if isEditing {
                         Button(role: .destructive) { deleteEditing() } label: {
@@ -148,6 +156,14 @@ struct TargetsTab: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            if target.probeMode != .icmp {
+                Text(target.probeMode.rawValue)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(RoundedRectangle(cornerRadius: 3).fill(Color.secondary.opacity(0.15)))
+            }
             if target.thresholdOverride != nil {
                 customBadge
             }
@@ -204,6 +220,7 @@ struct TargetsTab: View {
         let target = settings.pingTargets[index]
         newLabel              = target.label
         newHost               = target.host
+        newProbeMode          = target.probeMode
         editingIndex          = index
         errorMsg              = nil
         overrideEnabled       = target.thresholdOverride != nil
@@ -220,6 +237,7 @@ struct TargetsTab: View {
         editingIndex       = nil
         newLabel           = ""
         newHost            = ""
+        newProbeMode       = .icmp
         errorMsg           = nil
         overrideEnabled    = false
         editingThresholds  = .default
@@ -251,6 +269,7 @@ struct TargetsTab: View {
                 id:                settings.pingTargets[idx].id,
                 label:             InputValidator.sanitizedLabel(label),
                 host:              host,
+                probeMode:         newProbeMode,
                 thresholdOverride: override
             )
             cancelEditing()
@@ -267,10 +286,12 @@ struct TargetsTab: View {
                 return
             }
             settings.pingTargets.append(
-                PingTarget(label: InputValidator.sanitizedLabel(label), host: host)
+                PingTarget(label: InputValidator.sanitizedLabel(label), host: host,
+                           probeMode: newProbeMode)
             )
-            newLabel = ""
-            newHost  = ""
+            newLabel     = ""
+            newHost      = ""
+            newProbeMode = .icmp
         }
         errorMsg = nil
     }

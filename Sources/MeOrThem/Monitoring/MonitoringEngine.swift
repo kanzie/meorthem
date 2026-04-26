@@ -357,10 +357,14 @@ final class MonitoringEngine {
     // MARK: - Ping helpers
 
     private static func pingTarget(_ target: PingTarget, stealth: Bool) async -> PingResult {
-        if stealth {
-            return await tcpProbeTarget(target.host)
+        switch target.probeMode {
+        case .http:  return await httpProbeTarget(target.host, useHTTPS: false)
+        case .https: return await httpProbeTarget(target.host, useHTTPS: true)
+        case .tcp:   return await tcpProbeTarget(target.host)
+        case .icmp:
+            if stealth { return await tcpProbeTarget(target.host) }
+            return await pingHost(target.host)
         }
-        return await pingHost(target.host)
     }
 
     private static func pingHost(_ host: String) async -> PingResult {
@@ -387,5 +391,13 @@ final class MonitoringEngine {
             return PingResult(timestamp: Date(), rtt: rttMs, lossPercent: 0, jitter: nil)
         }
         return PingResult(timestamp: Date(), rtt: nil, lossPercent: 100, jitter: nil)
+    }
+
+    /// HTTP/HTTPS probe — measures time-to-first-byte via a HEAD request.
+    /// RTT = TTFB in ms; loss = 0 on 2xx/3xx, 100 on error or 4xx/5xx.
+    private static func httpProbeTarget(_ host: String, useHTTPS: Bool) async -> PingResult {
+        let result = await HTTPProber.probe(host: host, useHTTPS: useHTTPS)
+        return PingResult(timestamp: Date(), rtt: result.rttMs,
+                          lossPercent: result.lossPercent, jitter: nil)
     }
 }
