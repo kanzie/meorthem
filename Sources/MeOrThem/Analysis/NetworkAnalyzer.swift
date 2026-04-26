@@ -41,13 +41,14 @@ enum DataSufficiency {
 
 struct NetworkFinding: Identifiable {
     enum Category: String {
-        case latency      = "Latency"
-        case packetLoss   = "Packet Loss"
-        case jitter       = "Jitter"
-        case wifi         = "Wi-Fi Signal"
-        case bandwidth    = "Bandwidth"
-        case connectivity = "Connectivity"
-        case dns          = "DNS"
+        case latency       = "Latency"
+        case packetLoss    = "Packet Loss"
+        case jitter        = "Jitter"
+        case wifi          = "Wi-Fi Signal"
+        case bandwidth     = "Bandwidth"
+        case connectivity  = "Connectivity"
+        case dns           = "DNS"
+        case configuration = "Configuration"
     }
 
     let id = UUID()
@@ -104,6 +105,10 @@ struct SessionAnalysisInput {
     var crossSessionHourlyRTTs: [Int: Double] = [:]
     /// Traceroute snapshots captured during detected degradation events for this session.
     var tracerouteRows: [SQLiteStore.TracerouteEventRow] = []
+    /// Name of the VPN/tunnel interface active when this session was opened, or nil.
+    /// Sourced from `network_sessions.vpn_interface`. When non-nil, the analyzer surfaces
+    /// a high-confidence informational finding so users understand latency includes tunnel overhead.
+    var vpnInterface: String? = nil
 }
 
 // MARK: - Analyzer
@@ -138,6 +143,9 @@ final class NetworkAnalyzer: @unchecked Sendable {
 
         var findings: [NetworkFinding] = []
 
+        // VPN finding is factual — always surfaces regardless of data sufficiency.
+        if let vpnFinding = checkVPN(input) { findings.append(vpnFinding) }
+
         findings += checkLatency(input, sufficiency: sufficiency)
         findings += checkPacketLoss(input, sufficiency: sufficiency)
         findings += checkJitter(input, sufficiency: sufficiency)
@@ -157,6 +165,21 @@ final class NetworkAnalyzer: @unchecked Sendable {
         findings += checkTraceroute(input)
 
         return findings.filter { $0.confidence >= 0.40 }
+    }
+
+    // MARK: - VPN informational finding
+
+    /// Returns a high-confidence informational finding when a VPN tunnel was active at session open.
+    /// Confidence 1.0 — this is a fact, not a probability — and it always surfaces.
+    private func checkVPN(_ input: SessionAnalysisInput) -> NetworkFinding? {
+        guard let iface = input.vpnInterface else { return nil }
+        return NetworkFinding(
+            category:   .configuration,
+            title:      "VPN Active",
+            detail:     "A VPN tunnel (\(iface)) was active during this session. " +
+                        "Latency readings include tunnel overhead and do not reflect raw ISP performance.",
+            confidence: 1.0
+        )
     }
 
     // MARK: - Pattern 1: Elevated latency

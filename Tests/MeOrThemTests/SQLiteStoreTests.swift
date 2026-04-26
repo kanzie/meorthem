@@ -747,4 +747,29 @@ func runSQLiteStoreTests() {
         expectEqual(p2?.preferredPollInterval, nil, "preferredPollInterval cleared")
         expectEqual(p2?.pollIntervalSource,    nil, "pollIntervalSource cleared")
     }
+
+    suite("SQLiteStore — network_sessions vpn_interface column") {
+        let store = SQLiteStore(path: ":memory:")
+        let sid = UUID()
+        let fp  = "vpn|utun3|10.8.0.1|10.8.0"
+
+        // Open session with VPN interface
+        store.openSession(id: sid, fingerprint: fp, displayName: "VPN • 10.8.0.x",
+                          connectionType: "vpn", vpnInterface: "utun3")
+        store.waitForPendingOps()
+
+        // Verify vpn_interface is stored and returned
+        let row = store.sessionsInRange(from: Date.distantPast, to: Date.distantFuture).first
+        expectEqual(row?.vpnInterface, "utun3", "vpn_interface stored on session open")
+
+        // Open session without VPN interface — should be nil
+        let sid2 = UUID()
+        let fp2  = "wifi|ch6|2.4 GHz|192.168.1"
+        store.openSession(id: sid2, fingerprint: fp2, displayName: "2.4 GHz • 192.168.1.x")
+        store.waitForPendingOps()
+
+        let rows = store.sessionsInRange(from: Date.distantPast, to: Date.distantFuture)
+        let wifiRow = rows.first(where: { $0.fingerprint == fp2 })
+        expectEqual(wifiRow?.vpnInterface, nil, "vpn_interface nil when no VPN")
+    }
 }

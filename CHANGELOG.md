@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.34.0 — 2026-04-26
+
+### New Features
+- **VPN / Tunnel interface detection** — Me Or Them now detects active VPN or tunnel interfaces (utun*, ipsec*, ppp*) at session open time and approximately once per minute thereafter. The active tunnel name (e.g. "utun3") is shown in the Network Details submenu alongside WiFi info. Network Analysis findings for sessions where a VPN was active include an informational "VPN Active" notice explaining that latency readings include tunnel overhead.
+
+---
+
 ## v2.33.0 — 2026-04-21
 
 ### New Features

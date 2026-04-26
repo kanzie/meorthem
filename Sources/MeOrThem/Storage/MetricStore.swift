@@ -16,6 +16,11 @@ final class MetricStore: ObservableObject {
     @Published private(set) var overallStatus: MetricStatus = .green
     @Published private(set) var networkFaultType: NetworkFaultType = .none
 
+    // MARK: - VPN state (set by AppEnvironment on session open and ~once per minute)
+    @Published private(set) var vpnInterface: String? = nil
+
+    func recordVPNInterface(_ name: String?) { vpnInterface = name }
+
     // MARK: - Gateway ping (set by MonitoringEngine each tick)
     private(set) var latestGatewayPing: PingResult?
     @Published private(set) var latestGatewayIP: String?

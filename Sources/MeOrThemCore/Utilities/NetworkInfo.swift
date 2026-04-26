@@ -156,6 +156,42 @@ public enum NetworkInfo {
         return (found.name, found.ip, macMap[found.name] ?? "—")
     }
 
+    // MARK: - VPN / Tunnel detection
+
+    /// Returns the name of the first active VPN or tunnel interface, or nil if none.
+    /// Checks for utun*, ipsec*, and ppp* interface names that have the IFF_UP flag set
+    /// and at least one assigned non-loopback address. Uses getifaddrs — no entitlements needed.
+    public static func activeVPNInterface() -> String? {
+        var ifaddr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddr) == 0, let first = ifaddr else { return nil }
+        defer { freeifaddrs(ifaddr) }
+
+        var candidates: Set<String> = []
+        var upWithAddress: Set<String> = []
+
+        var ptr: UnsafeMutablePointer<ifaddrs>? = first
+        while let iface = ptr {
+            let name  = String(cString: iface.pointee.ifa_name)
+            let flags = Int32(iface.pointee.ifa_flags)
+            let isUp  = (flags & IFF_UP) != 0
+
+            let isVPN = name.hasPrefix("utun") || name.hasPrefix("ipsec") || name.hasPrefix("ppp")
+            if isVPN {
+                candidates.insert(name)
+                if isUp, let addr = iface.pointee.ifa_addr {
+                    let family = addr.pointee.sa_family
+                    if family == UInt8(AF_INET) || family == UInt8(AF_INET6) {
+                        upWithAddress.insert(name)
+                    }
+                }
+            }
+            ptr = iface.pointee.ifa_next
+        }
+
+        // Return the first UP interface with an address, sorted for determinism.
+        return candidates.intersection(upWithAddress).sorted().first
+    }
+
     // MARK: - Internal parsing helpers (exposed for unit testing)
 
     /// Parses `gateway:` and `interface:` values from `/sbin/route -n get default` output.

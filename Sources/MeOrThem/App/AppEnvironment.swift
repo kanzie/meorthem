@@ -37,6 +37,11 @@ final class AppEnvironment {
     /// Number of consecutive total-loss polls required before TCP probe fires.
     private let stealthDetectionThreshold: Int = 5
 
+    // VPN monitoring state
+    /// Tick counter used to re-sample the VPN interface approximately once per minute.
+    private var vpnCheckTickCounter: Int = 0
+    private let vpnCheckInterval: Int = 30  // ~1 min at 2s poll
+
     init() {
         settings          = AppSettings.shared
         sqliteStore       = SQLiteStore.makeDefault()
@@ -169,9 +174,12 @@ final class AppEnvironment {
             self?.logExporter.appendWiFi(snapshot)
         }
 
-        // Stealth mode detection — runs after every tick when all external targets have 100% loss.
+        // Stealth mode detection + periodic VPN re-check — runs after every tick.
         monitoringEngine.onTickCompleted = { [weak self] in
-            Task { @MainActor [weak self] in self?.evaluateStealthMode() }
+            Task { @MainActor [weak self] in
+                self?.evaluateStealthMode()
+                self?.periodicVPNCheck()
+            }
         }
 
         // SQLite maintenance: aggregate + prune on launch, then every hour.
@@ -256,11 +264,14 @@ final class AppEnvironment {
         let newID = UUID()
         currentSessionFingerprint    = key.fingerprint
         metricStore.currentSessionID = newID
+        let vpnIface = NetworkInfo.activeVPNInterface()
+        metricStore.recordVPNInterface(vpnIface)
         sqliteStore.openSession(id: newID,
                                 fingerprint:     key.fingerprint,
                                 displayName:     key.displayName,
                                 connectionType:  key.connectionType.rawValue,
-                                weakFingerprint: key.hasWeakFingerprint)
+                                weakFingerprint: key.hasWeakFingerprint,
+                                vpnInterface:    vpnIface)
 
         // Upsert connection profile and restore stealth mode from stored state.
         let fp = key.fingerprint
@@ -291,6 +302,20 @@ final class AppEnvironment {
         // Reset DNS resolver failure counts — a resolver unreachable on one network
         // may be fully functional on another.
         settings.resetDNSResolverFailureCounts()
+    }
+
+    // MARK: - VPN monitoring
+
+    /// Called after every tick. Re-samples the active VPN interface approximately once per minute
+    /// and updates MetricStore so the menu and analyzer always reflect the current VPN state.
+    private func periodicVPNCheck() {
+        vpnCheckTickCounter += 1
+        guard vpnCheckTickCounter >= vpnCheckInterval else { return }
+        vpnCheckTickCounter = 0
+        let iface = NetworkInfo.activeVPNInterface()
+        if iface != metricStore.vpnInterface {
+            metricStore.recordVPNInterface(iface)
+        }
     }
 
     // MARK: - Stealth mode detection

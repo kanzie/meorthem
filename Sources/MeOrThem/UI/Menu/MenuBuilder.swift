@@ -465,6 +465,8 @@ enum MenuBuilder {
             sub.addItem(infoItem("Noise:       \(w.noise) dBm"))
             sub.addItem(infoItem(String(format: "Tx Rate:     %.3f Mbps", w.txRateMbps)))
             sub.addItem(infoItem("PHY Mode:    \(w.phyMode)"))
+            // Show VPN tunnel indicator when an overlay VPN is active alongside WiFi.
+            if let vpn = store.vpnInterface { sub.addItem(infoItem("VPN:         \(vpn)")) }
         } else {
             let wifiIfaceName = WiFiMonitor.interfaceName()
             // Check the active default-route interface — covers VPN, Ethernet, and unusual setups.

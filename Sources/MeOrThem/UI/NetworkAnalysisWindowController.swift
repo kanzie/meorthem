@@ -127,6 +127,7 @@ private struct NetworkAnalysisView: View {
             input.dnsResolverRows        = dnsResolverRows
             input.tracerouteRows         = tracerouteRows
             input.crossSessionHourlyRTTs = hourlyRTTs
+            input.vpnInterface           = session.vpnInterface
             let suf = DataSufficiency(sampleCount: targetPings.count)
             let results = analyzer.analyze(input)
             return (results, suf.label)
@@ -384,17 +385,20 @@ private struct FindingCard: View {
 
     private var categoryIcon: String {
         switch finding.category {
-        case .latency:      return "clock"
-        case .packetLoss:   return "xmark.circle"
-        case .jitter:       return "waveform.path"
-        case .wifi:         return "wifi.exclamationmark"
-        case .bandwidth:    return "arrow.down.arrow.up"
-        case .connectivity: return "network"
-        case .dns:          return "globe"
+        case .latency:       return "clock"
+        case .packetLoss:    return "xmark.circle"
+        case .jitter:        return "waveform.path"
+        case .wifi:          return "wifi.exclamationmark"
+        case .bandwidth:     return "arrow.down.arrow.up"
+        case .connectivity:  return "network"
+        case .dns:           return "globe"
+        case .configuration: return "gearshape"
         }
     }
 
     private var categoryColor: Color {
+        // Configuration findings (e.g. VPN active) are informational — show in blue.
+        if finding.category == .configuration { return .blue }
         switch finding.confidence {
         case 0.80...: return .red
         case 0.55...: return .orange

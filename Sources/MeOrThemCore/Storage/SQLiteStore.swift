@@ -402,6 +402,9 @@ public final class SQLiteStore: @unchecked Sendable {
         public let connectionType:  String
         /// True when the Ethernet fingerprint was created without a resolved gateway MAC.
         public let weakFingerprint: Bool
+        /// Name of an active VPN/tunnel interface at the time the session was opened, e.g. "utun3".
+        /// nil when no VPN was detected at session open time or for pre-migration rows.
+        public let vpnInterface:    String?
     }
 
     public struct IncidentRow: Identifiable {
@@ -472,16 +475,17 @@ public final class SQLiteStore: @unchecked Sendable {
     public func openSession(id: UUID,
                             fingerprint:     String,
                             displayName:     String,
-                            connectionType:  String = "wifi",
-                            weakFingerprint: Bool   = false,
-                            startTime:       Date   = .init()) {
+                            connectionType:  String  = "wifi",
+                            weakFingerprint: Bool    = false,
+                            vpnInterface:    String? = nil,
+                            startTime:       Date    = .init()) {
         let idStr   = id.uuidString
         let ts      = startTime.timeIntervalSince1970
         let weakInt = weakFingerprint ? 1 : 0
         queue.async { [weak self] in
             self?._openSession(id: idStr, fingerprint: fingerprint,
                                displayName: displayName, connectionType: connectionType,
-                               weakFingerprint: weakInt, ts: ts)
+                               weakFingerprint: weakInt, vpnInterface: vpnInterface, ts: ts)
         }
     }
 
@@ -819,6 +823,8 @@ public final class SQLiteStore: @unchecked Sendable {
         // _exec silently discards SQLITE_ERROR when the column already exists — idempotent.
         _exec("ALTER TABLE network_sessions ADD COLUMN connection_type  TEXT    NOT NULL DEFAULT 'wifi';")
         _exec("ALTER TABLE network_sessions ADD COLUMN weak_fingerprint INTEGER NOT NULL DEFAULT 0;")
+        // v2.34.0: VPN/tunnel interface name at session open time.
+        _exec("ALTER TABLE network_sessions ADD COLUMN vpn_interface TEXT;")
     }
 
     // MARK: - Private: insert implementations
@@ -1081,12 +1087,13 @@ public final class SQLiteStore: @unchecked Sendable {
     // MARK: - Private: session implementations
 
     private func _openSession(id: String, fingerprint: String, displayName: String,
-                               connectionType: String, weakFingerprint: Int, ts: Double) {
+                               connectionType: String, weakFingerprint: Int,
+                               vpnInterface: String?, ts: Double) {
         let sql = """
             INSERT OR IGNORE INTO network_sessions
                 (id, fingerprint, display_name, started_at, last_seen,
-                 connection_type, weak_fingerprint)
-            VALUES (?, ?, ?, ?, ?, ?, ?);
+                 connection_type, weak_fingerprint, vpn_interface)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
             """
         guard let stmt = _prepare(sql) else { return }
         defer { sqlite3_finalize(stmt) }
@@ -1097,6 +1104,8 @@ public final class SQLiteStore: @unchecked Sendable {
         sqlite3_bind_double(stmt, 5, ts)
         _bindText(stmt, 6, connectionType)
         sqlite3_bind_int(stmt, 7, Int32(weakFingerprint))
+        if let vpn = vpnInterface { _bindText(stmt, 8, vpn) }
+        else { sqlite3_bind_null(stmt, 8) }
         sqlite3_step(stmt)
     }
 
@@ -1112,7 +1121,7 @@ public final class SQLiteStore: @unchecked Sendable {
     private func _latestSession(fingerprint: String) -> NetworkSessionRow? {
         let sql = """
             SELECT id, fingerprint, display_name, started_at, last_seen,
-                   connection_type, weak_fingerprint
+                   connection_type, weak_fingerprint, vpn_interface
             FROM network_sessions
             WHERE fingerprint = ?
             ORDER BY started_at DESC
@@ -1129,7 +1138,7 @@ public final class SQLiteStore: @unchecked Sendable {
         // A session overlaps [from, to] if it started before `to` and last_seen >= from.
         let sql = """
             SELECT id, fingerprint, display_name, started_at, last_seen,
-                   connection_type, weak_fingerprint
+                   connection_type, weak_fingerprint, vpn_interface
             FROM network_sessions
             WHERE started_at <= ? AND last_seen >= ?
             ORDER BY started_at ASC;
@@ -1154,9 +1163,11 @@ public final class SQLiteStore: @unchecked Sendable {
         let lastSeen       = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 4))
         let connType       = sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? "wifi"
         let weakFP         = sqlite3_column_int(stmt, 6) != 0
+        let vpnIface       = sqlite3_column_text(stmt, 7).map { String(cString: $0) }
         return NetworkSessionRow(id: id, fingerprint: fp, displayName: name,
                                  startedAt: startedAt, lastSeen: lastSeen,
-                                 connectionType: connType, weakFingerprint: weakFP)
+                                 connectionType: connType, weakFingerprint: weakFP,
+                                 vpnInterface: vpnIface)
     }
 
     private func _pingRows(targetID: String, sessionID: String) -> [PingRow] {

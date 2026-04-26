@@ -15,6 +15,13 @@ final class MetricStore: ObservableObject {
     @Published private(set) var overallStatus: MetricStatus = .green
     @Published private(set) var networkFaultType: NetworkFaultType = .none
 
+    // MARK: - VPN state
+    /// Name of the active VPN/tunnel interface, e.g. "utun3", or nil if none is detected.
+    /// Updated on each session open and approximately once per minute during a session.
+    @Published private(set) var vpnInterface: String? = nil
+
+    func recordVPNInterface(_ name: String?) { vpnInterface = name }
+
     // MARK: - Gateway ping
     private(set) var latestGatewayPing: PingResult?
 
