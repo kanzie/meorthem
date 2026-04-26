@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.37.0 — 2026-04-26
+
+### New Features
+- **Battery-aware monitoring** — Me Or Them now adapts its behaviour when running on battery power. A new "On battery" setting in General → Monitoring offers three modes: Normal (no change), Reduced (polls at 2× the configured interval to halve subprocess activity), and Pause (monitoring suspends entirely until AC power is restored). The setting takes effect immediately when switching between AC and battery.
+
+---
+
 ## v2.36.0 — 2026-04-26
 
 ### New Features

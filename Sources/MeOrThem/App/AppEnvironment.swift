@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import AppKit
+import IOKit.ps
 import MeOrThemCore
 
 @MainActor
@@ -46,6 +47,10 @@ final class AppEnvironment {
     // Sleep/wake state
     /// Timestamp of the most recent system wake event. Used to tag post-wake incidents.
     private var lastWakeDate: Date? = nil
+
+    // Battery monitoring state
+    private var isOnBattery: Bool = false
+    private var powerSourceObserver: CFRunLoopSource? = nil
 
     init() {
         settings          = AppSettings.shared
@@ -212,6 +217,25 @@ final class AppEnvironment {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleWake() }
         }
+
+        // Battery power monitoring — adjust poll rate when on battery.
+        isOnBattery = Self.readIsOnBattery()
+        let ctx = Unmanaged.passUnretained(self).toOpaque()
+        if let src = IOPSNotificationCreateRunLoopSource({ context in
+            guard let ctx = context else { return }
+            let env = Unmanaged<AppEnvironment>.fromOpaque(ctx).takeUnretainedValue()
+            Task { @MainActor in env.handlePowerSourceChange() }
+        }, ctx)?.takeRetainedValue() {
+            powerSourceObserver = src
+            CFRunLoopAddSource(CFRunLoopGetMain(), src, .defaultMode)
+        }
+        // Subscribe to batteryBehavior changes so the setting takes effect immediately.
+        settings.$batteryBehavior
+            .dropFirst()
+            .sink { [weak self] _ in self?.applyBatteryBehavior() }
+            .store(in: &cancellables)
+        // Apply on launch (no-op when .normal or on AC).
+        applyBatteryBehavior()
     }
 
     // MARK: - Sleep / Wake handling
@@ -227,6 +251,43 @@ final class AppEnvironment {
         lastWakeDate = now
         metricStore.lastWakeDate = now
         if monitoringEngine.isPaused { monitoringEngine.resume() }
+    }
+
+    // MARK: - Battery / Power source handling
+
+    private static func readIsOnBattery() -> Bool {
+        let info    = IOPSCopyPowerSourcesInfo().takeRetainedValue()
+        let sources = IOPSCopyPowerSourcesList(info).takeRetainedValue() as [CFTypeRef]
+        return sources.contains { src in
+            let desc = IOPSGetPowerSourceDescription(info, src)
+                .takeUnretainedValue() as? [String: Any]
+            return (desc?[kIOPSPowerSourceStateKey] as? String) == kIOPSBatteryPowerValue
+        }
+    }
+
+    @MainActor
+    private func handlePowerSourceChange() {
+        let nowOnBattery = Self.readIsOnBattery()
+        guard nowOnBattery != isOnBattery else { return }
+        isOnBattery = nowOnBattery
+        applyBatteryBehavior()
+    }
+
+    @MainActor
+    private func applyBatteryBehavior() {
+        guard isOnBattery else {
+            // Restore AC behaviour: resume if battery-paused, reset to configured interval.
+            if monitoringEngine.isPaused && !monitoringEngine.isManuallyPaused {
+                monitoringEngine.resume()
+            }
+            monitoringEngine.restart(interval: settings.pollIntervalSecs)
+            return
+        }
+        switch settings.batteryBehavior {
+        case .normal:  break   // no change
+        case .reduced: monitoringEngine.restart(interval: settings.pollIntervalSecs * 2)
+        case .paused:  monitoringEngine.pause()
+        }
     }
 
     // MARK: - Network session tracking

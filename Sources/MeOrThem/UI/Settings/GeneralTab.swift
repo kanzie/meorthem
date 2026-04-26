@@ -44,6 +44,14 @@ struct GeneralTab: View {
                     Text("60 seconds").tag(60.0)
                 }
                 .pickerStyle(.menu)
+
+                Picker("On battery", selection: $settings.batteryBehavior) {
+                    ForEach(BatteryBehavior.allCases, id: \.self) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                .help("Controls monitoring behaviour when your Mac is running on battery power.")
             }
 
             Section("Bandwidth Test") {

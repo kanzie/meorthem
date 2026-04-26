@@ -8,6 +8,13 @@ enum ColorTheme: String, Codable, CaseIterable {
     case dark   = "Dark"
 }
 
+/// Controls how monitoring adapts when the Mac is running on battery power.
+enum BatteryBehavior: String, Codable, CaseIterable {
+    case normal  = "Normal (no change)"
+    case reduced = "Reduced (2× slower)"
+    case paused  = "Pause monitoring"
+}
+
 @MainActor
 final class AppSettings: ObservableObject {
     static let shared = AppSettings()
@@ -104,6 +111,11 @@ final class AppSettings: ObservableObject {
         didSet { encode(dnsResolvers, forKey: "dnsResolvers") }
     }
 
+    // MARK: - Battery behavior
+    @Published var batteryBehavior: BatteryBehavior {
+        didSet { UserDefaults.standard.set(batteryBehavior.rawValue, forKey: "batteryBehavior") }
+    }
+
     // MARK: - Notifications
     @Published var enableNotificationBanner: Bool {
         didSet { UserDefaults.standard.set(enableNotificationBanner, forKey: "enableNotificationBanner") }
@@ -128,6 +140,7 @@ final class AppSettings: ObservableObject {
         enableLogRotation         = ud.bool(forKey: "enableLogRotation")
         bandwidthBarRedMbps       = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
         bandwidthBarYellowMbps    = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
+        batteryBehavior           = BatteryBehavior(rawValue: ud.string(forKey: "batteryBehavior") ?? "") ?? .normal
         enableNotificationBanner  = ud.object(forKey: "enableNotificationBanner") as? Bool ?? true
         enableNotificationSound   = ud.object(forKey: "enableNotificationSound")  as? Bool ?? false
         rawRetentionDays          = ud.object(forKey: "rawRetentionDays")       as? Int ?? 7
