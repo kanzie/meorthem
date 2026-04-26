@@ -418,6 +418,12 @@ public final class SQLiteStore: @unchecked Sendable {
         public var isActive: Bool { endedAt == nil }
     }
 
+    /// A system-level sleep or wake event recorded by the OS notification center.
+    public struct SystemEventRow: Sendable {
+        public let timestamp: Date
+        public let eventType: String   // "sleep" | "wake"
+    }
+
     /// Per-network-fingerprint profile storing stealth mode and ICMP health state.
     public struct ConnectionProfile: Identifiable, Sendable {
         public let fingerprint:           String
@@ -807,6 +813,13 @@ public final class SQLiteStore: @unchecked Sendable {
                 total_sessions           INTEGER NOT NULL DEFAULT 1
             );
             CREATE INDEX IF NOT EXISTS idx_connprofile_lastseen ON connection_profiles(last_seen);
+
+            CREATE TABLE IF NOT EXISTS system_events (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp  REAL    NOT NULL,
+                event_type TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_system_events_ts ON system_events(timestamp);
             """)
     }
 
@@ -1550,6 +1563,47 @@ public final class SQLiteStore: @unchecked Sendable {
         let ts = now.timeIntervalSince1970
         queue.async { [weak self] in
             self?._updateICMPLastOk(fingerprint: fingerprint, now: ts)
+        }
+    }
+
+    // MARK: - System events (sleep/wake)
+
+    /// Records a sleep or wake event. Fire-and-forget.
+    public func insertSystemEvent(timestamp: Date, eventType: String) {
+        let ts = timestamp.timeIntervalSince1970
+        queue.async { [weak self] in
+            guard let self else { return }
+            let sql = "INSERT INTO system_events (timestamp, event_type) VALUES (?, ?);"
+            guard let stmt = _prepare(sql) else { return }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, ts)
+            _bindText(stmt, 2, eventType)
+            sqlite3_step(stmt)
+        }
+    }
+
+    /// Returns system events (sleep/wake) within the given time range, ordered by timestamp.
+    public func systemEventRows(from: Date, to: Date) -> [SystemEventRow] {
+        let fromTs = from.timeIntervalSince1970
+        let toTs   = to.timeIntervalSince1970
+        return queue.sync {
+            let sql = """
+                SELECT timestamp, event_type FROM system_events
+                WHERE timestamp >= ? AND timestamp <= ?
+                ORDER BY timestamp ASC;
+                """
+            guard let stmt = _prepare(sql) else { return [] }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, fromTs)
+            sqlite3_bind_double(stmt, 2, toTs)
+            var rows: [SystemEventRow] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                let ts   = sqlite3_column_double(stmt, 0)
+                let type = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
+                rows.append(SystemEventRow(timestamp: Date(timeIntervalSince1970: ts),
+                                          eventType: type))
+            }
+            return rows
         }
     }
 

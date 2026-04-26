@@ -420,6 +420,8 @@ struct MetricsChartsView: View {
                                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
                         }
 
+                        systemEventMarkers()
+
                         // Area fills + lines per target
                         ForEach(filteredLatency) { p in
                             AreaMark(
@@ -541,6 +543,8 @@ struct MetricsChartsView: View {
                                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
                         }
 
+                        systemEventMarkers()
+
                         ForEach(filteredLoss) { p in
                             AreaMark(x: .value("Time", p.timestamp),
                                      yStart: .value("Zero", 0),
@@ -613,6 +617,8 @@ struct MetricsChartsView: View {
                                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 4]))
                         }
 
+                        systemEventMarkers()
+
                         ForEach(filteredJitter) { p in
                             AreaMark(x: .value("Time", p.timestamp),
                                      yStart: .value("Zero", 0),
@@ -673,6 +679,8 @@ struct MetricsChartsView: View {
                     RuleMark(y: .value("Poor", -80))
                         .foregroundStyle(Color.orange.opacity(0.4))
                         .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+                    systemEventMarkers()
 
                     ForEach(loader.wifiRSSI) { p in
                         AreaMark(x: .value("Time", p.timestamp),
@@ -738,6 +746,8 @@ struct MetricsChartsView: View {
                   subtitle: "Round-trip time per resolver (ms) — failures shown as gaps") {
             VStack(alignment: .leading, spacing: 6) {
                 Chart {
+                    systemEventMarkers()
+
                     ForEach(loader.dnsPoints) { p in
                         LineMark(x: .value("Time", p.timestamp),
                                  y: .value("ms", p.value))
@@ -1043,6 +1053,33 @@ struct MetricsChartsView: View {
             return "\(start) · \(inc.cause) · \(dur)s"
         }
         return "\(start) · \(inc.cause) · ongoing"
+    }
+
+    /// Renders wake (orange dashed) and sleep (grey dashed) vertical rule marks.
+    /// Used in every chart that has a time axis to show sleep/wake boundaries.
+    @ChartContentBuilder
+    private func systemEventMarkers() -> some ChartContent {
+        ForEach(loader.systemEvents, id: \.timestamp) { event in
+            if event.eventType == "wake" {
+                RuleMark(x: .value("Wake", event.timestamp))
+                    .foregroundStyle(Color.orange.opacity(0.5))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .annotation(position: .top, alignment: .leading) {
+                        Text("Wake")
+                            .font(.caption2)
+                            .foregroundStyle(Color.orange)
+                    }
+            } else {
+                RuleMark(x: .value("Sleep", event.timestamp))
+                    .foregroundStyle(Color.gray.opacity(0.35))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .annotation(position: .top, alignment: .leading) {
+                        Text("Sleep")
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondary)
+                    }
+            }
+        }
     }
 }
 

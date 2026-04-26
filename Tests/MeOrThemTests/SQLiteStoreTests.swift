@@ -772,4 +772,34 @@ func runSQLiteStoreTests() {
         let wifiRow = rows.first(where: { $0.fingerprint == fp2 })
         expectEqual(wifiRow?.vpnInterface, nil, "vpn_interface nil when no VPN")
     }
+
+    suite("SQLiteStore — system_events table round-trip") {
+        let store = SQLiteStore(path: ":memory:")
+        let now   = Date()
+        let sleep = now.addingTimeInterval(-60)
+        let wake  = now.addingTimeInterval(-30)
+
+        store.insertSystemEvent(timestamp: sleep, eventType: "sleep")
+        store.insertSystemEvent(timestamp: wake,  eventType: "wake")
+        store.waitForPendingOps()
+
+        let rows = store.systemEventRows(from: now.addingTimeInterval(-120), to: now)
+        expectEqual(rows.count, 2, "two system events stored")
+        expectEqual(rows[0].eventType, "sleep", "first event is sleep")
+        expectEqual(rows[1].eventType, "wake",  "second event is wake")
+
+        // Query with narrower range — only wake event should be returned
+        let narrow = store.systemEventRows(from: now.addingTimeInterval(-45), to: now)
+        expectEqual(narrow.count, 1, "narrow range returns only wake event")
+        expectEqual(narrow[0].eventType, "wake", "narrow range event is wake")
+    }
+
+    suite("SQLiteStore — system_events table created in schema") {
+        let store = SQLiteStore(path: ":memory:")
+        // If the table doesn't exist, insertSystemEvent would crash; this confirms schema.
+        store.insertSystemEvent(timestamp: Date(), eventType: "wake")
+        store.waitForPendingOps()
+        let rows = store.systemEventRows(from: Date.distantPast, to: Date.distantFuture)
+        expectEqual(rows.count, 1, "system_events table exists and accepts rows")
+    }
 }

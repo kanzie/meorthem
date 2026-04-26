@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import AppKit
 import MeOrThemCore
 
 @MainActor
@@ -41,6 +42,10 @@ final class AppEnvironment {
     /// Tick counter used to re-sample the VPN interface approximately once per minute.
     private var vpnCheckTickCounter: Int = 0
     private let vpnCheckInterval: Int = 30  // ~1 min at 2s poll
+
+    // Sleep/wake state
+    /// Timestamp of the most recent system wake event. Used to tag post-wake incidents.
+    private var lastWakeDate: Date? = nil
 
     init() {
         settings          = AppSettings.shared
@@ -190,6 +195,38 @@ final class AppEnvironment {
         mt.tolerance = 300   // ±5 min jitter is fine for housekeeping
         RunLoop.main.add(mt, forMode: .common)
         maintenanceTimer = mt
+
+        // Sleep/wake event recording — pauses monitoring on sleep, resumes on wake.
+        // NSWorkspace notifications are delivered on the main thread.
+        NotificationCenter.default.addObserver(
+            forName: NSWorkspace.willSleepNotification,
+            object: NSWorkspace.shared,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleSleep() }
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: NSWorkspace.shared,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.handleWake() }
+        }
+    }
+
+    // MARK: - Sleep / Wake handling
+
+    private func handleSleep() {
+        sqliteStore.insertSystemEvent(timestamp: Date(), eventType: "sleep")
+        monitoringEngine.pause()
+    }
+
+    private func handleWake() {
+        let now = Date()
+        sqliteStore.insertSystemEvent(timestamp: now, eventType: "wake")
+        lastWakeDate = now
+        metricStore.lastWakeDate = now
+        if monitoringEngine.isPaused { monitoringEngine.resume() }
     }
 
     // MARK: - Network session tracking

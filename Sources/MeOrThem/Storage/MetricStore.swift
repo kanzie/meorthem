@@ -25,6 +25,10 @@ final class MetricStore: ObservableObject {
     private(set) var latestGatewayPing: PingResult?
     @Published private(set) var latestGatewayIP: String?
 
+    // MARK: - Sleep/wake context (set by AppEnvironment on wake events)
+    /// Timestamp of the last system wake event. Used to annotate post-wake incidents.
+    var lastWakeDate: Date? = nil
+
     // MARK: - Current network session (set by AppEnvironment on WiFi fingerprint change)
     var currentSessionID: UUID?
 
@@ -404,7 +408,12 @@ final class MetricStore: ObservableObject {
             parts.append(String(format: "high system load (%.0f%%)", avgCPU * 100))
         }
 
-        return parts.isEmpty ? "network degradation" : parts.joined(separator: ", ")
+        var cause = parts.isEmpty ? "network degradation" : parts.joined(separator: ", ")
+        // Tag incidents that begin within 90 seconds of a system wake event.
+        if let wake = lastWakeDate, Date().timeIntervalSince(wake) <= 90 {
+            cause += " (post-wake)"
+        }
+        return cause
     }
 
     func clearConnectionHistory() {

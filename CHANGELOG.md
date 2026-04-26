@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.35.0 — 2026-04-26
+
+### New Features
+- **Sleep/Wake event correlation** — Me Or Them now records system sleep and wake events to SQLite. The Charts window overlays dashed orange "Wake" and grey "Sleep" vertical markers on all time-axis charts (latency, loss, jitter, WiFi signal, DNS latency). Degradation incidents that begin within 90 seconds of a wake event are automatically tagged with "(post-wake)" in their cause string, explaining the most common "brief outage at 9am" pattern. Monitoring automatically pauses on sleep and resumes on wake.
+
+---
+
 ## v2.34.0 — 2026-04-26
 
 ### New Features

@@ -63,6 +63,7 @@ final class MetricsDataLoader: ObservableObject {
     @Published private(set) var dnsPoints:         [ChartPoint] = []
     @Published private(set) var speedtestPoints:   [SQLiteStore.SpeedtestRow] = []
     @Published private(set) var incidents:         [SQLiteStore.IncidentRow] = []
+    @Published private(set) var systemEvents:      [SQLiteStore.SystemEventRow] = []
     /// Cross-session average RTT per hour-of-day (0–23) from the last 30 days of aggregates.
     @Published private(set) var hourlyRTTAverages: [Int: Double] = [:]
     @Published private(set) var isLoading        = false
@@ -190,7 +191,8 @@ final class MetricsDataLoader: ObservableObject {
                 dnsDownsampled = dnsPoints
             }
 
-            let speedtestRows = db.speedtestRows(from: from, to: now)
+            let speedtestRows  = db.speedtestRows(from: from, to: now)
+            let sysEventRows   = db.systemEventRows(from: from, to: now)
 
             guard !Task.isCancelled else { return }
 
@@ -202,6 +204,7 @@ final class MetricsDataLoader: ObservableObject {
             let finalDNS        = dnsDownsampled
             let finalSpeedtest  = speedtestRows
             let finalIncidents  = recentIncidents
+            let finalSysEvents  = sysEventRows
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -214,6 +217,7 @@ final class MetricsDataLoader: ObservableObject {
                 self.dnsPoints        = finalDNS
                 self.speedtestPoints  = finalSpeedtest
                 self.incidents        = finalIncidents
+                self.systemEvents     = finalSysEvents
                 self.isLoading        = false
             }
         }
