@@ -124,6 +124,14 @@ final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(enableNotificationSound, forKey: "enableNotificationSound") }
     }
 
+    // MARK: - Local metrics endpoint (Prometheus / JSON)
+    @Published var metricsServerEnabled: Bool {
+        didSet { UserDefaults.standard.set(metricsServerEnabled, forKey: "metricsServerEnabled") }
+    }
+    @Published var metricsServerPort: Int {
+        didSet { UserDefaults.standard.set(metricsServerPort, forKey: "metricsServerPort") }
+    }
+
     private init() {
         let ud = UserDefaults.standard
 
@@ -143,6 +151,8 @@ final class AppSettings: ObservableObject {
         batteryBehavior           = BatteryBehavior(rawValue: ud.string(forKey: "batteryBehavior") ?? "") ?? .normal
         enableNotificationBanner  = ud.object(forKey: "enableNotificationBanner") as? Bool ?? true
         enableNotificationSound   = ud.object(forKey: "enableNotificationSound")  as? Bool ?? false
+        metricsServerEnabled      = ud.object(forKey: "metricsServerEnabled") as? Bool ?? false
+        metricsServerPort         = ud.object(forKey: "metricsServerPort") as? Int ?? 9090
         rawRetentionDays          = ud.object(forKey: "rawRetentionDays")       as? Int ?? 7
         aggregateRetentionDays    = ud.object(forKey: "aggregateRetentionDays") as? Int ?? 90
         incidentRetentionDays     = ud.object(forKey: "incidentRetentionDays")  as? Int ?? 365

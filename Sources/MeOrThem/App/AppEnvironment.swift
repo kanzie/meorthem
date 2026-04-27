@@ -52,6 +52,9 @@ final class AppEnvironment {
     private var isOnBattery: Bool = false
     private var powerSourceObserver: CFRunLoopSource? = nil
 
+    // Local metrics HTTP server
+    private var metricsServer: MetricsHTTPServer?
+
     init() {
         settings          = AppSettings.shared
         sqliteStore       = SQLiteStore.makeDefault()
@@ -236,6 +239,24 @@ final class AppEnvironment {
             .store(in: &cancellables)
         // Apply on launch (no-op when .normal or on AC).
         applyBatteryBehavior()
+
+        // Local metrics endpoint — start if enabled, react to settings changes.
+        if settings.metricsServerEnabled { startMetricsServer() }
+        settings.$metricsServerEnabled
+            .dropFirst()
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                if enabled { self.startMetricsServer() } else { self.metricsServer?.stop() }
+            }
+            .store(in: &cancellables)
+        settings.$metricsServerPort
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self, self.settings.metricsServerEnabled else { return }
+                self.metricsServer?.stop()
+                self.startMetricsServer()
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Sleep / Wake handling
@@ -288,6 +309,14 @@ final class AppEnvironment {
         case .reduced: monitoringEngine.restart(interval: settings.pollIntervalSecs * 2)
         case .paused:  monitoringEngine.pause()
         }
+    }
+
+    // MARK: - Local metrics server
+
+    private func startMetricsServer() {
+        let server = MetricsHTTPServer(metricStore: metricStore, settings: settings)
+        try? server.start(port: settings.metricsServerPort)
+        metricsServer = server
     }
 
     // MARK: - Network session tracking

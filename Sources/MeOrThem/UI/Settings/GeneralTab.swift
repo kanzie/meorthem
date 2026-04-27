@@ -206,6 +206,25 @@ struct GeneralTab: View {
                     .disabled(!settings.enableNotificationBanner)
             }
 
+            Section("Metrics Export") {
+                Toggle("Enable local metrics endpoint", isOn: $settings.metricsServerEnabled)
+                    .help("Serves current metrics at http://localhost:\(settings.metricsServerPort)/metrics (Prometheus) and /metrics.json (JSON)")
+                if settings.metricsServerEnabled {
+                    HStack(spacing: 8) {
+                        Text("Port")
+                        TextField("9090", value: $settings.metricsServerPort, format: .number)
+                            .frame(width: 70)
+                            .textFieldStyle(.roundedBorder)
+                            .onChange(of: settings.metricsServerPort) { _, v in
+                                settings.metricsServerPort = max(1024, min(v, 65535))
+                            }
+                        Text("http://localhost:\(settings.metricsServerPort)/metrics")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section("Updates") {
                 HStack {
                     Text("Current version: \(appVersion)")

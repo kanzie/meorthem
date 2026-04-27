@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.41.0 — 2026-04-27
+
+### New Features
+- **Local metrics endpoint** — Me Or Them can now serve live network metrics over a local HTTP server bound to 127.0.0.1 only (never exposed to the network). Enable it in Settings → General → Metrics Export. `GET /metrics` returns Prometheus text format (compatible with prometheus-node-exporter scrapers); `GET /metrics.json` returns the same data as JSON. Configurable port (1024–65535, default 9090). The server starts and stops immediately when toggled, and restarts automatically on port change.
+
+---
+
 ## v2.40.0 — 2026-04-27
 
 ### New Features
