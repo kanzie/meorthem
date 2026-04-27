@@ -1,13 +1,20 @@
 import Foundation
 
-struct PingResult {
-    let timestamp: Date
+public struct PingResult {
+    public let timestamp: Date
     /// Average RTT in milliseconds, nil if all packets lost
-    let rtt: Double?
+    public let rtt: Double?
     /// Packet loss 0–100
-    let lossPercent: Double
+    public let lossPercent: Double
     /// Jitter (std-dev of RTTs), nil if fewer than 2 samples
-    let jitter: Double?
+    public let jitter: Double?
 
-    var isReachable: Bool { rtt != nil }
+    public var isReachable: Bool { rtt != nil }
+
+    public init(timestamp: Date, rtt: Double?, lossPercent: Double, jitter: Double?) {
+        self.timestamp = timestamp
+        self.rtt = rtt
+        self.lossPercent = lossPercent
+        self.jitter = jitter
+    }
 }

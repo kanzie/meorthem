@@ -1,7 +1,7 @@
 import Foundation
 import Combine
 
-enum SpeedtestState {
+public enum SpeedtestState {
     case idle
     case running
     case completed(SpeedtestResult)
@@ -10,84 +10,124 @@ enum SpeedtestState {
 }
 
 @MainActor
-final class SpeedtestRunner: ObservableObject {
-    @Published private(set) var state: SpeedtestState = .idle
-    @Published private(set) var lastRunDate: Date? = {
+public final class SpeedtestRunner: ObservableObject {
+    @Published public private(set) var state: SpeedtestState = .idle
+    @Published public private(set) var lastRunDate: Date? = {
         let t = UserDefaults.standard.double(forKey: "speedtestLastRunDate")
         return t > 0 ? Date(timeIntervalSince1970: t) : nil
     }()
+    @Published public private(set) var lastResultSummary: String? = UserDefaults.standard.string(forKey: "speedtestLastResultSummary")
+    /// Non-nil while waiting between retry attempts: (current attempt, max attempts).
+    @Published public private(set) var retryAttempt: (current: Int, max: Int)? = nil
+
+    private static let maxRetries = 3
+    private static let retryDelay: UInt64 = 4_000_000_000 // 4 seconds in nanoseconds
 
     private var runningTask: Task<Void, Never>?
     private var runningProcess: Process?
 
-    func run() {
+    public init() {}
+
+    public func run() {
         if case .running = state { return }
         runningTask?.cancel()
         runningProcess?.terminate()
         runningProcess = nil
         state = .running
+        retryAttempt = nil
 
         runningTask = Task {
-            let result = await self.executeSpeedtest()
+            var lastResult: SpeedtestState = .failed("Unknown error")
+            for attempt in 1...Self.maxRetries {
+                if Task.isCancelled { return }
+                let result = await self.executeSpeedtest()
+                if case .failed(let msg) = result, self.isRetryable(message: msg), attempt < Self.maxRetries {
+                    self.retryAttempt = (attempt + 1, Self.maxRetries)
+                    try? await Task.sleep(nanoseconds: Self.retryDelay)
+                    self.retryAttempt = nil
+                    lastResult = result
+                    continue
+                }
+                lastResult = result
+                break
+            }
             if !Task.isCancelled {
-                self.state = result
-                if case .completed = result {
+                self.state = lastResult
+                self.retryAttempt = nil
+                if case .completed(let r) = lastResult {
                     let now = Date()
                     self.lastRunDate = now
                     UserDefaults.standard.set(now.timeIntervalSince1970,
                                               forKey: "speedtestLastRunDate")
+                    let summary = "↓\(r.downloadFormatted)  ↑\(r.uploadFormatted)  \(r.latencyFormatted)"
+                    self.lastResultSummary = summary
+                    UserDefaults.standard.set(summary, forKey: "speedtestLastResultSummary")
                 }
             }
         }
     }
 
-    func cancel() {
+    /// Returns true for transient failures that are worth retrying (SIGTERM / timeout).
+    private func isRetryable(message: String) -> Bool {
+        // Exit code 15 = SIGTERM (OS killed the process or our watchdog fired).
+        // "timed out" covers ProcessError.timeout from runAsync.
+        message.contains("Exit code 15") || message.lowercased().contains("timed out")
+    }
+
+    public func cancel() {
         runningTask?.cancel()
         runningProcess?.terminate()
         runningProcess = nil
         state = .idle
+        retryAttempt = nil
     }
 
-    var summaryText: String {
+    public var summaryText: String {
         switch state {
-        case .idle:               return speedResultLine()
-        case .running:            return "Running…"
+        case .idle:               return lastResultSummary ?? ""
+        case .running:
+            if let retry = retryAttempt {
+                return "Retrying (\(retry.current)/\(retry.max))…"
+            }
+            return "Running…"
         case .unavailable(let m): return m
         case .failed(let m):      return "Failed: \(m)"
         case .completed(let r):   return "↓\(r.downloadFormatted)  ↑\(r.uploadFormatted)  \(r.latencyFormatted)"
         }
     }
 
-    var lastCheckedText: String {
+    public var lastCheckedText: String {
         guard let date = lastRunDate else { return "Not Checked" }
-        let cal = Calendar.current
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-        let timeStr = formatter.string(from: date)
-        if cal.isDateInToday(date) {
+        let timeStr = Self._timeFormatter.string(from: date)
+        if Calendar.current.isDateInToday(date) {
             return "Last checked: Today \(timeStr)"
         } else {
-            let df = DateFormatter()
-            df.dateFormat = "MMM d"
-            return "Last checked: \(df.string(from: date)), \(timeStr)"
+            return "Last checked: \(Self._dateFormatter.string(from: date)), \(timeStr)"
         }
     }
+
+    private static let _timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f
+    }()
+
+    private static let _dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "MMM d"
+        return f
+    }()
 
     // MARK: - Private
 
-    private func speedResultLine() -> String {
-        // When idle with a prior result we may have lost it on restart — show "Not checked"
-        return "Not checked"
-    }
-
     private func executeSpeedtest() async -> SpeedtestState {
-        // Locate binary in app bundle
-        guard let binaryPath = Bundle.main.path(forResource: "speedtest", ofType: nil) else {
+        let binaryPath = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/MacOS/speedtest").path
+        guard FileManager.default.fileExists(atPath: binaryPath) else {
             return .unavailable("Speedtest binary not found")
         }
 
-        // Verify it is a real, non-empty binary
         do {
             try BinaryVerifier.verify(at: binaryPath)
         } catch let e as BinaryVerifier.Error {
@@ -96,7 +136,6 @@ final class SpeedtestRunner: ObservableObject {
             return .unavailable("Binary verification failed")
         }
 
-        // Ensure it's executable
         let fm = FileManager.default
         guard fm.isExecutableFile(atPath: binaryPath) else {
             return .unavailable("Speedtest binary is not executable")
@@ -104,7 +143,6 @@ final class SpeedtestRunner: ObservableObject {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: binaryPath)
-        // Args as array — no shell, no injection
         process.arguments = ["--format=json", "--accept-license", "--accept-gdpr"]
         self.runningProcess = process
 

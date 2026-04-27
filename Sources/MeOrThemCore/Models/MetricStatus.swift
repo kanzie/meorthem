@@ -1,14 +1,15 @@
-import AppKit
+import Foundation
 
 // MARK: - Network Fault Type
 
-enum NetworkFaultType: Equatable {
-    case none
-    case local
-    case isp
-    case mixed
+/// Describes the likely source of a detected network issue.
+public enum NetworkFaultType: Equatable {
+    case none           // connection is healthy
+    case local          // gateway unreachable — WiFi/router problem
+    case isp            // gateway OK but all external targets fail — ISP/WAN problem
+    case mixed          // some external targets fail — partial outage or routing issue
 
-    var displayLabel: String {
+    public var displayLabel: String {
         switch self {
         case .none:   return ""
         case .local:  return "Likely cause: local network / router"
@@ -20,24 +21,16 @@ enum NetworkFaultType: Equatable {
 
 // MARK: - Metric Status
 
-enum MetricStatus: Int, Comparable, CaseIterable {
+public enum MetricStatus: Int, Comparable, CaseIterable {
     case green  = 0
     case yellow = 1
     case red    = 2
 
-    static func < (lhs: MetricStatus, rhs: MetricStatus) -> Bool {
+    public static func < (lhs: MetricStatus, rhs: MetricStatus) -> Bool {
         lhs.rawValue < rhs.rawValue
     }
 
-    var color: NSColor {
-        switch self {
-        case .green:  return .systemGreen
-        case .yellow: return .systemYellow
-        case .red:    return .systemRed
-        }
-    }
-
-    var label: String {
+    public var label: String {
         switch self {
         case .green:  return "Good"
         case .yellow: return "Degraded"
@@ -46,7 +39,7 @@ enum MetricStatus: Int, Comparable, CaseIterable {
     }
 }
 
-extension MetricStatus {
+public extension MetricStatus {
     /// Evaluate a window of samples against thresholds using averages.
     /// Loss, latency, and jitter are each averaged independently over their
     /// respective sample windows, then compared to yellow/red thresholds.
@@ -81,14 +74,16 @@ extension MetricStatus {
     }
 }
 
-struct Thresholds: Codable, Equatable, Hashable {
-    // ── Alarm thresholds (tuned for video conferencing) ──────────────────────
-    var latencyYellowMs: Double = 60    // noticeable lag on calls
-    var latencyRedMs:    Double = 150   // severe call degradation
-    var lossYellowPct:   Double = 1     // video artifacts begin
-    var lossRedPct:      Double = 3     // calls frequently drop/freeze
-    var jitterYellowMs:  Double = 30    // audio glitches begin
-    var jitterRedMs:     Double = 80    // severe audio/video disruption
+public struct Thresholds: Codable, Equatable, Hashable, Sendable {
+    // Tuned for video conferencing: values where call quality starts to degrade
+    public var latencyYellowMs: Double = 60    // noticeable lag on calls
+    public var latencyRedMs:    Double = 150   // severe call degradation
+    public var lossYellowPct:   Double = 1     // video artifacts begin
+    public var lossRedPct:      Double = 3     // calls frequently drop/freeze
+    public var jitterYellowMs:  Double = 30    // audio glitches begin
+    public var jitterRedMs:     Double = 80    // severe audio/video disruption
 
-    static let `default` = Thresholds()
+    public init() {}
+
+    public static let `default` = Thresholds()
 }

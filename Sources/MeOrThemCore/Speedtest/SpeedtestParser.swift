@@ -1,11 +1,11 @@
 import Foundation
 
-enum SpeedtestParser {
-    enum Error: Swift.Error, LocalizedError {
+public enum SpeedtestParser {
+    public enum Error: Swift.Error, LocalizedError {
         case invalidJSON(String)
         case missingField(String)
 
-        var errorDescription: String? {
+        public var errorDescription: String? {
             switch self {
             case .invalidJSON(let s):  return "Speedtest: invalid JSON — \(s)"
             case .missingField(let f): return "Speedtest: missing field '\(f)'"
@@ -14,7 +14,7 @@ enum SpeedtestParser {
     }
 
     /// Parses Ookla speedtest CLI JSON output (--format=json).
-    static func parse(_ json: String) throws -> SpeedtestResult {
+    public static func parse(_ json: String) throws -> SpeedtestResult {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw Error.invalidJSON(json.prefix(200).string)

@@ -1,4 +1,5 @@
 import AppKit
+import MeOrThemCore
 
 /// Stateless utility that rebuilds an NSMenu from current AppEnvironment state.
 /// Called in NSMenuDelegate.menuWillOpen — runs synchronously, O(targets) cost.

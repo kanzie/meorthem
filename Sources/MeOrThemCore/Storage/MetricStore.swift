@@ -3,60 +3,265 @@ import Combine
 
 // 6h at 5s poll = 4,320 samples per target — enough for export/reports
 private let kPingHistoryCapacity = 4_320
-// 1h at 5s — WiFi stats change rarely
-private let kWifiHistoryCapacity =    720
+// 1h of WiFi snapshots (changes rarely — RSSI, channel, SSID)
+private let kWifiHistoryCapacity = 720
 
 @MainActor
-final class MetricStore: ObservableObject {
+public final class MetricStore: ObservableObject {
 
-    // MARK: - Published snapshots
-    @Published private(set) var latestPing: [UUID: PingResult] = [:]
-    @Published private(set) var latestWifi: WiFiSnapshot?
-    @Published private(set) var overallStatus: MetricStatus = .green
-    @Published private(set) var networkFaultType: NetworkFaultType = .none
+    // MARK: - Published snapshots (drive icon + menu updates)
+    @Published public private(set) var latestPing: [UUID: PingResult] = [:]
+    @Published public private(set) var latestWifi: WiFiSnapshot?
+    @Published public private(set) var overallStatus: MetricStatus = .green
+    @Published public private(set) var networkFaultType: NetworkFaultType = .none
 
-    // MARK: - VPN state
-    /// Name of the active VPN/tunnel interface, e.g. "utun3", or nil if none is detected.
-    /// Updated on each session open and approximately once per minute during a session.
-    @Published private(set) var vpnInterface: String? = nil
+    // MARK: - VPN state (set by AppEnvironment on session open and ~once per minute)
+    @Published public private(set) var vpnInterface: String? = nil
 
-    func recordVPNInterface(_ name: String?) { vpnInterface = name }
+    public func recordVPNInterface(_ name: String?) { vpnInterface = name }
 
-    // MARK: - Gateway ping
-    private(set) var latestGatewayPing: PingResult?
+    // MARK: - Gateway ping (set by MonitoringEngine each tick)
+    public private(set) var latestGatewayPing: PingResult?
+    @Published public private(set) var latestGatewayIP: String?
 
-    // MARK: - History
-    private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]
-    private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)
+    // MARK: - Sleep/wake context (set by AppEnvironment on wake events)
+    /// Timestamp of the last system wake event. Used to annotate post-wake incidents.
+    public var lastWakeDate: Date? = nil
+
+    // MARK: - Availability (uptime percentage, updated hourly by AppEnvironment)
+    @Published public private(set) var availability24h: Double? = nil
+    @Published public private(set) var availability7d:  Double? = nil
+    @Published public private(set) var availability30d: Double? = nil
+
+    public func recordAvailability(h24: Double?, d7: Double?, d30: Double?) {
+        availability24h = h24
+        availability7d  = d7
+        availability30d = d30
+    }
+
+    // MARK: - Current network session (set by AppEnvironment on WiFi fingerprint change)
+    public var currentSessionID: UUID?
+    /// ISP/ASN name for the current session, resolved asynchronously at session open. nil until resolved.
+    @Published public private(set) var currentSessionISPName: String? = nil
+
+    public func recordSessionISP(_ name: String?) { currentSessionISPName = name }
+
+    // MARK: - History (read by export + sparklines)
+    public private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]
+    public private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)
     private var statusHistory: CircularBuffer<MetricStatus> = CircularBuffer(capacity: 5)
 
-    // MARK: - Connection history (last 5 degradation events, persisted)
-    @Published private(set) var connectionHistory: [ConnectionEvent] = []
+    // MARK: - DNS resolver summary (drives menu tag 6; no SQLite reads)
+
+    public struct DNSSummary {
+        /// Name of the fastest-responding enabled resolver this window.
+        public let bestResolverName: String
+        /// Trimmed-mean RTT of the best resolver's last 10 samples (ms).
+        public let bestRTTMs: Double
+        /// Fraction of last-10 samples that timed out across all enabled resolvers.
+        public let failRate: Double
+        /// Count of enabled resolvers that responded this window.
+        public let respondingCount: Int
+        /// Total enabled resolver count.
+        public let totalCount: Int
+        /// Derived status colour.
+        public let status: MetricStatus
+    }
+
+    /// Most-recently computed DNS summary. nil until the first probe round completes.
+    @Published public private(set) var dnsSummary: DNSSummary?
+
+    /// Rolling 10-sample RTT buffer per resolver IP (nil entries = timeout/failure).
+    private var dnsRollingBuffer: [String: [Double?]] = [:]
+
+    // MARK: - Connection history (last 20 degradation events, backed by SQLite)
+    @Published public private(set) var connectionHistory: [ConnectionEvent] = []
     private var previousOverallStatus: MetricStatus = .green
-    private static let kMaxConnectionEvents = 5
+    // In-memory cap for menu display; SQLite retains full history per incidentRetentionDays.
+    private static let kMaxConnectionEvents = 20
     private static let kHistoryUDKey = "metricStore.connectionHistory"
 
+    // MARK: - Settings reference for threshold evaluation
     private let settings: AppSettings
+    private let sqliteStore: SQLiteStore?
 
-    init(settings: AppSettings) {
+    /// Called on every successful ping record — used by LogExporter for append-mode CSV.
+    public var onPingRecorded: ((PingResult, UUID) -> Void)?
+    /// Called on every WiFi snapshot — used by LogExporter for append-mode CSV.
+    public var onWiFiRecorded: ((WiFiSnapshot) -> Void)?
+
+    public init(settings: AppSettings, sqliteStore: SQLiteStore? = nil) {
         self.settings = settings
+        self.sqliteStore = sqliteStore
         loadConnectionHistory()
     }
 
-    // MARK: - Write
+    // MARK: - Write methods (called from MonitoringEngine)
 
-    func record(result: PingResult, for targetID: UUID) {
+    public func record(result: PingResult, for targetID: UUID) {
         latestPing[targetID] = result
-        pingHistory[targetID, default: CircularBuffer(capacity: kPingHistoryCapacity)].append(result)
+        if pingHistory[targetID] == nil {
+            pingHistory[targetID] = CircularBuffer(capacity: kPingHistoryCapacity)
+        }
+        pingHistory[targetID]!.append(result)
         recomputeOverallStatus()
+
+        // Notify observers (e.g. LogExporter for append-mode CSV).
+        onPingRecorded?(result, targetID)
+
+        // Persist to SQLite — look up label/host from settings or fall back to the ID string.
+        if let db = sqliteStore {
+            let target = settings.pingTargets.first(where: { $0.id == targetID })
+            let label  = target?.label ?? (targetID == PingTarget.gatewayID ? "Gateway" : targetID.uuidString)
+            let host   = target?.host  ?? ""
+            db.insertPing(timestamp:   result.timestamp,
+                          rtt:         result.rtt,
+                          lossPercent: result.lossPercent,
+                          jitter:      result.jitter,
+                          targetID:    targetID,
+                          targetLabel: label,
+                          host:        host,
+                          sessionID:   currentSessionID)
+        }
     }
 
-    func recordWiFi(_ snapshot: WiFiSnapshot?) {
+    public func recordWiFi(_ snapshot: WiFiSnapshot?) {
         latestWifi = snapshot
-        if let s = snapshot { wifiHistory.append(s) }
+        if let s = snapshot {
+            wifiHistory.append(s)
+            onWiFiRecorded?(s)
+            sqliteStore?.insertWiFi(timestamp:     s.timestamp,
+                                    rssi:          s.rssi,
+                                    noise:         s.noise,
+                                    snr:           s.snr,
+                                    channel:       s.channelNumber,
+                                    bandGHz:       s.channelBandGHz,
+                                    txRateMbps:    s.txRateMbps,
+                                    phyMode:       s.phyMode,
+                                    interfaceName: s.interfaceName,
+                                    ipAddress:     s.ipAddress,
+                                    routerIP:      s.routerIP,
+                                    sessionID:     currentSessionID)
+        }
     }
 
-    func recordGatewayPing(_ result: PingResult?) {
+    /// Persists a single interface error delta sample for the current session.
+    /// All values are deltas (change since the previous sample), clamped to ≥ 0.
+    public func recordInterfaceDelta(errorsIn: Int64, errorsOut: Int64, dropsIn: Int64, iface: String) {
+        sqliteStore?.insertInterfaceErrors(timestamp: Date(),
+                                           iface: iface,
+                                           errorsIn: errorsIn,
+                                           errorsOut: errorsOut,
+                                           dropsIn: dropsIn,
+                                           sessionID: currentSessionID)
+    }
+
+    /// Persists a DNS resolution sample for the current session.
+    public func recordDNS(resolveMs: Double?, hostname: String) {
+        sqliteStore?.insertDNS(timestamp: Date(),
+                               hostname: hostname,
+                               resolveMs: resolveMs,
+                               sessionID: currentSessionID)
+    }
+
+    /// Persists an MTU probe result for the current session.
+    public func recordMTUResult(host: String, payloadBytes: Int, reachable: Bool, rttMs: Double?) {
+        sqliteStore?.insertMTUCheck(timestamp: Date(),
+                                    host: host,
+                                    payloadBytes: payloadBytes,
+                                    reachable: reachable,
+                                    rttMs: rttMs,
+                                    sessionID: currentSessionID)
+    }
+
+    /// Record one resolver probe result. Updates the rolling buffer + summary and
+    /// persists to SQLite. Call from MonitoringEngine after each probe round.
+    public func recordDNSResolverSample(resolver: DNSResolver, resolveMs: Double?, rcode: Int?) {
+        // Update rolling 10-sample buffer.
+        let ip = resolver.ip.isEmpty ? resolver.name : resolver.ip
+        var buf = dnsRollingBuffer[ip] ?? []
+        buf.append(resolveMs)
+        if buf.count > 10 { buf.removeFirst(buf.count - 10) }
+        dnsRollingBuffer[ip] = buf
+
+        // Persist to SQLite.
+        sqliteStore?.insertDNSResolverSample(
+            timestamp:    Date(),
+            resolverIP:   ip,
+            resolverName: resolver.name,
+            queryHost:    "example.com",
+            resolveMs:    resolveMs,
+            rcode:        rcode,
+            sessionID:    currentSessionID)
+    }
+
+    /// Recompute `dnsSummary` from the current rolling buffers.
+    /// Call after the full probe round (all resolver results recorded).
+    public func refreshDNSSummary(enabledResolvers: [(name: String, ip: String)]) {
+        guard !enabledResolvers.isEmpty else { dnsSummary = nil; return }
+
+        var bestName  = ""
+        var bestRTT   = Double.infinity
+        var totalFail = 0
+        var totalSamples = 0
+        var respondingCount = 0
+
+        for r in enabledResolvers {
+            let key = r.ip.isEmpty ? r.name : r.ip
+            let buf = dnsRollingBuffer[key] ?? []
+            guard !buf.isEmpty else { continue }
+
+            let successes = buf.compactMap { $0 }
+            let failures  = buf.count - successes.count
+            totalFail    += failures
+            totalSamples += buf.count
+            if !successes.isEmpty { respondingCount += 1 }
+
+            if let mean = trimmedMeanDNS(successes), mean < bestRTT {
+                bestRTT  = mean
+                bestName = r.name
+            }
+        }
+
+        let failRate: Double = totalSamples > 0 ? Double(totalFail) / Double(totalSamples) : 0
+
+        // Derive colour thresholds per design:
+        // Green:  avg < 80 ms AND 0% failure
+        // Yellow: avg 80–200 ms OR 0–30% failure
+        // Red:    avg > 200 ms OR > 30% failure OR all resolvers timing out
+        let status: MetricStatus
+        if bestRTT == .infinity || failRate > 0.30 {
+            status = .red
+        } else if bestRTT > 200 || failRate > 0 || bestRTT > 80 {
+            status = .yellow
+        } else {
+            status = .green
+        }
+
+        dnsSummary = DNSSummary(
+            bestResolverName: bestName.isEmpty ? "DNS" : bestName,
+            bestRTTMs:        bestRTT == .infinity ? 0 : bestRTT,
+            failRate:         failRate,
+            respondingCount:  respondingCount,
+            totalCount:       enabledResolvers.count,
+            status:           status)
+    }
+
+    /// Trimmed mean for DNS RTT samples: drop bottom and top 10% (min 1 each) when ≥4 samples.
+    private func trimmedMeanDNS(_ values: [Double]) -> Double? {
+        guard !values.isEmpty else { return nil }
+        guard values.count >= 4 else {
+            return values.reduce(0, +) / Double(values.count)
+        }
+        let sorted     = values.sorted()
+        let trimCount  = max(1, values.count / 10)
+        let trimmed    = sorted.dropFirst(trimCount).dropLast(trimCount)
+        guard !trimmed.isEmpty else { return sorted[sorted.count / 2] }
+        return trimmed.reduce(0, +) / Double(trimmed.count)
+    }
+
+    public func recordGatewayPing(_ result: PingResult?, gatewayIP: String? = nil) {
+        if let ip = gatewayIP { latestGatewayIP = ip }
         latestGatewayPing = result
         recomputeFaultType()
     }
@@ -64,53 +269,55 @@ final class MetricStore: ObservableObject {
     // MARK: - System load
 
     /// Most-recent sampled CPU utilisation fraction (0–1). Updated each tick before pings run.
-    @Published private(set) var currentSystemLoad: Double = 0
-    private var recentSystemLoads: [Double] = []
-    private let kSystemLoadWindow = 3          // ~15 s at 5 s poll
+    @Published public private(set) var currentSystemLoad: Double = 0
+    private var recentSystemLoads = CircularBuffer<Double>(capacity: 3)   // ~15 s at 5 s poll
 
     /// Called by MonitoringEngine at the start of every tick with the delta CPU fraction.
-    func recordSystemLoad(_ fraction: Double) {
+    public func recordSystemLoad(_ fraction: Double) {
         currentSystemLoad = fraction
         recentSystemLoads.append(fraction)
-        if recentSystemLoads.count > kSystemLoadWindow { recentSystemLoads.removeFirst() }
     }
 
     private var averageRecentSystemLoad: Double {
-        guard !recentSystemLoads.isEmpty else { return 0 }
-        return recentSystemLoads.reduce(0, +) / Double(recentSystemLoads.count)
+        let all = recentSystemLoads.last(recentSystemLoads.count)
+        guard !all.isEmpty else { return 0 }
+        return all.reduce(0, +) / Double(all.count)
     }
 
     // MARK: - Derived
 
-    func effectiveStatus(for targetID: UUID) -> MetricStatus {
+    /// Returns the window-averaged status for a target.
+    public func effectiveStatus(for targetID: UUID) -> MetricStatus {
         windowedStatus(for: targetID)
     }
 
-    func latencyHistory(for targetID: UUID, last n: Int = 60) -> [Double] {
+    public func latencyHistory(for targetID: UUID, last n: Int = 60) -> [Double] {
         pingHistory[targetID]?.last(n).compactMap(\.rtt) ?? []
     }
 
-    func lossHistory(for targetID: UUID, last n: Int = 60) -> [Double] {
+    public func lossHistory(for targetID: UUID, last n: Int = 60) -> [Double] {
         pingHistory[targetID]?.last(n).map(\.lossPercent) ?? []
     }
 
-    func sparklineData(for targetID: UUID, last n: Int = 12) -> [Double] {
+    /// Sparkline data: last N RTT values for a target (nil = timeout replaced by 0 for display).
+    public func sparklineData(for targetID: UUID, last n: Int = 12) -> [Double] {
         pingHistory[targetID]?.last(n).map { $0.rtt ?? 0 } ?? []
     }
 
-    func recentOverallStatuses(last n: Int = 5) -> [MetricStatus] {
+    /// Returns the last N overall status values in chronological order (oldest first).
+    public func recentOverallStatuses(last n: Int = 5) -> [MetricStatus] {
         statusHistory.last(n)
     }
 
     // MARK: - Private
 
     /// Returns the window-averaged status for a target.
+    /// Uses per-target threshold override when set, otherwise falls back to global thresholds.
     /// Each metric is averaged over its configured evaluation window, expressed as
     /// sample count = ceil(windowSecs / pollIntervalSecs). This naturally filters
     /// brief single-poll spikes (AWDL, roaming) without needing a separate debounce.
     private func windowedStatus(for targetID: UUID) -> MetricStatus {
         guard let history = pingHistory[targetID] else { return .red }
-        // Use per-target threshold override when set, otherwise fall back to global thresholds.
         let t    = settings.pingTargets.first(where: { $0.id == targetID })?.thresholdOverride
                    ?? settings.thresholds
         let poll = settings.pollIntervalSecs
@@ -136,12 +343,10 @@ final class MetricStore: ObservableObject {
             effectiveStatuses[targetID] = windowedStatus(for: targetID)
         }
 
-        // Overall status:
-        // - Targets with per-target threshold overrides are evaluated individually.
-        //   Their status feeds directly into the worst-case without participating in the
-        //   trimmed mean (overrides are intentional, not outliers to be discarded).
-        // - Targets without overrides use the global trimmed-mean approach (prevents an
-        //   outlier target from dominating when ≥3 non-override targets are present).
+        // Targets with per-target threshold overrides are evaluated individually;
+        // their status feeds directly into the worst-case without participating in the
+        // trimmed mean (overrides are intentional, not outliers to be discarded).
+        // Targets without overrides use the global trimmed-mean approach.
         let overrideTargetIDs = Set(settings.pingTargets
             .filter { $0.thresholdOverride != nil }
             .map(\.id))
@@ -152,7 +357,6 @@ final class MetricStore: ObservableObject {
             .max() ?? .green
 
         let globalWorst = trimmedMeanStatus(excluding: overrideTargetIDs)
-
         let worst = max(overrideWorst, globalWorst)
 
         let prev = previousOverallStatus
@@ -166,7 +370,6 @@ final class MetricStore: ObservableObject {
         } else if prev != .green && worst == .green {
             closeActiveConnectionEvent()
         } else if prev != .green && worst != .green && prev != worst {
-            // Severity escalated or de-escalated while still degraded — update active event
             updateActiveEventSeverity(worst)
         }
 
@@ -177,95 +380,111 @@ final class MetricStore: ObservableObject {
 
     private func openConnectionEvent(severity: MetricStatus) {
         let cause = computeDegradationCause()
-        // Close any lingering open event (shouldn't normally exist)
         if let idx = connectionHistory.firstIndex(where: { $0.isActive }) {
             connectionHistory[idx].endTime = Date()
         }
         let event = ConnectionEvent(severity: severity, cause: cause)
         connectionHistory.insert(event, at: 0)
-        if connectionHistory.count > Self.kMaxConnectionEvents {
-            connectionHistory.removeLast()
-        }
+        if connectionHistory.count > Self.kMaxConnectionEvents { connectionHistory.removeLast() }
         saveConnectionHistory()
+        sqliteStore?.openIncident(id: event.id, severityRaw: severity.rawValue,
+                                  cause: cause, startTime: event.startTime)
     }
 
     private func closeActiveConnectionEvent() {
         guard let idx = connectionHistory.firstIndex(where: { $0.isActive }) else { return }
+        let event = connectionHistory[idx]
         connectionHistory[idx].endTime = Date()
         saveConnectionHistory()
+        sqliteStore?.closeIncident(id: event.id, endTime: Date(),
+                                   peakSeverityRaw: event.severityRaw)
     }
 
     private func updateActiveEventSeverity(_ newSeverity: MetricStatus) {
-        // Severity changed while degraded (e.g. yellow→red). We keep the original event
-        // and just update its severity so the dot reflects the worst seen.
         guard let idx = connectionHistory.firstIndex(where: { $0.isActive }),
               newSeverity.rawValue > connectionHistory[idx].severityRaw else { return }
-        let existing = connectionHistory[idx]
-        connectionHistory[idx] = ConnectionEvent(severity: newSeverity,
-                                                 startTime: existing.startTime,
-                                                 cause: existing.cause)
+        let e = connectionHistory[idx]
+        connectionHistory[idx] = ConnectionEvent(severity: newSeverity, startTime: e.startTime, cause: e.cause)
         saveConnectionHistory()
+        sqliteStore?.updateIncidentSeverity(id: e.id, peakSeverityRaw: newSeverity.rawValue)
     }
 
     private func computeDegradationCause() -> String {
         let t = settings.thresholds
         var parts: [String] = []
+        let ids = latestPing.keys.filter { $0 != PingTarget.gatewayID }
 
-        let nonGatewayIDs = latestPing.keys.filter { $0 != PingTarget.gatewayID }
-
-        let losses = nonGatewayIDs.map { latestPing[$0]?.lossPercent ?? 0 }
+        let losses = ids.map { latestPing[$0]?.lossPercent ?? 0 }
         if !losses.isEmpty {
             let avg = losses.reduce(0, +) / Double(losses.count)
-            if avg >= t.lossYellowPct {
-                parts.append(String(format: "packet loss (%.1f%%)", avg))
-            }
+            if avg >= t.lossYellowPct { parts.append(String(format: "packet loss (%.1f%%)", avg)) }
         }
-
-        let rtts = nonGatewayIDs.compactMap { latestPing[$0]?.rtt }
+        let rtts = ids.compactMap { latestPing[$0]?.rtt }
         if !rtts.isEmpty {
             let avg = rtts.reduce(0, +) / Double(rtts.count)
-            if avg >= t.latencyYellowMs {
-                parts.append(String(format: "high latency (%.0fms)", avg))
-            }
+            if avg >= t.latencyYellowMs { parts.append(String(format: "high latency (%.0fms)", avg)) }
         }
-
-        let jitters = nonGatewayIDs.compactMap { latestPing[$0]?.jitter }
+        let jitters = ids.compactMap { latestPing[$0]?.jitter }
         if !jitters.isEmpty {
             let avg = jitters.reduce(0, +) / Double(jitters.count)
-            if avg >= t.jitterYellowMs {
-                parts.append(String(format: "high jitter (%.0fms)", avg))
-            }
+            if avg >= t.jitterYellowMs { parts.append(String(format: "high jitter (%.0fms)", avg)) }
         }
-
-        // Annotate with system load if CPU was high when degradation started — the user's
-        // machine may simply be resource-constrained rather than the network being bad.
+        // Annotate with system load if CPU was high when degradation started.
         let avgCPU = averageRecentSystemLoad
         if avgCPU >= 0.75 {
             parts.append(String(format: "high system load (%.0f%%)", avgCPU * 100))
         }
 
-        return parts.isEmpty ? "network degradation" : parts.joined(separator: ", ")
+        var cause = parts.isEmpty ? "network degradation" : parts.joined(separator: ", ")
+        // Tag incidents that begin within 90 seconds of a system wake event.
+        if let wake = lastWakeDate, Date().timeIntervalSince(wake) <= 90 {
+            cause += " (post-wake)"
+        }
+        return cause
     }
 
-    func clearConnectionHistory() {
+    public func clearConnectionHistory() {
         connectionHistory.removeAll()
         UserDefaults.standard.removeObject(forKey: Self.kHistoryUDKey)
+        sqliteStore?.clearAllIncidents()
     }
 
     private static let _historyEncoder = JSONEncoder()
 
+    /// Write-through to UserDefaults as a fast-load cache; SQLite is the authoritative store.
     private func saveConnectionHistory() {
-        if let data = try? Self._historyEncoder.encode(connectionHistory) {
+        if let data = try? Self._historyEncoder.encode(Array(connectionHistory.prefix(Self.kMaxConnectionEvents))) {
             UserDefaults.standard.set(data, forKey: Self.kHistoryUDKey)
         }
     }
 
+    /// Load on launch: prefer SQLite (full fidelity); fall back to UserDefaults cache.
     private func loadConnectionHistory() {
+        if let db = sqliteStore {
+            let rows = db.recentIncidents(limit: Self.kMaxConnectionEvents)
+            connectionHistory = rows.map { row in
+                var event = ConnectionEvent(id: row.id,
+                                            severityRaw: row.peakSeverityRaw,
+                                            startTime: row.startedAt,
+                                            cause: row.cause,
+                                            endTime: row.endedAt)
+                // Close any event left open from a previous session, and persist the closure
+                // to SQLite so Network History (which reads SQLite directly) shows it as ended.
+                if event.isActive {
+                    let closeTime = Date()
+                    event.endTime = closeTime
+                    db.closeIncident(id: event.id, endTime: closeTime,
+                                     peakSeverityRaw: row.peakSeverityRaw)
+                }
+                return event
+            }
+            return
+        }
+        // No SQLite available — fall back to UserDefaults cache
         guard let data = UserDefaults.standard.data(forKey: Self.kHistoryUDKey),
               let events = try? JSONDecoder().decode([ConnectionEvent].self, from: data)
         else { return }
         connectionHistory = events
-        // Close any event left open from a previous session (app was force-quit during degradation)
         if let idx = connectionHistory.firstIndex(where: { $0.isActive }) {
             connectionHistory[idx].endTime = Date()
         }
@@ -330,7 +549,10 @@ final class MetricStore: ObservableObject {
     /// Called from recomputeOverallStatus (statuses pre-computed) or standalone from recordGatewayPing.
     private func recomputeFaultType(using precomputed: [UUID: MetricStatus]? = nil) {
         guard overallStatus != .green else { networkFaultType = .none; return }
-        guard let gw = latestGatewayPing else { networkFaultType = .none; return }
+        guard let gw = latestGatewayPing else {
+            networkFaultType = .none
+            return
+        }
 
         let gatewayOk = gw.lossPercent < settings.thresholds.lossYellowPct
         // Use pre-computed statuses when available; otherwise compute fresh (gateway-only path).
@@ -342,24 +564,28 @@ final class MetricStore: ObservableObject {
                 .filter { $0 != PingTarget.gatewayID }
                 .map { effectiveStatus(for: $0) }
         }
-        let allFailed = !statuses.isEmpty && statuses.allSatisfy { $0 == .red }
+        let allExternalFailed = !statuses.isEmpty && statuses.allSatisfy { $0 == .red }
 
         if !gatewayOk {
             networkFaultType = .local
-        } else if allFailed {
+        } else if allExternalFailed {
             networkFaultType = .isp
         } else {
             networkFaultType = .mixed
         }
     }
 
-    // MARK: - Summary
+    // MARK: - Summary for clipboard report
 
-    private static let _isoFormatter = ISO8601DateFormatter()
+    private static let _localFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .medium
+        return f
+    }()
 
-    func summaryText(targets: [PingTarget]) -> String {
-        let df = MetricStore._isoFormatter
-        var lines = ["Me Or Them Network Report — \(df.string(from: Date()))"]
+    public func summaryText(targets: [PingTarget]) -> String {
+        var lines = ["Me Or Them Network Report — \(Self._localFormatter.string(from: Date()))"]
         lines.append("")
         lines.append("PING TARGETS")
         for target in targets {
@@ -369,9 +595,10 @@ final class MetricStore: ObservableObject {
                 lines.append("    —")
             } else {
                 for r in recent {
+                    let ts     = Self._localFormatter.string(from: r.timestamp)
                     let rttStr = r.rtt.map { String(format: "%.1f ms", $0) } ?? "timeout"
                     let jitStr = r.jitter.map { String(format: "±%.1f ms", $0) } ?? "n/a"
-                    lines.append("    \(rttStr)  loss \(String(format: "%.1f%%", r.lossPercent))  jitter \(jitStr)")
+                    lines.append("    [\(ts)]  \(rttStr)  loss \(String(format: "%.1f%%", r.lossPercent))  jitter \(jitStr)")
                 }
             }
         }
@@ -379,9 +606,22 @@ final class MetricStore: ObservableObject {
         if let w = latestWifi {
             lines.append("WI-FI")
             lines.append("  RSSI:    \(w.rssi) dBm  (\(w.rssiQuality))")
+            lines.append("  SNR:     \(w.snr) dB")
+            lines.append("  Channel: \(w.channelNumber)  (\(w.channelBandGHz, format: "%.1f") GHz)")
+            lines.append("  TX Rate: \(String(format: "%.0f Mbps", w.txRateMbps))")
         }
         lines.append("")
         lines.append("Overall status: \(overallStatus.label)")
+        if networkFaultType != .none {
+            lines.append(networkFaultType.displayLabel)
+        }
         return lines.joined(separator: "\n")
+    }
+}
+
+// MARK: - Format helper
+private extension DefaultStringInterpolation {
+    mutating func appendInterpolation(_ value: Double, format: String) {
+        appendLiteral(String(format: format, value))
     }
 }

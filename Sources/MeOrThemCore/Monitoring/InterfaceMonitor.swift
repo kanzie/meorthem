@@ -4,19 +4,19 @@ import Foundation
 /// Interface errors at the driver level (as opposed to TCP retransmissions) indicate
 /// RF interference, hardware faults, or driver buffer overflows.
 /// Blocking — call from a background thread or detached Task.
-enum InterfaceMonitor {
+public enum InterfaceMonitor {
 
-    struct Counters {
-        let iface: String
-        let errorsIn:  UInt64   // cumulative input (receive) errors
-        let errorsOut: UInt64   // cumulative output (transmit) errors
-        let dropsIn:   UInt64   // cumulative input drops (driver buffer full)
-        let packetsIn: UInt64   // cumulative input packets
+    public struct Counters {
+        public let iface: String
+        public let errorsIn:  UInt64   // cumulative input (receive) errors
+        public let errorsOut: UInt64   // cumulative output (transmit) errors
+        public let dropsIn:   UInt64   // cumulative input drops (driver buffer full)
+        public let packetsIn: UInt64   // cumulative input packets
     }
 
     /// Read cumulative interface counters for the named interface via `netstat -i -n`.
     /// Returns `nil` if the interface is not found or the process cannot be launched.
-    static func readCounters(for interfaceName: String) -> Counters? {
+    public static func readCounters(for interfaceName: String) -> Counters? {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/sbin/netstat")
         task.arguments = ["-i", "-n"]

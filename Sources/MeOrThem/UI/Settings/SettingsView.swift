@@ -1,4 +1,5 @@
 import SwiftUI
+import MeOrThemCore
 
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case general    = "General"

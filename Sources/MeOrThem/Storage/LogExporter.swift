@@ -1,4 +1,5 @@
 import Foundation
+import MeOrThemCore
 import os.log
 
 private let log = Logger(subsystem: "com.meorthem", category: "LogExporter")

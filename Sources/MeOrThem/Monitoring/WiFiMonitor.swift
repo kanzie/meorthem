@@ -2,6 +2,7 @@ import Foundation
 import CoreWLAN
 import Combine
 import SystemConfiguration
+import MeOrThemCore
 
 /// Reads current WiFi interface stats synchronously (always called on @MainActor).
 enum WiFiMonitor {

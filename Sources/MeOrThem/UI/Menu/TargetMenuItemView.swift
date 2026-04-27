@@ -1,4 +1,5 @@
 import AppKit
+import MeOrThemCore
 
 /// Custom NSView for a per-target row inside the NSMenu.
 final class TargetMenuItemView: NSView {

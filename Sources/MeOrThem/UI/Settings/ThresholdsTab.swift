@@ -1,4 +1,5 @@
 import SwiftUI
+import MeOrThemCore
 
 struct ThresholdsTab: View {
     @EnvironmentObject private var settings: AppSettings

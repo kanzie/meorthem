@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import MeOrThemCore
 
 @MainActor
 final class AlertManager {

@@ -6,19 +6,19 @@ import Foundation
 /// Optimization notes:
 /// - `writeIndex` is kept bounded to `[0, capacity)` — avoids modulo in append.
 /// - `toArray()` and `last()` use two-slice copy to avoid per-element modulo.
-struct CircularBuffer<T> {
+public struct CircularBuffer<T> {
     private var storage: ContiguousArray<T?>
     private var writeIndex: Int = 0
-    private(set) var count: Int = 0
-    let capacity: Int
+    public private(set) var count: Int = 0
+    public let capacity: Int
 
-    init(capacity: Int) {
+    public init(capacity: Int) {
         precondition(capacity > 0, "Capacity must be positive")
         self.capacity = capacity
         storage = ContiguousArray(repeating: nil, count: capacity)
     }
 
-    mutating func append(_ element: T) {
+    public mutating func append(_ element: T) {
         storage[writeIndex] = element
         writeIndex += 1
         if writeIndex == capacity { writeIndex = 0 }   // bounds-wrap: cheaper than % on every call
@@ -26,7 +26,7 @@ struct CircularBuffer<T> {
     }
 
     /// Returns all elements in chronological order (oldest → newest).
-    func toArray() -> [T] {
+    public func toArray() -> [T] {
         guard count > 0 else { return [] }
         if count < capacity {
             // Buffer hasn't wrapped yet — data lives in storage[0..<count]
@@ -45,7 +45,7 @@ struct CircularBuffer<T> {
     }
 
     /// Last N elements in chronological order (oldest first within the N).
-    func last(_ n: Int) -> [T] {
+    public func last(_ n: Int) -> [T] {
         guard count > 0 else { return [] }
         let take = min(n, count)
         // Start slot: with bounded writeIndex, only one capacity addition needed.
@@ -63,13 +63,13 @@ struct CircularBuffer<T> {
         return result
     }
 
-    var latest: T? {
+    public var latest: T? {
         guard count > 0 else { return nil }
         let idx = writeIndex == 0 ? capacity - 1 : writeIndex - 1
         return storage[idx]
     }
 
-    mutating func clear() {
+    public mutating func clear() {
         storage = ContiguousArray(repeating: nil, count: capacity)
         writeIndex = 0
         count = 0

@@ -1,4 +1,5 @@
 import AppKit
+import MeOrThemCore
 
 enum StatusBarIconRenderer {
     private static let iconSize = NSSize(width: 18, height: 18)

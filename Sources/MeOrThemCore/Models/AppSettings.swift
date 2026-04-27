@@ -1,40 +1,47 @@
 import Foundation
 import Combine
 
-enum ColorTheme: String, Codable, CaseIterable {
+public enum ColorTheme: String, Codable, CaseIterable, Sendable {
     case system = "System"
     case light  = "Light"
     case dark   = "Dark"
 }
 
+/// Controls how monitoring adapts when the Mac is running on battery power.
+public enum BatteryBehavior: String, Codable, CaseIterable, Sendable {
+    case normal  = "Normal (no change)"
+    case reduced = "Reduced (2× slower)"
+    case paused  = "Pause monitoring"
+}
+
 @MainActor
-final class AppSettings: ObservableObject {
-    static let shared = AppSettings()
+public final class AppSettings: ObservableObject {
+    public static let shared = AppSettings()
 
     // MARK: - Ping targets
-    @Published var pingTargets: [PingTarget] {
+    @Published public var pingTargets: [PingTarget] {
         didSet { encode(pingTargets, forKey: "pingTargets") }
     }
 
     // MARK: - Thresholds
-    @Published var thresholds: Thresholds {
+    @Published public var thresholds: Thresholds {
         didSet { encode(thresholds, forKey: "thresholds") }
     }
 
     // MARK: - General
-    @Published var alwaysShowBarChart: Bool {
+    @Published public var alwaysShowBarChart: Bool {
         didSet { UserDefaults.standard.set(alwaysShowBarChart, forKey: "alwaysShowBarChart") }
     }
 
-    @Published var colorTheme: ColorTheme {
+    @Published public var colorTheme: ColorTheme {
         didSet { UserDefaults.standard.set(colorTheme.rawValue, forKey: "colorTheme") }
     }
 
-    @Published var launchAtLogin: Bool {
+    @Published public var launchAtLogin: Bool {
         didSet { UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin") }
     }
 
-    @Published var pollIntervalSecs: Double {
+    @Published public var pollIntervalSecs: Double {
         didSet {
             UserDefaults.standard.set(pollIntervalSecs, forKey: "pollIntervalSecs")
             // Evaluation windows must always be at least one poll interval long.
@@ -48,80 +55,148 @@ final class AppSettings: ObservableObject {
     // Each metric is averaged over its window before being compared to thresholds.
     // Defaults: latency 15 s, loss 10 s, jitter 30 s (guards against AWDL scans).
     // All windows are clamped to ≥ pollIntervalSecs whenever that setting changes.
-    @Published var latencyWindowSecs: Double {
+    @Published public var latencyWindowSecs: Double {
         didSet { UserDefaults.standard.set(latencyWindowSecs, forKey: "latencyWindowSecs") }
     }
-    @Published var lossWindowSecs: Double {
+    @Published public var lossWindowSecs: Double {
         didSet { UserDefaults.standard.set(lossWindowSecs, forKey: "lossWindowSecs") }
     }
-    @Published var jitterWindowSecs: Double {
+    @Published public var jitterWindowSecs: Double {
         didSet { UserDefaults.standard.set(jitterWindowSecs, forKey: "jitterWindowSecs") }
     }
 
-    @Published var showLatencyInMenubar: Bool {
+    // MARK: - Menubar text mode
+    /// When true, shows current average latency as text alongside the icon.
+    @Published public var showLatencyInMenubar: Bool {
         didSet { UserDefaults.standard.set(showLatencyInMenubar, forKey: "showLatencyInMenubar") }
     }
 
-    @Published var bandwidthScheduleHours: Double {
+    // MARK: - Bandwidth scheduling (0 = disabled)
+    /// Auto-run bandwidth test every N hours. 0 disables.
+    @Published public var bandwidthScheduleHours: Double {
         didSet { UserDefaults.standard.set(bandwidthScheduleHours, forKey: "bandwidthScheduleHours") }
     }
 
-    @Published var enableLogRotation: Bool {
+    // MARK: - Log rotation
+    /// When true, daily summaries are written to ~/Library/Logs/MeOrThem/.
+    @Published public var enableLogRotation: Bool {
         didSet { UserDefaults.standard.set(enableLogRotation, forKey: "enableLogRotation") }
     }
 
     // MARK: - SQLite data retention (days)
-    @Published var rawRetentionDays: Int {
+    // Defaults: 7 days raw, 90 days per-minute aggregates, 1 year incident journal.
+    @Published public var rawRetentionDays: Int {
         didSet { UserDefaults.standard.set(rawRetentionDays, forKey: "rawRetentionDays") }
     }
-    @Published var aggregateRetentionDays: Int {
+    @Published public var aggregateRetentionDays: Int {
         didSet { UserDefaults.standard.set(aggregateRetentionDays, forKey: "aggregateRetentionDays") }
     }
-    @Published var incidentRetentionDays: Int {
+    @Published public var incidentRetentionDays: Int {
         didSet { UserDefaults.standard.set(incidentRetentionDays, forKey: "incidentRetentionDays") }
     }
 
-    @Published var bandwidthBarRedMbps: Double {
+    @Published public var bandwidthBarRedMbps: Double {
         didSet { UserDefaults.standard.set(bandwidthBarRedMbps, forKey: "bandwidthBarRedMbps") }
     }
 
-    @Published var bandwidthBarYellowMbps: Double {
+    @Published public var bandwidthBarYellowMbps: Double {
         didSet { UserDefaults.standard.set(bandwidthBarYellowMbps, forKey: "bandwidthBarYellowMbps") }
     }
 
+    // MARK: - DNS Resolvers
+    /// The configured multi-resolver list. On first launch after upgrade (no saved key),
+    /// defaults to the pre-populated list with the default five enabled.
+    @Published public var dnsResolvers: [DNSResolver] {
+        didSet { encode(dnsResolvers, forKey: "dnsResolvers") }
+    }
+
+    // MARK: - Battery behavior
+    @Published public var batteryBehavior: BatteryBehavior {
+        didSet { UserDefaults.standard.set(batteryBehavior.rawValue, forKey: "batteryBehavior") }
+    }
+
     // MARK: - Notifications
-    @Published var enableNotificationBanner: Bool {
+    @Published public var enableNotificationBanner: Bool {
         didSet { UserDefaults.standard.set(enableNotificationBanner, forKey: "enableNotificationBanner") }
     }
-    @Published var enableNotificationSound: Bool {
+    @Published public var enableNotificationSound: Bool {
         didSet { UserDefaults.standard.set(enableNotificationSound, forKey: "enableNotificationSound") }
+    }
+
+    // MARK: - Local metrics endpoint (Prometheus / JSON)
+    @Published public var metricsServerEnabled: Bool {
+        didSet { UserDefaults.standard.set(metricsServerEnabled, forKey: "metricsServerEnabled") }
+    }
+    @Published public var metricsServerPort: Int {
+        didSet { UserDefaults.standard.set(metricsServerPort, forKey: "metricsServerPort") }
     }
 
     private init() {
         let ud = UserDefaults.standard
 
-        pingTargets = (try? ud.decoded([PingTarget].self, forKey: "pingTargets")) ?? PingTarget.defaults
-        thresholds  = (try? ud.decoded(Thresholds.self, forKey: "thresholds")) ?? .default
+        pingTargets   = (try? ud.decoded([PingTarget].self,    forKey: "pingTargets"))   ?? PingTarget.defaults
+        thresholds    = (try? ud.decoded(Thresholds.self,     forKey: "thresholds"))    ?? .default
+        dnsResolvers  = (try? ud.decoded([DNSResolver].self,  forKey: "dnsResolvers"))  ?? DNSResolver.defaults
 
-        alwaysShowBarChart     = ud.bool(forKey: "alwaysShowBarChart")
-        colorTheme             = ColorTheme(rawValue: ud.string(forKey: "colorTheme") ?? "") ?? .system
-        launchAtLogin          = ud.object(forKey: "launchAtLogin") as? Bool ?? true
-        pollIntervalSecs       = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
-        showLatencyInMenubar   = ud.bool(forKey: "showLatencyInMenubar")
-        bandwidthScheduleHours = ud.double(forKey: "bandwidthScheduleHours")
+        alwaysShowBarChart        = ud.bool(forKey: "alwaysShowBarChart")
+        colorTheme                = ColorTheme(rawValue: ud.string(forKey: "colorTheme") ?? "") ?? .system
+        launchAtLogin             = ud.object(forKey: "launchAtLogin") as? Bool ?? true
+        pollIntervalSecs          = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
+        showLatencyInMenubar      = ud.bool(forKey: "showLatencyInMenubar")
+        bandwidthScheduleHours    = ud.double(forKey: "bandwidthScheduleHours")   // 0 = disabled
         enableLogRotation         = ud.bool(forKey: "enableLogRotation")
+        bandwidthBarRedMbps       = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
+        bandwidthBarYellowMbps    = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
+        batteryBehavior           = BatteryBehavior(rawValue: ud.string(forKey: "batteryBehavior") ?? "") ?? .normal
+        enableNotificationBanner  = ud.object(forKey: "enableNotificationBanner") as? Bool ?? true
+        enableNotificationSound   = ud.object(forKey: "enableNotificationSound")  as? Bool ?? false
+        metricsServerEnabled      = ud.object(forKey: "metricsServerEnabled") as? Bool ?? false
+        metricsServerPort         = ud.object(forKey: "metricsServerPort") as? Int ?? 9090
         rawRetentionDays          = ud.object(forKey: "rawRetentionDays")       as? Int ?? 7
-        aggregateRetentionDays    = ud.object(forKey: "aggregateRetentionDays") as? Int ?? 366
+        aggregateRetentionDays    = ud.object(forKey: "aggregateRetentionDays") as? Int ?? 90
         incidentRetentionDays     = ud.object(forKey: "incidentRetentionDays")  as? Int ?? 365
-        bandwidthBarRedMbps    = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
-        bandwidthBarYellowMbps = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
-        enableNotificationBanner = ud.object(forKey: "enableNotificationBanner") as? Bool ?? true
-        enableNotificationSound  = ud.object(forKey: "enableNotificationSound")  as? Bool ?? false
 
         let poll = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
         latencyWindowSecs = Swift.max(ud.double(forKey: "latencyWindowSecs").nonZero ?? 15, poll)
         lossWindowSecs    = Swift.max(ud.double(forKey: "lossWindowSecs").nonZero    ?? 10, poll)
         jitterWindowSecs  = Swift.max(ud.double(forKey: "jitterWindowSecs").nonZero  ?? 30, poll)
+    }
+
+    /// Update failure tracking for one resolver after a probe round.
+    /// - Parameters:
+    ///   - id: The resolver's stable UUID.
+    ///   - succeeded: Whether this resolver returned a valid response this tick.
+    ///   - otherResolversOK: Whether ≥1 other resolver succeeded this tick.
+    ///     When false (all resolvers failing), no failure count is incremented —
+    ///     it's a network outage, not a resolver fault.
+    public func updateDNSResolverFailureCount(id: UUID, succeeded: Bool, otherResolversOK: Bool) {
+        guard let idx = dnsResolvers.firstIndex(where: { $0.id == id }) else { return }
+        if succeeded {
+            dnsResolvers[idx].consecutiveFailures = 0
+            dnsResolvers[idx].autoDisabledAt = nil
+        } else if otherResolversOK {
+            dnsResolvers[idx].consecutiveFailures += 1
+            if dnsResolvers[idx].consecutiveFailures >= DNSResolver.autoDisableThreshold,
+               dnsResolvers[idx].autoDisabledAt == nil {
+                dnsResolvers[idx].autoDisabledAt = Date()
+            }
+        }
+        // If !succeeded && !otherResolversOK: network outage — do not penalise any resolver.
+    }
+
+    /// Re-enable a resolver that was auto-disabled (called after a successful re-probe).
+    public func reEnableDNSResolver(id: UUID) {
+        guard let idx = dnsResolvers.firstIndex(where: { $0.id == id }) else { return }
+        dnsResolvers[idx].consecutiveFailures = 0
+        dnsResolvers[idx].autoDisabledAt = nil
+    }
+
+    /// Reset all resolver failure counters (called on network session change).
+    public func resetDNSResolverFailureCounts() {
+        for idx in dnsResolvers.indices {
+            dnsResolvers[idx].consecutiveFailures = 0
+            dnsResolvers[idx].autoDisabledAt = nil
+        }
     }
 
     private func encode<T: Encodable>(_ value: T, forKey key: String) {

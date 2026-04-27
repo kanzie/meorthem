@@ -1,4 +1,5 @@
 import AppIntents
+import MeOrThemCore
 
 /// Returns the current network connection quality and average latency.
 /// Appears in Shortcuts.app under "MeOrThem" as "Get Network Status".

@@ -1,4 +1,5 @@
 import Foundation
+import MeOrThemCore
 
 /// A stable fingerprint for a network environment, independent of connection type.
 ///

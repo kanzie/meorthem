@@ -7,19 +7,19 @@ import Foundation
 /// or blocking.
 ///
 /// Blocking — call from a background thread or detached Task.
-enum MTUChecker {
+public enum MTUChecker {
 
-    struct Result {
+    public struct Result {
         /// The probe payload size used (bytes, not including IP/ICMP headers).
-        let payloadBytes: Int
+        public let payloadBytes: Int
         /// `true` if the large packet reached the destination without loss.
-        let reachable: Bool
+        public let reachable: Bool
         /// Round-trip time in milliseconds if reachable, nil otherwise.
-        let rttMs: Double?
+        public let rttMs: Double?
     }
 
     /// Probe size: 1472 bytes payload → 1500-byte Ethernet frame (20 IP + 8 ICMP).
-    static let standardPayload = 1472
+    public static let standardPayload = 1472
 
     /// Send a single large-packet probe to `host` using `/sbin/ping -D`.
     ///
@@ -28,7 +28,7 @@ enum MTUChecker {
     ///   - payloadBytes: Payload size in bytes (default: 1472).
     /// - Returns: `Result` with reachability and RTT, or `nil` if the process
     ///   could not be launched.
-    static func probe(host: String, payloadBytes: Int = standardPayload) -> Result? {
+    public static func probe(host: String, payloadBytes: Int = standardPayload) -> Result? {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/sbin/ping")
         // -D: set Don't-Fragment bit; -s: payload size; -c 1: single packet; -t 3: 3s timeout

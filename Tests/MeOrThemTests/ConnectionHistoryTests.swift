@@ -87,7 +87,7 @@ func runConnectionHistoryTests() {
         }
     }
 
-    suite("MetricStore connection history — cap at 5 events") {
+    suite("MetricStore connection history — cap at 20 events") {
         MainActor.assumeIsolated {
             let settings = AppSettings.shared
             let store    = MetricStore(settings: settings)
@@ -110,7 +110,20 @@ func runConnectionHistoryTests() {
                 store.record(result: good, for: id1)    // [150, 30, 30] → avg 70 ms → green → closes event
             }
 
-            expectEqual(store.connectionHistory.count, 5, "history capped at 5 events")
+            // 6 events, all fit within the 20-event cap
+            expectEqual(store.connectionHistory.count, 6, "6 events fit within 20-event cap")
+
+            // Generate 22 events to verify the cap clamps to 20
+            store.clearConnectionHistory()
+            for _ in 1...22 {
+                store.record(result: good50, for: id1)
+                store.record(result: good50, for: id1)
+                store.record(result: bad, for: id1)
+                store.record(result: bad, for: id1)
+                store.record(result: good, for: id1)
+                store.record(result: good, for: id1)
+            }
+            expectEqual(store.connectionHistory.count, 20, "history capped at 20 events")
         }
     }
 

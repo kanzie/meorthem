@@ -1,4 +1,5 @@
 import AppKit
+import MeOrThemCore
 import SwiftUI
 
 final class SettingsWindowController: NSWindowController {

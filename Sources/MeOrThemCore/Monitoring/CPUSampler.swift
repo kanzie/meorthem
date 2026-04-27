@@ -8,7 +8,7 @@ import Darwin
 ///
 /// Uses wrapping subtraction on the cumulative tick counters so it handles the
 /// natural_t (UInt32) overflow that occurs on machines with very long uptimes.
-final class CPUSampler {
+public final class CPUSampler {
 
     private var prevUser:   UInt32 = 0
     private var prevSystem: UInt32 = 0
@@ -16,8 +16,10 @@ final class CPUSampler {
     private var prevNice:   UInt32 = 0
     private var hasPrev = false
 
+    public init() {}
+
     /// Returns the active CPU fraction (0.0–1.0) since the last call.
-    func sample() -> Double {
+    public func sample() -> Double {
         var info  = host_cpu_load_info_data_t()
         var count = mach_msg_type_number_t(
             MemoryLayout<host_cpu_load_info_data_t>.stride /

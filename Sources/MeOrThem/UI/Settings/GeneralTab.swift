@@ -1,4 +1,5 @@
 import SwiftUI
+import MeOrThemCore
 
 struct GeneralTab: View {
     @EnvironmentObject private var settings: AppSettings
