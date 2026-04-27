@@ -448,8 +448,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        if response.actionIdentifier == AlertManager.actionViewCharts {
-            Task { @MainActor in
+        let actionID = response.actionIdentifier
+        Task { @MainActor in
+            if actionID == AlertManager.actionViewCharts {
                 self.showNetworkIntelligence()
             }
         }

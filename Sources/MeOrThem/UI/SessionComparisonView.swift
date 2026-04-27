@@ -48,7 +48,7 @@ final class SessionComparisonLoader: ObservableObject {
         // We approximate: fetch from/to date range for the session
         let allPings: [SQLiteStore.PingRow]
         // Combine gateway and a date-based fallback for external pings
-        var combined: [SQLiteStore.PingRow] = pingSample
+        let combined: [SQLiteStore.PingRow] = pingSample
         // Also pull any pings via the date range (non-gateway targets)
         // Use a well-known target UUID lookup isn't available without settings;
         // instead derive stats from available gateway pings + wifi rows

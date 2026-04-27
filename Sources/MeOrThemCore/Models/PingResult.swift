@@ -1,6 +1,6 @@
 import Foundation
 
-public struct PingResult {
+public struct PingResult: Sendable {
     public let timestamp: Date
     /// Average RTT in milliseconds, nil if all packets lost
     public let rtt: Double?

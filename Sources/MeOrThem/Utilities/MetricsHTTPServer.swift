@@ -55,11 +55,14 @@ final class MetricsHTTPServer {
             guard let self, let data, !data.isEmpty else { connection.cancel(); return }
             let requestLine = String(data: data, encoding: .utf8)?
                 .components(separatedBy: "\r\n").first ?? ""
-            let path = self.parsePath(from: requestLine)
-            let (body, contentType) = self.responseBody(for: path)
-            let header = "HTTP/1.1 200 OK\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
-            let response = (header + body).data(using: .utf8) ?? Data()
-            connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            Task { @MainActor [weak self] in
+                guard let self else { connection.cancel(); return }
+                let path = self.parsePath(from: requestLine)
+                let (body, contentType) = self.responseBody(for: path)
+                let header = "HTTP/1.1 200 OK\r\nContent-Type: \(contentType)\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n"
+                let response = (header + body).data(using: .utf8) ?? Data()
+                connection.send(content: response, completion: .contentProcessed { _ in connection.cancel() })
+            }
         }
     }
 

@@ -3,8 +3,8 @@ import AppIntents
 /// Triggers a bandwidth test (Ookla Speedtest) immediately.
 /// Appears in Shortcuts.app under "MeOrThem" as "Run Bandwidth Test".
 struct RunBandwidthTestIntent: AppIntent {
-    static var title: LocalizedStringResource = "Run Bandwidth Test"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Run Bandwidth Test"
+    static let description = IntentDescription(
         "Starts a bandwidth test using the bundled Speedtest CLI. Check the MeOrThem menu for results."
     )
 

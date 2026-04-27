@@ -5,8 +5,8 @@ import MeOrThemCore
 /// Exports a network report for the last 24 hours to a temp file.
 /// Appears in Shortcuts.app under "MeOrThem" as "Export Network Report".
 struct ExportReportIntent: AppIntent {
-    static var title: LocalizedStringResource = "Export Network Report"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Export Network Report"
+    static let description = IntentDescription(
         "Exports the last 24 hours of network data as a CSV or JSON file."
     )
 
@@ -17,8 +17,8 @@ struct ExportReportIntent: AppIntent {
         case csv  = "CSV"
         case json = "JSON"
 
-        static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Export Format")
-        static var caseDisplayRepresentations: [ExportFormatOption: DisplayRepresentation] = [
+        static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Export Format")
+        static let caseDisplayRepresentations: [ExportFormatOption: DisplayRepresentation] = [
             .csv:  "CSV",
             .json: "JSON"
         ]

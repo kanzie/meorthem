@@ -6,7 +6,7 @@ import Foundation
 /// Blocking — call from a background thread or detached Task.
 public enum InterfaceMonitor {
 
-    public struct Counters {
+    public struct Counters: Sendable {
         public let iface: String
         public let errorsIn:  UInt64   // cumulative input (receive) errors
         public let errorsOut: UInt64   // cumulative output (transmit) errors

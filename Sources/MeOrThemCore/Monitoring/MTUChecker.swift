@@ -9,7 +9,7 @@ import Foundation
 /// Blocking — call from a background thread or detached Task.
 public enum MTUChecker {
 
-    public struct Result {
+    public struct Result: Sendable {
         /// The probe payload size used (bytes, not including IP/ICMP headers).
         public let payloadBytes: Int
         /// `true` if the large packet reached the destination without loss.

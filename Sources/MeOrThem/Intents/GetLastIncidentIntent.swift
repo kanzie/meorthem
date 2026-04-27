@@ -3,8 +3,8 @@ import AppIntents
 /// Returns details about the most recent recorded network incident.
 /// Appears in Shortcuts.app under "MeOrThem" as "Get Last Incident".
 struct GetLastIncidentIntent: AppIntent {
-    static var title: LocalizedStringResource = "Get Last Incident"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Get Last Incident"
+    static let description = IntentDescription(
         "Returns the time, duration, and cause of the most recent network incident."
     )
 

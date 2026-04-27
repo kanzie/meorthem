@@ -4,8 +4,8 @@ import MeOrThemCore
 /// Returns the current network connection quality and average latency.
 /// Appears in Shortcuts.app under "MeOrThem" as "Get Network Status".
 struct GetNetworkStatusIntent: AppIntent {
-    static var title: LocalizedStringResource = "Get Network Status"
-    static var description = IntentDescription(
+    static let title: LocalizedStringResource = "Get Network Status"
+    static let description = IntentDescription(
         "Returns the current connection quality (Good / Degraded / Poor) and average latency."
     )
 
