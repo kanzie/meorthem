@@ -30,6 +30,12 @@ final class AppEnvironment {
     // when the gateway IP hasn't changed since the last non-WiFi session was established.
     private var lastNonWifiGatewayIP: String?
 
+    // Debounce: holds a pending DispatchWorkItem that will open an Ethernet/VPN session
+    // after a short delay. Cancelled immediately if WiFi is detected first, preventing
+    // spurious Ethernet sessions from being created during the startup race where
+    // latestGatewayIP arrives before the first WiFi snapshot.
+    private var pendingNonWifiSession: DispatchWorkItem?
+
     // Traceroute rate-limiting: don't fire more than once per 5 minutes
     private var lastTracerouteDate: Date?
     private let tracerouteDebounce: TimeInterval = 300
@@ -329,6 +335,9 @@ final class AppEnvironment {
     private func updateNetworkSession(wifi: WiFiSnapshot?, gatewayIP: String?) {
         if let wifi {
             // WiFi: fingerprint encodes gateway IP + channel + band + subnet.
+            // Cancel any pending Ethernet/VPN session — WiFi always wins.
+            pendingNonWifiSession?.cancel()
+            pendingNonWifiSession = nil
             if let key = NetworkSessionKey.from(wifi: wifi) {
                 applySessionKey(key)
             }
@@ -352,34 +361,45 @@ final class AppEnvironment {
         }
         lastNonWifiGatewayIP = gatewayIP
 
-        // Run ARP and routing lookups off the MainActor — cached (30 s TTL), but the
-        // first call in a cache window can spawn a short subprocess.
-        Task { [weak self] in
+        // Debounce non-WiFi session creation by 3 s to absorb the startup race where
+        // latestGatewayIP arrives before the first WiFi snapshot. If WiFi is detected
+        // before the timer fires, the work item is cancelled (see WiFi branch above)
+        // and no Ethernet/VPN session is ever written to the database.
+        pendingNonWifiSession?.cancel()
+        let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
-            let (ifaceName, gatewayMAC) = await Task.detached(priority: .utility) {
-                let iface = NetworkInfo.defaultGatewayInterface()
-                let mac   = NetworkInfo.gatewayMACAddress(for: gatewayIP)
-                return (iface, mac)
-            }.value
+            self.pendingNonWifiSession = nil
+            // Run ARP and routing lookups off the MainActor — cached (30 s TTL), but the
+            // first call in a cache window can spawn a short subprocess.
+            Task { [weak self] in
+                guard let self else { return }
+                let (ifaceName, gatewayMAC) = await Task.detached(priority: .utility) {
+                    let iface = NetworkInfo.defaultGatewayInterface()
+                    let mac   = NetworkInfo.gatewayMACAddress(for: gatewayIP)
+                    return (iface, mac)
+                }.value
 
-            await MainActor.run {
-                let key: NetworkSessionKey
-                if let iface = ifaceName,
-                   iface.hasPrefix("utun") || iface.hasPrefix("ppp") || iface.hasPrefix("tap") {
-                    // VPN tunnel interface
-                    let localIP = NetworkInfo.ipAddress(for: iface)
-                    key = NetworkSessionKey.fromVPN(
-                        gatewayIP: gatewayIP, localIP: localIP, interfaceName: iface)
-                } else {
-                    // Ethernet or unrecognised interface type
-                    let wifiIfaceName = WiFiMonitor.interfaceName()
-                    let ethInfo = NetworkInfo.ethernetInfo(excluding: wifiIfaceName)
-                    key = NetworkSessionKey.fromEthernet(
-                        gatewayIP: gatewayIP, localIP: ethInfo?.ip, gatewayMAC: gatewayMAC)
+                await MainActor.run {
+                    let key: NetworkSessionKey
+                    if let iface = ifaceName,
+                       iface.hasPrefix("utun") || iface.hasPrefix("ppp") || iface.hasPrefix("tap") {
+                        // VPN tunnel interface
+                        let localIP = NetworkInfo.ipAddress(for: iface)
+                        key = NetworkSessionKey.fromVPN(
+                            gatewayIP: gatewayIP, localIP: localIP, interfaceName: iface)
+                    } else {
+                        // Ethernet or unrecognised interface type
+                        let wifiIfaceName = WiFiMonitor.interfaceName()
+                        let ethInfo = NetworkInfo.ethernetInfo(excluding: wifiIfaceName)
+                        key = NetworkSessionKey.fromEthernet(
+                            gatewayIP: gatewayIP, localIP: ethInfo?.ip, gatewayMAC: gatewayMAC)
+                    }
+                    self.applySessionKey(key)
                 }
-                self.applySessionKey(key)
             }
         }
+        pendingNonWifiSession = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3, execute: work)
     }
 
     /// Opens a new session or touches the existing one, depending on whether the

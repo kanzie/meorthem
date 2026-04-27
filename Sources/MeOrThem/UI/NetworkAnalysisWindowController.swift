@@ -37,9 +37,12 @@ final class NetworkAnalysisWindowController: NSWindowController {
 
 // MARK: - Root view
 
-private struct NetworkAnalysisView: View {
+struct NetworkAnalysisView: View {
     let sqliteStore: SQLiteStore
     let settings:    AppSettings
+    /// When set (e.g. from the Network Intelligence unified window), this session is
+    /// pre-selected in the list after data loads. Nil = default to the most recent session.
+    var initialSession: SQLiteStore.NetworkSessionRow? = nil
 
     @State private var sessions:        [SQLiteStore.NetworkSessionRow] = []
     @State private var selectedSession: SQLiteStore.NetworkSessionRow?
@@ -121,7 +124,9 @@ private struct NetworkAnalysisView: View {
             db.sessionsInRange(from: .distantPast, to: .distantFuture)
         }.value
         sessions = rows.sorted { $0.startedAt > $1.startedAt }
-        if selectedSession == nil { selectedSession = sessions.first }
+        if selectedSession == nil {
+            selectedSession = initialSession ?? sessions.first
+        }
     }
 
     @MainActor

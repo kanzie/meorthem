@@ -32,9 +32,12 @@ final class ConnectionProfilesWindowController: NSWindowController {
 
 // MARK: - SwiftUI View
 
-private struct ConnectionProfilesView: View {
+struct ConnectionProfilesView: View {
 
     let db: SQLiteStore
+    /// When set, the row matching this fingerprint is visually highlighted (used
+    /// by the Network Intelligence unified window to indicate the active profile).
+    var highlightedFingerprint: String? = nil
 
     @State private var profiles: [SQLiteStore.ConnectionProfile] = []
     @State private var isLoading = true
@@ -51,23 +54,33 @@ private struct ConnectionProfilesView: View {
             } else {
                 Table(profiles) {
                     TableColumn("Network") { p in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(p.displayName)
-                                .font(.system(.body, design: .monospaced))
-                                .lineLimit(1)
-                            Text(p.fingerprint)
-                                .font(.system(.caption2, design: .monospaced))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                        HStack(spacing: 6) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(p.displayName)
+                                    .font(.system(.body, design: .monospaced))
+                                    .lineLimit(1)
+                                Text(p.fingerprint)
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                            if p.fingerprint == highlightedFingerprint {
+                                Text("Active")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(RoundedRectangle(cornerRadius: 3).fill(Color.green))
+                            }
                         }
                         .padding(.vertical, 2)
                     }
-                    .width(min: 140, ideal: 200)
+                    .width(min: 140, ideal: 220)
 
-                    TableColumn("Stealth") { p in
+                    TableColumn("Type") { p in
                         stealthBadge(p)
                     }
-                    .width(70)
+                    .width(90)
 
                     TableColumn("ICMP Status") { p in
                         icmpStatus(p)
@@ -96,16 +109,19 @@ private struct ConnectionProfilesView: View {
     @ViewBuilder
     private func stealthBadge(_ p: SQLiteStore.ConnectionProfile) -> some View {
         if p.stealthMode {
-            Text("TCP")
+            Text("Stealth (RAW)")
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
                 .background(RoundedRectangle(cornerRadius: 3).fill(Color.purple))
         } else {
-            Text("ICMP")
-                .font(.caption2)
+            Text("ICMP (Ping)")
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(RoundedRectangle(cornerRadius: 3).fill(Color.secondary.opacity(0.15)))
         }
     }
 

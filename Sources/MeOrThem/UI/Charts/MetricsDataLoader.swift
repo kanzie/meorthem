@@ -247,6 +247,104 @@ final class MetricsDataLoader: ObservableObject {
         }
     }
 
+    /// Loads data for an explicit date range (e.g. a specific network session).
+    /// Uses aggregated rows when the range exceeds 6 hours.
+    func load(from: Date, to: Date) {
+        loadTask?.cancel()
+        isLoading = true
+
+        let db        = self.db
+        let targets   = self.targets
+        let maxPts    = Self.maxPoints
+        let duration  = to.timeIntervalSince(from)
+        let useAgg    = duration > 6 * 3600
+
+        loadTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard !Task.isCancelled else { return }
+
+            var latency = [ChartPoint]()
+            var loss    = [ChartPoint]()
+            var jitter  = [ChartPoint]()
+
+            for target in targets {
+                let rows: [SQLiteStore.PingRow]
+                if useAgg {
+                    let aggRows = db.aggregatedPingRows(for: target.id, from: from, to: to)
+                    let rawRows = db.pingRows(for: target.id, from: from, to: to)
+                    rows = (aggRows + rawRows).sorted { $0.timestamp < $1.timestamp }
+                } else {
+                    rows = db.pingRows(for: target.id, from: from, to: to)
+                }
+                let sampled = Self.downsample(rows, maxPoints: maxPts / max(targets.count, 1))
+                for r in sampled {
+                    if let rtt = r.rttMs {
+                        latency.append(ChartPoint(timestamp: r.timestamp, value: rtt, targetLabel: target.label))
+                    }
+                    loss.append(ChartPoint(timestamp: r.timestamp, value: r.lossPct, targetLabel: target.label))
+                    if let j = r.jitterMs {
+                        jitter.append(ChartPoint(timestamp: r.timestamp, value: j, targetLabel: target.label))
+                    }
+                }
+            }
+
+            let wifiRows    = db.wifiRows(from: from, to: to)
+            let sampledWifi = Self.downsampleWifi(wifiRows, maxPoints: maxPts)
+            let wifiPoints  = sampledWifi.map { w in
+                ChartPoint(timestamp: w.timestamp, value: Double(w.rssi), targetLabel: "WiFi")
+            }
+
+            let recentIncidents = db.recentIncidents(limit: 200).filter {
+                $0.startedAt >= from && $0.startedAt <= to
+            }
+
+            let dnsFrom    = max(from, to.addingTimeInterval(-7 * 86_400))
+            let dnsRawRows = db.dnsResolverRows(from: dnsFrom, to: to)
+            let dnsPoints: [ChartPoint] = dnsRawRows.compactMap { row in
+                guard let ms = row.resolveMs else { return nil }
+                return ChartPoint(timestamp: row.timestamp, value: ms, targetLabel: row.resolverName)
+            }
+            let dnsDownsampled: [ChartPoint] = dnsPoints.count > maxPts
+                ? (0..<maxPts).map { i in
+                    dnsPoints[min(Int((Double(i) * Double(dnsPoints.count) / Double(maxPts)).rounded()), dnsPoints.count - 1)]
+                  }
+                : dnsPoints
+
+            let speedtestRows = db.speedtestRows(from: from, to: to)
+            let sysEventRows  = db.systemEventRows(from: from, to: to)
+            let availFraction = db.availabilityFraction(from: from, to: to)
+
+            guard !Task.isCancelled else { return }
+
+            let finalLatency      = latency
+            let finalLoss         = loss
+            let finalJitter       = jitter
+            let finalWifi         = wifiPoints
+            let finalDNS          = dnsDownsampled
+            let finalSpeedtest    = speedtestRows
+            let finalIncidents    = recentIncidents
+            let finalSysEvents    = sysEventRows
+            let finalAvailability = availFraction
+
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.rangeStart           = from
+                self.rangeEnd             = to
+                self.latencyPoints        = finalLatency
+                self.lossPoints           = finalLoss
+                self.jitterPoints         = finalJitter
+                self.wifiRSSI             = finalWifi
+                self.dnsPoints            = finalDNS
+                self.speedtestPoints      = finalSpeedtest
+                self.incidents            = finalIncidents
+                self.systemEvents         = finalSysEvents
+                self.availabilityFraction = finalAvailability
+                self.isLoading            = false
+            }
+        }
+
+        loadPatternAverages()
+    }
+
     // MARK: - Downsampling (stride-based)
 
     nonisolated private static func downsample(_ rows: [SQLiteStore.PingRow], maxPoints: Int) -> [SQLiteStore.PingRow] {

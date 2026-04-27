@@ -5,17 +5,14 @@ import AppKit
 enum MenuBuilder {
 
     struct Actions {
-        let showAbout:               () -> Void
-        let openSettings:            () -> Void
-        let copyReport:              () -> Void
-        let showNetworkHistory:      () -> Void
-        let showNetworkAnalysis:     () -> Void
-        let showIncidentHistory:     () -> Void
-        let showConnectionProfiles:  () -> Void
-        let runSpeedtest:            () -> Void
-        let showHelp:                () -> Void
-        let togglePause:             () -> Void
-        let quit:                    () -> Void
+        let showAbout:                  () -> Void
+        let openSettings:               () -> Void
+        let copyReport:                 () -> Void
+        let showNetworkIntelligence:    () -> Void
+        let runSpeedtest:               () -> Void
+        let showHelp:                   () -> Void
+        let togglePause:                () -> Void
+        let quit:                       () -> Void
     }
 
     // Tags for items updated during live refresh
@@ -177,10 +174,7 @@ enum MenuBuilder {
         let advancedItem = NSMenuItem(title: "Advanced", action: nil, keyEquivalent: "")
         advancedItem.tag = tagAdvanced
         let advancedMenu = NSMenu(title: "Advanced")
-        advancedMenu.addItem(actionItem("Graphs…",                action: actions.showNetworkHistory))
-        advancedMenu.addItem(actionItem("Network Analysis…",      action: actions.showNetworkAnalysis))
-        advancedMenu.addItem(actionItem("Incident History…",      action: actions.showIncidentHistory))
-        advancedMenu.addItem(actionItem("Connection Profiles…",   action: actions.showConnectionProfiles))
+        advancedMenu.addItem(actionItem("Network Intelligence…",  action: actions.showNetworkIntelligence))
         advancedMenu.addItem(actionItem("Export Reports",         action: actions.copyReport))
         let netItem = networkDetailsSubmenu(store: store)
         netItem.tag = tagNetworkDetails

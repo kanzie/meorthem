@@ -8,20 +8,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     private var statusItem: NSStatusItem!
     private var environment: AppEnvironment!
-    private var settingsController:        SettingsWindowController?
-    private var pingReportController:      PingReportWindowController?
-    private var chartsWindowController:    MetricsChartsWindowController?
-    private var networkAnalysisController:    NetworkAnalysisWindowController?
-    private var incidentHistoryController:    IncidentHistoryWindowController?
-    private var connectionProfilesController: ConnectionProfilesWindowController?
+    private var settingsController:              SettingsWindowController?
+    private var pingReportController:            PingReportWindowController?
+    private var networkIntelligenceController:   NetworkIntelligenceWindowController?
+    private var networkIntelligenceObserver:     NSObjectProtocol?
     private var cancellables = Set<AnyCancellable>()
     private var menuLiveUpdate: AnyCancellable?
     private var menuWifiUpdate: AnyCancellable?
     private var menuSpeedtestUpdate: AnyCancellable?
     private var menuHistoryUpdate: AnyCancellable?
     private var countdownTimer: Timer?
-    private var chartsWindowObserver: NSObjectProtocol?
-    private var incidentHistoryObserver: NSObjectProtocol?
     private var isPulsing = false
     private var hasInitialData = false
     private var loadingBlinkTimer: Timer?
@@ -312,26 +308,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     private func makeMenuActions() -> MenuBuilder.Actions {
         MenuBuilder.Actions(
-            showAbout:               { AboutWindowController.shared.showAndFocus() },
-            openSettings:            { [weak self] in self?.showSettings() },
-            copyReport:              { [weak self] in self?.showPingReport() },
-            showNetworkHistory:      { [weak self] in self?.showNetworkHistory() },
-            showNetworkAnalysis:     { [weak self] in self?.showNetworkAnalysis() },
-            showIncidentHistory:     { [weak self] in self?.showIncidentHistory() },
-            showConnectionProfiles:  { [weak self] in self?.showConnectionProfiles() },
-            runSpeedtest:            { [weak self] in self?.environment.speedtestRunner.run() },
-            showHelp:                { HelpWindowController.shared.showAndFocus() },
-            togglePause:             { [weak self] in self?.toggleManualPause() },
-            quit:                    { NSApp.terminate(nil) }
+            showAbout:                  { AboutWindowController.shared.showAndFocus() },
+            openSettings:               { [weak self] in self?.showSettings() },
+            copyReport:                 { [weak self] in self?.showPingReport() },
+            showNetworkIntelligence:    { [weak self] in self?.showNetworkIntelligence() },
+            runSpeedtest:               { [weak self] in self?.environment.speedtestRunner.run() },
+            showHelp:                   { HelpWindowController.shared.showAndFocus() },
+            togglePause:                { [weak self] in self?.toggleManualPause() },
+            quit:                       { NSApp.terminate(nil) }
         )
-    }
-
-    private func showConnectionProfiles() {
-        if connectionProfilesController == nil {
-            connectionProfilesController = ConnectionProfilesWindowController(
-                db: environment.sqliteStore)
-        }
-        connectionProfilesController?.showAndFocus()
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -410,71 +395,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 sqliteStore: environment.sqliteStore,
                 settings:    environment.settings,
                 exporter:    environment.exportCoordinator,
-                onShowCharts: { [weak self] in self?.showNetworkHistory() }
+                onShowCharts: { [weak self] in self?.showNetworkIntelligence() }
             )
         }
         pingReportController?.showAndFocus()
     }
 
-    private func showNetworkHistory() {
-        if chartsWindowController == nil {
-            chartsWindowController = MetricsChartsWindowController(
-                db:                  environment.sqliteStore,
-                targets:             environment.settings.pingTargets,
-                thresholds:          environment.settings.thresholds,
-                bandwidthRedMbps:    environment.settings.bandwidthBarRedMbps,
-                bandwidthYellowMbps: environment.settings.bandwidthBarYellowMbps
+    private func showNetworkIntelligence() {
+        if networkIntelligenceController == nil {
+            networkIntelligenceController = NetworkIntelligenceWindowController(
+                db:          environment.sqliteStore,
+                settings:    environment.settings,
+                metricStore: environment.metricStore
             )
-            // Release on close so the SwiftUI hosting controller doesn't linger in the compositor.
+            // Release on close so the SwiftUI hosting controller (with embedded charts)
+            // doesn't linger in the compositor and burn background CPU.
             // The token must be stored — discarding it causes ARC to remove the observer
             // immediately, so the close notification would never fire.
-            if let win = chartsWindowController?.window {
-                chartsWindowObserver = NotificationCenter.default.addObserver(
+            if let win = networkIntelligenceController?.window {
+                networkIntelligenceObserver = NotificationCenter.default.addObserver(
                     forName: NSWindow.willCloseNotification,
                     object: win, queue: .main
                 ) { [weak self] _ in
                     MainActor.assumeIsolated {
-                        self?.chartsWindowController = nil
-                        self?.chartsWindowObserver = nil
+                        self?.networkIntelligenceController = nil
+                        self?.networkIntelligenceObserver   = nil
                     }
                 }
             }
         }
-        chartsWindowController?.showAndFocus()
-    }
-
-    private func showNetworkAnalysis() {
-        if networkAnalysisController == nil {
-            networkAnalysisController = NetworkAnalysisWindowController(
-                sqliteStore: environment.sqliteStore,
-                settings:    environment.settings
-            )
-        }
-        networkAnalysisController?.showAndFocus()
-    }
-
-    private func showIncidentHistory() {
-        if incidentHistoryController == nil {
-            incidentHistoryController = IncidentHistoryWindowController(
-                sqliteStore: environment.sqliteStore
-            )
-            if let win = incidentHistoryController?.window {
-                incidentHistoryObserver = NotificationCenter.default.addObserver(
-                    forName: NSWindow.willCloseNotification,
-                    object: win, queue: .main
-                ) { [weak self] _ in
-                    MainActor.assumeIsolated {
-                        self?.incidentHistoryController = nil
-                        self?.incidentHistoryObserver   = nil
-                    }
-                }
-            }
-        }
-        incidentHistoryController?.showAndFocus(onShowCharts: { [weak self] start, end in
-            self?.showNetworkHistory()
-            // Note: charts window doesn't currently support pre-jumping to a time range,
-            // but the window opens so user can manually navigate.
-        })
+        networkIntelligenceController?.showAndFocus()
     }
 
     private func toggleManualPause() {
@@ -500,7 +450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     ) {
         if response.actionIdentifier == AlertManager.actionViewCharts {
             Task { @MainActor in
-                self.showNetworkHistory()
+                self.showNetworkIntelligence()
             }
         }
         completionHandler()

@@ -70,13 +70,18 @@ struct MetricsChartsView: View {
     private let thresholds: Thresholds
     private let bandwidthRedMbps:    Double
     private let bandwidthYellowMbps: Double
+    /// When non-nil the chart loads data for this session's time range and hides the
+    /// time-window picker (used when embedded in the Network Intelligence window).
+    private let preloadedSession: SQLiteStore.NetworkSessionRow?
 
     init(db: SQLiteStore, targets: [PingTarget], thresholds: Thresholds,
-         bandwidthRedMbps: Double = 10, bandwidthYellowMbps: Double = 25) {
-        _loader     = StateObject(wrappedValue: MetricsDataLoader(db: db, targets: targets))
+         bandwidthRedMbps: Double = 10, bandwidthYellowMbps: Double = 25,
+         preloadedSession: SQLiteStore.NetworkSessionRow? = nil) {
+        _loader                  = StateObject(wrappedValue: MetricsDataLoader(db: db, targets: targets))
         self.thresholds          = thresholds
         self.bandwidthRedMbps    = bandwidthRedMbps
         self.bandwidthYellowMbps = bandwidthYellowMbps
+        self.preloadedSession    = preloadedSession
     }
 
     // MARK: - Derived target data
@@ -166,7 +171,17 @@ struct MetricsChartsView: View {
             }
             ToolbarItem(placement: .principal) {
                 HStack(spacing: 8) {
-                    windowPicker
+                    if preloadedSession != nil {
+                        // Session-scoped mode: show date range label instead of time-window picker.
+                        if let from = loader.rangeStart as Date?,
+                           let to   = loader.rangeEnd   as Date? {
+                            Text("\(from.formatted(date: .abbreviated, time: .omitted)) – \(to.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        windowPicker
+                    }
                     if let avail = loader.availabilityFraction {
                         let pctStr   = String(format: "%.1f%%", avail * 100)
                         let color: Color = avail >= 0.99 ? .green
@@ -178,20 +193,38 @@ struct MetricsChartsView: View {
                 }
             }
             ToolbarItem(placement: .primaryAction) {
-                Button { loader.load(window: selectedWindow) } label: {
+                Button {
+                    if let s = preloadedSession {
+                        loader.load(from: s.startedAt, to: s.lastSeen)
+                    } else {
+                        loader.load(window: selectedWindow)
+                    }
+                } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("Refresh")
             }
         }
         .onAppear {
-            loader.load(window: selectedWindow)
-            loader.checkAvailableWindows(for: visibleTargets.map(\.id))
+            if let s = preloadedSession {
+                loader.load(from: s.startedAt, to: s.lastSeen)
+            } else {
+                loader.load(window: selectedWindow)
+                loader.checkAvailableWindows(for: visibleTargets.map(\.id))
+            }
         }
-        .onChange(of: selectedWindow) { _, w in loader.load(window: w) }
+        .onChange(of: preloadedSession?.id) { _, _ in
+            if let s = preloadedSession {
+                loader.load(from: s.startedAt, to: s.lastSeen)
+            }
+        }
+        .onChange(of: selectedWindow) { _, w in
+            if preloadedSession == nil { loader.load(window: w) }
+        }
         .onChange(of: selectedTargetIndex) { _, _ in
-            // Re-check which windows have data for the newly selected target.
-            loader.checkAvailableWindows(for: visibleTargets.map(\.id))
+            if preloadedSession == nil {
+                loader.checkAvailableWindows(for: visibleTargets.map(\.id))
+            }
         }
     }
 

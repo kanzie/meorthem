@@ -5,6 +5,19 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.44.0 — 2026-04-27
+
+### New Features
+- **Network Intelligence window** — Replaces the four separate Advanced menu windows (Graphs, Network Analysis, Incident History, Connection Profiles) with a unified tabbed window. A profile dropdown at the top selects which network session to review (defaults to the currently active connection, labelled "Active"). Selecting a session filters the Graphs and Network Analysis tabs to that session's time range.
+
+### Changes
+- **Connection Profiles: Type column** — The "Stealth" column has been renamed to "Type". It now shows "ICMP (Ping)" or "Stealth (RAW)" badges instead of the previous "TCP"/"ICMP" labels, making the probe mode immediately clear.
+
+### Bug Fixes
+- **Spurious Ethernet sessions** — Fixed a startup race where an Ethernet session was created in the database before the WiFi snapshot arrived, producing orphan "Ethernet ?.?.?.x" entries in the sessions list. Session creation is now debounced by 3 seconds; if WiFi is detected within that window the Ethernet session is never written.
+
+---
+
 ## v2.43.0 — 2026-04-27
 
 ### New Features
