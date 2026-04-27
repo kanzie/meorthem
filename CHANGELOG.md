@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.42.0 — 2026-04-27
+
+### New Features
+- **Session comparison** — The Network Analysis window now has a "Compare Sessions" toolbar button. Click it to enter comparison mode, select any two sessions from the left panel (checkboxes replace single-selection), then click "Compare" to open a side-by-side comparison sheet. The sheet shows average latency, packet loss, jitter, WiFi signal, DNS latency, availability %, and best download speed for each session, with colour-coded delta values (green = improvement, red = degradation).
+
+---
+
 ## v2.41.0 — 2026-04-27
 
 ### New Features

@@ -47,11 +47,20 @@ private struct NetworkAnalysisView: View {
     @State private var isLoading        = false
     @State private var sufficiencyLabel = ""
 
+    // Comparison mode
+    @State private var compareMode      = false
+    @State private var compareSelected: Set<UUID> = []
+    @State private var showingComparison = false
+
+    private var canCompare: Bool { compareSelected.count == 2 }
+
     var body: some View {
         HSplitView {
             // ── Left panel: session list ───────────────────────────────────
             SessionListPanel(sessions: sessions,
-                             selected: $selectedSession)
+                             selected: $selectedSession,
+                             compareMode: compareMode,
+                             compareSelected: $compareSelected)
                 .frame(minWidth: 180, idealWidth: 200, maxWidth: 240)
 
             // ── Right panel: findings ──────────────────────────────────────
@@ -61,6 +70,40 @@ private struct NetworkAnalysisView: View {
                           sufficiencyLabel: sufficiencyLabel)
         }
         .frame(minWidth: 580, minHeight: 400)
+        .toolbar {
+            ToolbarItem(placement: .automatic) {
+                if compareMode {
+                    HStack(spacing: 8) {
+                        Button("Cancel") {
+                            compareMode = false
+                            compareSelected = []
+                        }
+                        Button("Compare") {
+                            showingComparison = true
+                        }
+                        .disabled(!canCompare)
+                        .buttonStyle(.borderedProminent)
+                    }
+                } else {
+                    Button {
+                        compareMode = true
+                        compareSelected = []
+                    } label: {
+                        Label("Compare Sessions", systemImage: "arrow.left.arrow.right")
+                    }
+                    .help("Select two sessions to compare side-by-side")
+                    .disabled(sessions.count < 2)
+                }
+            }
+        }
+        .sheet(isPresented: $showingComparison) {
+            let ids    = Array(compareSelected)
+            let sA     = sessions.first { $0.id == ids[0] }
+            let sB     = sessions.first { $0.id == ids[1] }
+            if let a = sA, let b = sB {
+                SessionComparisonView(sessionA: a, sessionB: b, sqliteStore: sqliteStore)
+            }
+        }
         .task {
             await loadSessions()
         }
@@ -144,8 +187,10 @@ private struct NetworkAnalysisView: View {
 // MARK: - Session list panel
 
 private struct SessionListPanel: View {
-    let sessions:  [SQLiteStore.NetworkSessionRow]
+    let sessions:       [SQLiteStore.NetworkSessionRow]
     @Binding var selected: SQLiteStore.NetworkSessionRow?
+    let compareMode:    Bool
+    @Binding var compareSelected: Set<UUID>
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .none; return f
@@ -153,10 +198,17 @@ private struct SessionListPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Networks")
-                .font(.headline)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Networks")
+                    .font(.headline)
+                if compareMode {
+                    Text("Select 2 sessions")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
 
             Divider()
 
@@ -165,6 +217,35 @@ private struct SessionListPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .padding(12)
+            } else if compareMode {
+                List(sessions, id: \.id) { session in
+                    let isChecked = compareSelected.contains(session.id)
+                    HStack(spacing: 6) {
+                        Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(isChecked ? Color.accentColor : .secondary)
+                            .imageScale(.small)
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.displayName)
+                                .font(.system(.body, design: .default))
+                                .lineLimit(1)
+                            Text(Self.dateFmt.string(from: session.startedAt))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        if isChecked {
+                            compareSelected.remove(session.id)
+                        } else if compareSelected.count < 2 {
+                            compareSelected.insert(session.id)
+                        }
+                    }
+                }
+                .listStyle(.sidebar)
             } else {
                 List(sessions, id: \.id, selection: Binding(
                     get: { selected?.id },
