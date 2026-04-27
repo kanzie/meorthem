@@ -6,6 +6,9 @@ import MeOrThemCore
 
 @MainActor
 final class AppEnvironment {
+    /// Weak reference set by AppDelegate after init. Used by App Intents for status queries.
+    static weak var shared: AppEnvironment?
+
     let settings:          AppSettings
     let sqliteStore:       SQLiteStore
     let metricStore:       MetricStore

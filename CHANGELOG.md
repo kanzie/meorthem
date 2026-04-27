@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.43.0 — 2026-04-27
+
+### New Features
+- **Shortcuts / Automation integration** — Me Or Them now exposes four actions to macOS Shortcuts (and Raycast): **Get Network Status** (returns current quality + average latency), **Run Bandwidth Test** (starts a Speedtest immediately), **Get Last Incident** (returns the most recent incident's time, duration, and cause), and **Export Network Report** (exports the last 24 hours as a CSV or JSON file). All four actions appear under "MeOrThem" in Shortcuts.app automatically on first launch.
+
+---
+
 ## v2.42.0 — 2026-04-27
 
 ### New Features

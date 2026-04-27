@@ -53,6 +53,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let isFirstLaunch = UserDefaults.standard.object(forKey: "launchAtLogin") == nil
 
         environment = AppEnvironment()
+        AppEnvironment.shared = environment
         UNUserNotificationCenter.current().delegate = self
         setupStatusItem()
         observeStatusChanges()
