@@ -67,7 +67,9 @@ final class MetricsDataLoader: ObservableObject {
     /// Availability fraction [0–1] for the currently loaded time window. nil if no data.
     @Published private(set) var availabilityFraction: Double? = nil
     /// Cross-session average RTT per hour-of-day (0–23) from the last 30 days of aggregates.
-    @Published private(set) var hourlyRTTAverages: [Int: Double] = [:]
+    @Published private(set) var hourlyRTTAverages:   [Int: Double] = [:]
+    /// Cross-session average RTT per weekday (0=Sun … 6=Sat) from the last 30 days of aggregates.
+    @Published private(set) var weekdayRTTAverages:  [Int: Double] = [:]
     @Published private(set) var isLoading        = false
     @Published private(set) var rangeStart       = Date()
     @Published private(set) var rangeEnd         = Date()
@@ -227,18 +229,20 @@ final class MetricsDataLoader: ObservableObject {
             }
         }
 
-        // Load cross-session hourly averages independently (not window-scoped; always 30 days)
-        loadHourlyAverages()
+        // Load cross-session pattern averages independently (not window-scoped; always 30 days)
+        loadPatternAverages()
     }
 
-    /// Fetches per-hour-of-day average RTT from the last 30 days of aggregates.
+    /// Fetches per-hour-of-day and per-weekday average RTT from the last 30 days of aggregates.
     /// Runs off the main thread; result is safe to use in chart views.
-    func loadHourlyAverages() {
+    func loadPatternAverages() {
         let db = self.db
         Task.detached(priority: .utility) { [weak self] in
-            let averages = db.hourlyRTTAverages(lookback: 30 * 86_400, minSampleCount: 3)
+            let hourly  = db.hourlyRTTAverages(lookback: 30 * 86_400, minSampleCount: 3)
+            let weekday = db.weekdayRTTAverages(lookback: 30 * 86_400, minSampleCount: 5)
             await MainActor.run { [weak self] in
-                self?.hourlyRTTAverages = averages
+                self?.hourlyRTTAverages  = hourly
+                self?.weekdayRTTAverages = weekday
             }
         }
     }

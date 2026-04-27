@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.39.0 — 2026-04-27
+
+### New Features
+- **Weekly pattern detection** — The Charts window now includes a "Weekly Pattern" bar chart showing average latency per day of week across the last 30 days, colour-coded against your latency thresholds. Network Analysis gains a new finding (pattern #17) that flags recurring weekly degradation when one weekday's average consistently exceeds the weekly mean by more than 1.5 standard deviations.
+
+---
+
 ## v2.38.0 — 2026-04-26
 
 ### New Features

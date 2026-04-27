@@ -109,6 +109,9 @@ struct SessionAnalysisInput {
     /// Sourced from `network_sessions.vpn_interface`. When non-nil, the analyzer surfaces
     /// a high-confidence informational finding so users understand latency includes tunnel overhead.
     var vpnInterface: String? = nil
+    /// Cross-session weekday average RTTs keyed by weekday (0 = Sunday … 6 = Saturday).
+    /// Sourced from `ping_aggregates` across all historical sessions; used by pattern #17.
+    var crossSessionWeekdayRTTs: [Int: Double] = [:]
 }
 
 // MARK: - Analyzer
@@ -163,6 +166,7 @@ final class NetworkAnalyzer: @unchecked Sendable {
         findings += checkChannelSwitching(input, sufficiency: sufficiency)
         findings += checkTimeOfDayPattern(input)
         findings += checkTraceroute(input)
+        findings += checkWeekdayPattern(input)
 
         return findings.filter { $0.confidence >= 0.40 }
     }
@@ -1238,6 +1242,49 @@ final class NetworkAnalyzer: @unchecked Sendable {
 
         return [NetworkFinding(category: .wifi,
                                title: "Wi-Fi channel switching detected",
+                               detail: detail,
+                               confidence: confidence)]
+    }
+
+    // MARK: - Pattern 17: Recurring weekly pattern
+
+    func checkWeekdayPattern(_ input: SessionAnalysisInput) -> [NetworkFinding] {
+        let weekdayRTTs = input.crossSessionWeekdayRTTs
+        guard weekdayRTTs.count >= 4 else { return [] }
+
+        let values  = Array(weekdayRTTs.values)
+        let mean    = values.reduce(0, +) / Double(values.count)
+        guard mean > 0 else { return [] }
+        let variance = values.map { ($0 - mean) * ($0 - mean) }.reduce(0, +) / Double(values.count)
+        let stddev   = variance.squareRoot()
+
+        // Find weekdays with average > mean + 1.5 * stddev AND delta > 10 ms
+        let threshold = mean + 1.5 * stddev
+        let elevated  = weekdayRTTs.filter { $0.value > threshold && ($0.value - mean) > 10 }
+        guard !elevated.isEmpty else { return [] }
+
+        // Confidence scales with how many weekdays have data and how elevated the worst day is
+        let maxDelta  = elevated.values.map { $0 - mean }.max() ?? 0
+        let base: Double = weekdayRTTs.count >= 6 ? 0.70 : (weekdayRTTs.count >= 5 ? 0.60 : 0.55)
+        let severityBonus: Double = maxDelta > 30 ? 0.05 : 0
+        let confidence = min(0.90, base + severityBonus)
+
+        let dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+        let dayStr = elevated
+            .sorted { $0.value > $1.value }
+            .map { (wd, avg) in
+                let name = wd < dayNames.count ? dayNames[wd] : "Day \(wd)"
+                return String(format: "%@ (avg %.0f ms)", name, avg)
+            }
+            .joined(separator: ", ")
+
+        let detail = String(format:
+            "Average latency is consistently elevated on %@, compared to a weekly average of " +
+            "%.0f ms. This pattern may reflect ISP congestion, scheduled maintenance, or " +
+            "increased neighbourhood usage on that day.", dayStr, mean)
+
+        return [NetworkFinding(category: .latency,
+                               title: "Recurring weekly pattern",
                                detail: detail,
                                confidence: confidence)]
     }

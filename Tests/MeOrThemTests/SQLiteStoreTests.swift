@@ -867,3 +867,61 @@ func runSQLiteStoreTests() {
         expectEqual(result, nil, "nil when no incidents in range")
     }
 }
+
+func runSQLiteStoreWeekdayTests() {
+    suite("SQLiteStore — weekdayRTTAverages basic grouping") {
+        let store = SQLiteStore(path: ":memory:")
+        let tID   = UUID()
+
+        // Use timestamps that are:
+        //  - older than raw retention (rawRetentionDays=0 → all old data gets aggregated)
+        //  - within the 400-day lookback
+        // 15 days ago and 17 days ago guarantee two different weekdays.
+        let dayA = Date().addingTimeInterval(-15 * 86_400)
+        let dayB = Date().addingTimeInterval(-17 * 86_400)
+
+        // 6 pings on dayA ~30 ms
+        for i in 0..<6 {
+            let ts = dayA.addingTimeInterval(Double(i) * 60)
+            store.insertPing(PingResult(timestamp: ts, rtt: 30.0, lossPercent: 0, jitter: nil),
+                             targetID: tID, targetLabel: "T", host: "h")
+        }
+        // 6 pings on dayB ~90 ms (3× higher)
+        for i in 0..<6 {
+            let ts = dayB.addingTimeInterval(Double(i) * 60)
+            store.insertPing(PingResult(timestamp: ts, rtt: 90.0, lossPercent: 0, jitter: nil),
+                             targetID: tID, targetLabel: "T", host: "h")
+        }
+        store.waitForPendingOps()
+        store.aggregateAndPrune(rawRetentionDays: 0, aggregateRetentionDays: 3650, incidentRetentionDays: 365)
+        store.waitForPendingOps()
+
+        let avgs = store.weekdayRTTAverages(lookback: 400 * 86_400, minSampleCount: 1)
+        expect(avgs.count >= 2, "at least 2 weekday buckets")
+
+        // Higher-RTT day should be measurably worse
+        let values = avgs.values.sorted()
+        if values.count >= 2 {
+            expect(values.last! > values.first! * 1.5, "elevated day is measurably worse")
+        }
+    }
+
+    suite("SQLiteStore — weekdayRTTAverages minSampleCount filters sparse weekdays") {
+        let store = SQLiteStore(path: ":memory:")
+        let tID   = UUID()
+        let dayA = Date().addingTimeInterval(-15 * 86_400)
+
+        // Only 2 pings on one day — below minSampleCount=5
+        for i in 0..<2 {
+            let ts = dayA.addingTimeInterval(Double(i) * 60)
+            store.insertPing(PingResult(timestamp: ts, rtt: 50.0, lossPercent: 0, jitter: nil),
+                             targetID: tID, targetLabel: "T", host: "h")
+        }
+        store.waitForPendingOps()
+        store.aggregateAndPrune(rawRetentionDays: 0, aggregateRetentionDays: 3650, incidentRetentionDays: 365)
+        store.waitForPendingOps()
+
+        let avgs = store.weekdayRTTAverages(lookback: 400 * 86_400, minSampleCount: 5)
+        expect(avgs.isEmpty, "sparse weekday filtered by minSampleCount=5")
+    }
+}

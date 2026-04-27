@@ -135,6 +135,7 @@ struct MetricsChartsView: View {
                             if !loader.dnsPoints.isEmpty { dnsCard }
                             speedtestCard
                             if loader.hourlyRTTAverages.count >= 4 { hourlyPatternCard }
+                            if loader.weekdayRTTAverages.count >= 4 { weekdayPatternCard }
                             if !loader.incidents.isEmpty { incidentList }
                         }
                         .padding(20)
@@ -988,6 +989,61 @@ struct MetricsChartsView: View {
                         }
                     }
                 }
+
+                HStack(spacing: 12) {
+                    legendDot(.green,  "Normal")
+                    legendDot(.orange, "Elevated")
+                    legendDot(.red,    "High")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.top, 2)
+            }
+        }
+    }
+
+    // MARK: - Weekly pattern card
+
+    private var weekdayPatternCard: some View {
+        ChartCard(title: "Weekly Pattern",
+                  subtitle: "Average latency by day of week — last 30 days") {
+            let dayAbbrevs = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+            let days = (0..<7).compactMap { wd -> (label: String, avg: Double)? in
+                guard let avg = loader.weekdayRTTAverages[wd] else { return nil }
+                return (dayAbbrevs[wd], avg)
+            }
+            let maxRTT = days.map(\.avg).max() ?? thresholds.latencyRedMs
+            let yMax   = max(maxRTT * 1.2, thresholds.latencyYellowMs * 2)
+            VStack(alignment: .leading, spacing: 6) {
+                Chart {
+                    RuleMark(y: .value("Yellow", thresholds.latencyYellowMs))
+                        .foregroundStyle(Color.orange.opacity(0.4))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    RuleMark(y: .value("Red", thresholds.latencyRedMs))
+                        .foregroundStyle(Color.red.opacity(0.4))
+                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    ForEach(days, id: \.label) { item in
+                        BarMark(
+                            x: .value("Day", item.label),
+                            y: .value("Avg RTT ms", item.avg)
+                        )
+                        .foregroundStyle(barColor(item.avg))
+                        .cornerRadius(3)
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks { _ in
+                        AxisValueLabel().font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks(position: .leading) { _ in
+                        AxisValueLabel().font(.caption).foregroundStyle(.secondary)
+                        AxisGridLine().foregroundStyle(.secondary.opacity(0.15))
+                    }
+                }
+                .chartYScale(domain: 0...yMax)
+                .frame(height: 120)
 
                 HStack(spacing: 12) {
                     legendDot(.green,  "Normal")

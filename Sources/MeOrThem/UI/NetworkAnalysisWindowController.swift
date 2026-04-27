@@ -112,8 +112,9 @@ private struct NetworkAnalysisView: View {
             let interfaceErrorRows = db.interfaceErrorRows(sessionID: sid)
             let mtuRows            = db.mtuRows(sessionID: sid)
             let tracerouteRows     = db.tracerouteEvents(sessionID: sid)
-            // Cross-session hourly averages: last 30 days of aggregate data
-            let hourlyRTTs         = db.hourlyRTTAverages(lookback: 30 * 86_400)
+            // Cross-session pattern averages: last 30 days of aggregate data
+            let hourlyRTTs   = db.hourlyRTTAverages(lookback: 30 * 86_400)
+            let weekdayRTTs  = db.weekdayRTTAverages(lookback: 30 * 86_400)
 
             var input = SessionAnalysisInput(session: session,
                                              pingRows: targetPings,
@@ -126,8 +127,9 @@ private struct NetworkAnalysisView: View {
                                              mtuRows: mtuRows)
             input.dnsResolverRows        = dnsResolverRows
             input.tracerouteRows         = tracerouteRows
-            input.crossSessionHourlyRTTs = hourlyRTTs
-            input.vpnInterface           = session.vpnInterface
+            input.crossSessionHourlyRTTs   = hourlyRTTs
+            input.crossSessionWeekdayRTTs  = weekdayRTTs
+            input.vpnInterface             = session.vpnInterface
             let suf = DataSufficiency(sampleCount: targetPings.count)
             let results = analyzer.analyze(input)
             return (results, suf.label)

@@ -207,6 +207,15 @@ public final class SQLiteStore: @unchecked Sendable {
         return queue.sync { _hourlyRTTAverages(since: since, minSampleCount: minSampleCount) }
     }
 
+    /// Computes per-weekday (0 = Sunday … 6 = Saturday) average RTT across all
+    /// ping_aggregates in the lookback window. Returns only weekdays with at least
+    /// `minSampleCount` aggregate rows. Used by the weekly-pattern chart and analyzer.
+    public func weekdayRTTAverages(lookback: TimeInterval,
+                                    minSampleCount: Int = 5) -> [Int: Double] {
+        let since = Date().addingTimeInterval(-lookback).timeIntervalSince1970
+        return queue.sync { _weekdayRTTAverages(since: since, minSampleCount: minSampleCount) }
+    }
+
     public func insertWiFi(timestamp: Date,
                            rssi: Int,
                            noise: Int,
@@ -1504,6 +1513,32 @@ public final class SQLiteStore: @unchecked Sendable {
             let hour   = Int(sqlite3_column_int(stmt, 0))
             let avgRTT = sqlite3_column_double(stmt, 1)
             result[hour] = avgRTT
+        }
+        return result
+    }
+
+    private func _weekdayRTTAverages(since: Double, minSampleCount: Int) -> [Int: Double] {
+        // strftime('%w') returns 0=Sunday … 6=Saturday in localtime.
+        let sql = """
+            SELECT
+                CAST(strftime('%w', datetime(timestamp_minute, 'unixepoch', 'localtime')) AS INTEGER) AS wd,
+                AVG(avg_rtt) AS avg_rtt,
+                COUNT(*)     AS n
+            FROM ping_aggregates
+            WHERE timestamp_minute >= ? AND avg_rtt IS NOT NULL
+            GROUP BY wd
+            HAVING n >= ?
+            ORDER BY wd;
+            """
+        guard let stmt = _prepare(sql) else { return [:] }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, since)
+        sqlite3_bind_int(stmt, 2, Int32(minSampleCount))
+        var result: [Int: Double] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let wd     = Int(sqlite3_column_int(stmt, 0))
+            let avgRTT = sqlite3_column_double(stmt, 1)
+            result[wd] = avgRTT
         }
         return result
     }

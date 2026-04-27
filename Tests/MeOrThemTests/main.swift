@@ -16,6 +16,7 @@ runDNSProberTests()
 runNetworkInfoTests()
 runNetworkSessionKeyTests()
 runPingTargetTests()
+runSQLiteStoreWeekdayTests()
 
 printSummary()
 exit(_failCount > 0 ? 1 : 0)
