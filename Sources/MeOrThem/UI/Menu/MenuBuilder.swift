@@ -557,6 +557,12 @@ enum MenuBuilder {
             }
         }
 
+        // Show resolved ISP name if available (async lookup at session open).
+        if let isp = store.currentSessionISPName {
+            sub.addItem(.separator())
+            sub.addItem(infoItem("ISP:         \(isp)"))
+        }
+
         parent.submenu = sub
         return parent
     }

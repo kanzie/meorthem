@@ -42,6 +42,10 @@ final class MetricStore: ObservableObject {
 
     // MARK: - Current network session (set by AppEnvironment on WiFi fingerprint change)
     var currentSessionID: UUID?
+    /// ISP/ASN name for the current session, resolved asynchronously at session open. nil until resolved.
+    @Published private(set) var currentSessionISPName: String? = nil
+
+    func recordSessionISP(_ name: String?) { currentSessionISPName = name }
 
     // MARK: - History (read by export + sparklines)
     private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]

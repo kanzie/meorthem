@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.40.0 — 2026-04-27
+
+### New Features
+- **Automatic ISP identification** — Me Or Them now resolves the ISP / AS name for your current session using DNS TXT lookups against the Cymru ASN database (no external service — pure DNS). The ISP name appears in the menu's Network Details row (e.g. "ISP: COMCAST-7922") and in the Network Analysis session list alongside the session date. Lookup runs asynchronously in the background at session open; private/loopback addresses are skipped immediately. Results are cached for the lifetime of the app.
+
+---
+
 ## v2.39.0 — 2026-04-27
 
 ### New Features

@@ -179,9 +179,15 @@ private struct SessionListPanel: View {
                             Text(session.displayName)
                                 .font(.system(.body, design: .default))
                                 .lineLimit(1)
-                            Text(Self.dateFmt.string(from: session.startedAt))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            HStack(spacing: 4) {
+                                Text(Self.dateFmt.string(from: session.startedAt))
+                                if let isp = session.ispName {
+                                    Text("· \(isp)")
+                                }
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
                         }
                     }
                     .padding(.vertical, 2)

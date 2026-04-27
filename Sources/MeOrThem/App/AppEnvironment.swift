@@ -371,6 +371,22 @@ final class AppEnvironment {
                                 weakFingerprint: key.hasWeakFingerprint,
                                 vpnInterface:    vpnIface)
 
+        // Clear stale ISP name immediately; async lookup below will fill it in.
+        metricStore.recordSessionISP(nil)
+
+        // Async ISP identification via DNS TXT lookup — non-blocking, best-effort.
+        let ispDB = sqliteStore
+        Task.detached(priority: .background) { [weak self] in
+            guard let self else { return }
+            let gatewayIP = await MainActor.run { self.metricStore.latestGatewayIP }
+            guard let ip = gatewayIP else { return }
+            guard let ispName = await ASNLookup.resolve(ip: ip) else { return }
+            await MainActor.run {
+                self.metricStore.recordSessionISP(ispName)
+                ispDB.updateSessionISP(id: newID, ispName: ispName)
+            }
+        }
+
         // Upsert connection profile and restore stealth mode from stored state.
         let fp = key.fingerprint
         let db = sqliteStore
