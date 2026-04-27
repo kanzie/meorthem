@@ -29,6 +29,7 @@ build/
 
 # Internal / AI tooling
 .claude/
+finished/
 # CLAUDE.md
 # FIXES.md
 # HARDENING.md
