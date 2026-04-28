@@ -197,9 +197,41 @@ private struct SessionListPanel: View {
     let compareMode:    Bool
     @Binding var compareSelected: Set<UUID>
 
-    private static let dateFmt: DateFormatter = {
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
+    }()
+
+    private static let dayFmt: DateFormatter = {
         let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .none; return f
     }()
+
+    /// Sessions grouped by calendar day (descending), with "Today" / "Yesterday" labels.
+    private var groupedSessions: [(id: Date, label: String, sessions: [SQLiteStore.NetworkSessionRow])] {
+        let calendar = Calendar.current
+        let today     = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+
+        var result: [(id: Date, label: String, sessions: [SQLiteStore.NetworkSessionRow])] = []
+        var curDay:      Date?
+        var curLabel     = ""
+        var curSessions: [SQLiteStore.NetworkSessionRow] = []
+
+        for session in sessions {   // already sorted descending
+            let day = calendar.startOfDay(for: session.startedAt)
+            if day != curDay {
+                if let d = curDay, !curSessions.isEmpty {
+                    result.append((d, curLabel, curSessions))
+                }
+                curDay      = day
+                curLabel    = day == today ? "Today" : day == yesterday ? "Yesterday" : Self.dayFmt.string(from: day)
+                curSessions = [session]
+            } else {
+                curSessions.append(session)
+            }
+        }
+        if let d = curDay, !curSessions.isEmpty { result.append((d, curLabel, curSessions)) }
+        return result
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -223,61 +255,73 @@ private struct SessionListPanel: View {
                     .foregroundStyle(.secondary)
                     .padding(12)
             } else if compareMode {
-                List(sessions, id: \.id) { session in
-                    let isChecked = compareSelected.contains(session.id)
-                    HStack(spacing: 6) {
-                        Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(isChecked ? Color.accentColor : .secondary)
-                            .imageScale(.small)
-                            .frame(width: 16)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(session.displayName)
-                                .font(.system(.body, design: .default))
-                                .lineLimit(1)
-                            Text(Self.dateFmt.string(from: session.startedAt))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if isChecked {
-                            compareSelected.remove(session.id)
-                        } else if compareSelected.count < 2 {
-                            compareSelected.insert(session.id)
+                List {
+                    ForEach(groupedSessions, id: \.id) { group in
+                        Section(group.label) {
+                            ForEach(group.sessions) { session in
+                                let isChecked = compareSelected.contains(session.id)
+                                HStack(spacing: 6) {
+                                    Image(systemName: isChecked ? "checkmark.circle.fill" : "circle")
+                                        .foregroundStyle(isChecked ? Color.accentColor : .secondary)
+                                        .imageScale(.small)
+                                        .frame(width: 16)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(session.displayName)
+                                            .font(.system(.body, design: .default))
+                                            .lineLimit(1)
+                                        Text(Self.timeFmt.string(from: session.startedAt))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+                                .padding(.vertical, 2)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if isChecked {
+                                        compareSelected.remove(session.id)
+                                    } else if compareSelected.count < 2 {
+                                        compareSelected.insert(session.id)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 .listStyle(.sidebar)
             } else {
-                List(sessions, id: \.id, selection: Binding(
+                List(selection: Binding(
                     get: { selected?.id },
                     set: { newID in selected = sessions.first { $0.id == newID } }
-                )) { session in
-                    HStack(spacing: 6) {
-                        Image(systemName: Self.connectionTypeIcon(session.connectionType))
-                            .foregroundStyle(.secondary)
-                            .imageScale(.small)
-                            .frame(width: 16)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(session.displayName)
-                                .font(.system(.body, design: .default))
-                                .lineLimit(1)
-                            HStack(spacing: 4) {
-                                Text(Self.dateFmt.string(from: session.startedAt))
-                                if let isp = session.ispName {
-                                    Text("· \(isp)")
+                )) {
+                    ForEach(groupedSessions, id: \.id) { group in
+                        Section(group.label) {
+                            ForEach(group.sessions) { session in
+                                HStack(spacing: 6) {
+                                    Image(systemName: Self.connectionTypeIcon(session.connectionType))
+                                        .foregroundStyle(.secondary)
+                                        .imageScale(.small)
+                                        .frame(width: 16)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(session.displayName)
+                                            .font(.system(.body, design: .default))
+                                            .lineLimit(1)
+                                        HStack(spacing: 4) {
+                                            Text(Self.timeFmt.string(from: session.startedAt))
+                                            if let isp = session.ispName {
+                                                Text("· \(isp)")
+                                            }
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                    }
                                 }
+                                .padding(.vertical, 2)
+                                .tag(session.id)
                             }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
                         }
                     }
-                    .padding(.vertical, 2)
-                    .tag(session.id)
                 }
                 .listStyle(.sidebar)
             }

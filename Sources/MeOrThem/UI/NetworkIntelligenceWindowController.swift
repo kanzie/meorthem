@@ -211,14 +211,18 @@ private struct NetworkIntelligenceView: View {
                 Text("No sessions recorded yet")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(sessions) { session in
-                    Button {
-                        selectedSession = session
-                    } label: {
-                        if session.id == activeSessionID {
-                            Label(session.displayName + " (Active)", systemImage: "wifi")
-                        } else {
-                            Text(sessionMenuLabel(session))
+                ForEach(groupedSessions, id: \.id) { group in
+                    Section(group.label) {
+                        ForEach(group.sessions) { session in
+                            Button {
+                                selectedSession = session
+                            } label: {
+                                if session.id == activeSessionID {
+                                    Label(session.displayName + " (Active)", systemImage: "wifi")
+                                } else {
+                                    Text(sessionMenuLabel(session))
+                                }
+                            }
                         }
                     }
                 }
@@ -278,8 +282,44 @@ private struct NetworkIntelligenceView: View {
     }
 
     private func sessionMenuLabel(_ session: SQLiteStore.NetworkSessionRow) -> String {
-        let dateStr = session.startedAt.formatted(date: .abbreviated, time: .omitted)
-        return "\(session.displayName) — \(dateStr)"
+        let timeStr = Self.timeFmt.string(from: session.startedAt)
+        return "\(session.displayName) — \(timeStr)"
+    }
+
+    private static let timeFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
+    }()
+
+    private static let dayFmt: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .none; return f
+    }()
+
+    /// Sessions grouped by calendar day (descending), with "Today" / "Yesterday" labels.
+    private var groupedSessions: [(id: Date, label: String, sessions: [SQLiteStore.NetworkSessionRow])] {
+        let calendar = Calendar.current
+        let today     = calendar.startOfDay(for: Date())
+        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
+
+        var result: [(id: Date, label: String, sessions: [SQLiteStore.NetworkSessionRow])] = []
+        var curDay:      Date?
+        var curLabel     = ""
+        var curSessions: [SQLiteStore.NetworkSessionRow] = []
+
+        for session in sessions {   // already sorted descending
+            let day = calendar.startOfDay(for: session.startedAt)
+            if day != curDay {
+                if let d = curDay, !curSessions.isEmpty {
+                    result.append((d, curLabel, curSessions))
+                }
+                curDay      = day
+                curLabel    = day == today ? "Today" : day == yesterday ? "Yesterday" : Self.dayFmt.string(from: day)
+                curSessions = [session]
+            } else {
+                curSessions.append(session)
+            }
+        }
+        if let d = curDay, !curSessions.isEmpty { result.append((d, curLabel, curSessions)) }
+        return result
     }
 
     // MARK: - Data loading
