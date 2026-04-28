@@ -380,8 +380,13 @@ public final class MetricStore: ObservableObject {
 
     private func openConnectionEvent(severity: MetricStatus) {
         let cause = computeDegradationCause()
+        // Close any previously-open event both in memory and in SQLite.
         if let idx = connectionHistory.firstIndex(where: { $0.isActive }) {
-            connectionHistory[idx].endTime = Date()
+            let prev = connectionHistory[idx]
+            let closeTime = Date()
+            connectionHistory[idx].endTime = closeTime
+            sqliteStore?.closeIncident(id: prev.id, endTime: closeTime,
+                                       peakSeverityRaw: prev.severityRaw)
         }
         let event = ConnectionEvent(severity: severity, cause: cause)
         connectionHistory.insert(event, at: 0)
@@ -461,21 +466,19 @@ public final class MetricStore: ObservableObject {
     /// Load on launch: prefer SQLite (full fidelity); fall back to UserDefaults cache.
     private func loadConnectionHistory() {
         if let db = sqliteStore {
+            // Close every open incident from previous sessions in a single pass.
+            // This covers all rows in the table, not just the most-recent batch.
+            db.closeAllOpenIncidents()
             let rows = db.recentIncidents(limit: Self.kMaxConnectionEvents)
             connectionHistory = rows.map { row in
                 var event = ConnectionEvent(id: row.id,
                                             severityRaw: row.peakSeverityRaw,
                                             startTime: row.startedAt,
                                             cause: row.cause,
-                                            endTime: row.endedAt)
-                // Close any event left open from a previous session, and persist the closure
-                // to SQLite so Network History (which reads SQLite directly) shows it as ended.
-                if event.isActive {
-                    let closeTime = Date()
-                    event.endTime = closeTime
-                    db.closeIncident(id: event.id, endTime: closeTime,
-                                     peakSeverityRaw: row.peakSeverityRaw)
-                }
+                                            endTime: row.endedAt ?? Date())
+                // endedAt should already be set by closeAllOpenIncidents above, but
+                // clamp any that arrived after the batch update (race window is negligible).
+                if event.isActive { event.endTime = Date() }
                 return event
             }
             return

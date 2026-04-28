@@ -256,6 +256,20 @@ public final class SQLiteStore: @unchecked Sendable {
         }
     }
 
+    /// Close every incident that has no ended_at recorded (e.g. left open by a previous
+    /// app session that was force-quit or crashed). Called once at launch.
+    public func closeAllOpenIncidents(endTime: Date = .init()) {
+        let ts = endTime.timeIntervalSince1970
+        queue.async { [weak self] in
+            guard let self else { return }
+            let sql = "UPDATE incidents SET ended_at = ? WHERE ended_at IS NULL;"
+            guard let stmt = _prepare(sql) else { return }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, ts)
+            sqlite3_step(stmt)
+        }
+    }
+
     public func updateIncidentSeverity(id: UUID, peakSeverityRaw: Int) {
         let idStr = id.uuidString
         queue.async { [weak self] in
