@@ -5,6 +5,17 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.44.1 — 2026-04-28
+
+### Changes
+- **Network Intelligence window redesign** — Replaced the narrow sidebar-with-dropdown layout with a standard macOS source-list + segmented-tab design. Sessions are now listed directly in a scrollable sidebar (grouped by date) rather than hidden behind a dropdown menu that cropped long network names. The four view tabs (Graphs, Analysis, Profiles, Incidents) move to a segmented control at the top of the content area.
+- **Session list grouped by date** — The session browser in both the Network Intelligence window and the Network Analysis window now groups entries under "Today", "Yesterday", and older date headers, reducing visual noise when many sessions are recorded on the same day.
+
+### Bug Fixes
+- **Incidents shown as ACTIVE / ongoing** — Fixed two bugs that left `ended_at` unset in the database for the majority of recorded incidents. Severity transitions (e.g. yellow→red) were closing the previous incident in memory but not writing the close to the database. Additionally, the startup repair pass only healed the 20 most-recent open incidents; all older ones remained permanently unclosed. Both paths are now correct: every transition writes the close immediately, and a single pass at launch closes any incidents left open by a previous session.
+
+---
+
 ## v2.44.0 — 2026-04-27
 
 ### New Features
