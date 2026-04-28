@@ -135,7 +135,7 @@ private struct NetworkIntelligenceView: View {
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                 HStack(spacing: 4) {
-                    Text(Self.timeFmt.string(from: session.startedAt))
+                    Text(Self.timeFmt.string(from: session.lastSeen))
                     if let isp = session.ispName {
                         Text("· \(isp)").lineLimit(1)
                     }
@@ -186,7 +186,8 @@ private struct NetworkIntelligenceView: View {
             NetworkAnalysisView(
                 sqliteStore:    db,
                 settings:       settings,
-                initialSession: selectedSession
+                initialSession: selectedSession,
+                embeddedMode:   true
             )
             .id(selectedSession?.id)
 
@@ -234,7 +235,7 @@ private struct NetworkIntelligenceView: View {
         var curSessions: [SQLiteStore.NetworkSessionRow] = []
 
         for session in sessions {
-            let day = calendar.startOfDay(for: session.startedAt)
+            let day = calendar.startOfDay(for: session.lastSeen)
             if day != curDay {
                 if let d = curDay, !curSessions.isEmpty {
                     result.append((d, curLabel, curSessions))
@@ -261,7 +262,14 @@ private struct NetworkIntelligenceView: View {
             db.sessionsInRange(from: .distantPast, to: .distantFuture)
         }.value
 
-        sessions        = rows.sorted { $0.startedAt > $1.startedAt }
+        // Deduplicate: one row per fingerprint, keeping the most recently active session.
+        // This collapses "5 GHz • 192.168.1.x × 15 today" into a single sidebar entry.
+        var seen = Set<String>()
+        let deduped = rows
+            .sorted { $0.lastSeen > $1.lastSeen }
+            .filter  { seen.insert($0.fingerprint).inserted }
+
+        sessions        = deduped
         activeSessionID = currentSessID
 
         if selectedSession == nil {

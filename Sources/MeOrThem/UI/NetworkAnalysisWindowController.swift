@@ -40,9 +40,11 @@ final class NetworkAnalysisWindowController: NSWindowController {
 struct NetworkAnalysisView: View {
     let sqliteStore: SQLiteStore
     let settings:    AppSettings
-    /// When set (e.g. from the Network Intelligence unified window), this session is
-    /// pre-selected in the list after data loads. Nil = default to the most recent session.
+    /// When set, this session is pre-selected after data loads.
     var initialSession: SQLiteStore.NetworkSessionRow? = nil
+    /// When true (embedded in Network Intelligence), the inner session list and
+    /// compare toolbar are hidden — session selection is handled by the outer sidebar.
+    var embeddedMode: Bool = false
 
     @State private var sessions:        [SQLiteStore.NetworkSessionRow] = []
     @State private var selectedSession: SQLiteStore.NetworkSessionRow?
@@ -50,7 +52,7 @@ struct NetworkAnalysisView: View {
     @State private var isLoading        = false
     @State private var sufficiencyLabel = ""
 
-    // Comparison mode
+    // Comparison mode (standalone only)
     @State private var compareMode      = false
     @State private var compareSelected: Set<UUID> = []
     @State private var showingComparison = false
@@ -58,44 +60,52 @@ struct NetworkAnalysisView: View {
     private var canCompare: Bool { compareSelected.count == 2 }
 
     var body: some View {
-        HSplitView {
-            // ── Left panel: session list ───────────────────────────────────
-            SessionListPanel(sessions: sessions,
-                             selected: $selectedSession,
-                             compareMode: compareMode,
-                             compareSelected: $compareSelected)
-                .frame(minWidth: 180, idealWidth: 200, maxWidth: 240)
+        Group {
+            if embeddedMode {
+                // Outer sidebar owns session selection — show findings directly.
+                FindingsPanel(session:          selectedSession,
+                              findings:         findings,
+                              isLoading:        isLoading,
+                              sufficiencyLabel: sufficiencyLabel)
+            } else {
+                HSplitView {
+                    SessionListPanel(sessions: sessions,
+                                     selected: $selectedSession,
+                                     compareMode: compareMode,
+                                     compareSelected: $compareSelected)
+                        .frame(minWidth: 180, idealWidth: 200, maxWidth: 240)
 
-            // ── Right panel: findings ──────────────────────────────────────
-            FindingsPanel(session:          selectedSession,
-                          findings:         findings,
-                          isLoading:        isLoading,
-                          sufficiencyLabel: sufficiencyLabel)
-        }
-        .frame(minWidth: 580, minHeight: 400)
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                if compareMode {
-                    HStack(spacing: 8) {
-                        Button("Cancel") {
-                            compareMode = false
-                            compareSelected = []
+                    FindingsPanel(session:          selectedSession,
+                                  findings:         findings,
+                                  isLoading:        isLoading,
+                                  sufficiencyLabel: sufficiencyLabel)
+                }
+                .frame(minWidth: 580, minHeight: 400)
+                .toolbar {
+                    ToolbarItem(placement: .automatic) {
+                        if compareMode {
+                            HStack(spacing: 8) {
+                                Button("Cancel") {
+                                    compareMode = false
+                                    compareSelected = []
+                                }
+                                Button("Compare") {
+                                    showingComparison = true
+                                }
+                                .disabled(!canCompare)
+                                .buttonStyle(.borderedProminent)
+                            }
+                        } else {
+                            Button {
+                                compareMode = true
+                                compareSelected = []
+                            } label: {
+                                Label("Compare Sessions", systemImage: "arrow.left.arrow.right")
+                            }
+                            .help("Select two sessions to compare side-by-side")
+                            .disabled(sessions.count < 2)
                         }
-                        Button("Compare") {
-                            showingComparison = true
-                        }
-                        .disabled(!canCompare)
-                        .buttonStyle(.borderedProminent)
                     }
-                } else {
-                    Button {
-                        compareMode = true
-                        compareSelected = []
-                    } label: {
-                        Label("Compare Sessions", systemImage: "arrow.left.arrow.right")
-                    }
-                    .help("Select two sessions to compare side-by-side")
-                    .disabled(sessions.count < 2)
                 }
             }
         }
