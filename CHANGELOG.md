@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.48.0 — 2026-04-29
+
+### New Features
+- **Bandwidth test quiet hours** — Automatic bandwidth tests can now be suppressed during a configurable time window (e.g. 9 AM to 5 PM). Configure it in Settings → Bandwidth Test → Quiet hours. Tests scheduled to fire inside the window are skipped and run at the next interval; no queuing or backlog occurs.
+
+---
+
 ## v2.47.0 — 2026-04-29
 
 ### New Features

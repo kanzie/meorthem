@@ -65,9 +65,38 @@ struct GeneralTab: View {
                     Text("Every 24 hours").tag(24.0)
                 }
                 .pickerStyle(.menu)
+                .disabled(settings.bandwidthScheduleHours == 0)
+
+                if settings.bandwidthScheduleHours > 0 {
+                    Toggle("Quiet hours", isOn: $settings.bandwidthQuietHoursEnabled)
+                        .help("Suppress automatic bandwidth tests during the specified hours.")
+                    if settings.bandwidthQuietHoursEnabled {
+                        HStack(spacing: 8) {
+                            Text("From")
+                            Picker("", selection: $settings.bandwidthQuietHoursStart) {
+                                ForEach(0..<24, id: \.self) { h in
+                                    Text(hourLabel(h)).tag(h)
+                                }
+                            }
+                            .frame(width: 90)
+                            .labelsHidden()
+                            Text("to")
+                            Picker("", selection: $settings.bandwidthQuietHoursEnd) {
+                                ForEach(0..<24, id: \.self) { h in
+                                    Text(hourLabel(h)).tag(h)
+                                }
+                            }
+                            .frame(width: 90)
+                            .labelsHidden()
+                        }
+                        .padding(.leading, 16)
+                        Text("Tests scheduled to fire during this window are skipped and run at the next interval.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+
                 Text("Latency polling is paused while a bandwidth test runs.")
                     .font(.caption).foregroundStyle(.secondary)
-
             }
 
             Section("Appearance") {
@@ -252,6 +281,18 @@ struct GeneralTab: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .padding(8)
     }
+}
+
+// MARK: - Helpers
+
+private func hourLabel(_ hour: Int) -> String {
+    let components = DateComponents(hour: hour, minute: 0)
+    guard let date = Calendar.current.date(from: components) else {
+        return "\(hour):00"
+    }
+    let fmt = DateFormatter()
+    fmt.dateFormat = "h a"
+    return fmt.string(from: date)
 }
 
 // MARK: - Launch at Login helper using SMAppService (macOS 13+)

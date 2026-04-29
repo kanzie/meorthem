@@ -619,6 +619,9 @@ final class AppEnvironment {
         let t = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // Skip the test if we are inside the configured quiet window.
+                // The timer continues running; the next tick will fire after another interval.
+                guard !self.settings.isInBandwidthQuietHours() else { return }
                 if case .idle = self.speedtestRunner.state {
                     self.speedtestRunner.run()
                 }

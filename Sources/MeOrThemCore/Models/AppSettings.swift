@@ -77,6 +77,30 @@ public final class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(bandwidthScheduleHours, forKey: "bandwidthScheduleHours") }
     }
 
+    /// When true, bandwidth tests are suppressed during the quiet window [start, end).
+    @Published public var bandwidthQuietHoursEnabled: Bool {
+        didSet { UserDefaults.standard.set(bandwidthQuietHoursEnabled, forKey: "bandwidthQuietHoursEnabled") }
+    }
+    /// Start of quiet window (hour of day, 0–23).
+    @Published public var bandwidthQuietHoursStart: Int {
+        didSet { UserDefaults.standard.set(bandwidthQuietHoursStart, forKey: "bandwidthQuietHoursStart") }
+    }
+    /// End of quiet window (hour of day, 0–23; exclusive). Wraps midnight when start > end.
+    @Published public var bandwidthQuietHoursEnd: Int {
+        didSet { UserDefaults.standard.set(bandwidthQuietHoursEnd, forKey: "bandwidthQuietHoursEnd") }
+    }
+
+    /// Returns true when the current local time falls inside the configured quiet window.
+    public func isInBandwidthQuietHours() -> Bool {
+        guard bandwidthQuietHoursEnabled else { return false }
+        let hour = Calendar.current.component(.hour, from: Date())
+        let s = bandwidthQuietHoursStart
+        let e = bandwidthQuietHoursEnd
+        if s == e { return false }           // degenerate window — disabled
+        if s < e  { return hour >= s && hour < e }
+        return hour >= s || hour < e         // wraps midnight
+    }
+
     // MARK: - Log rotation
     /// When true, daily summaries are written to ~/Library/Logs/MeOrThem/.
     @Published public var enableLogRotation: Bool {
@@ -144,6 +168,9 @@ public final class AppSettings: ObservableObject {
         pollIntervalSecs          = ud.double(forKey: "pollIntervalSecs").nonZero ?? 5
         showLatencyInMenubar      = ud.bool(forKey: "showLatencyInMenubar")
         bandwidthScheduleHours    = ud.double(forKey: "bandwidthScheduleHours")   // 0 = disabled
+        bandwidthQuietHoursEnabled = ud.object(forKey: "bandwidthQuietHoursEnabled") as? Bool ?? false
+        bandwidthQuietHoursStart  = ud.object(forKey: "bandwidthQuietHoursStart") as? Int ?? 9
+        bandwidthQuietHoursEnd    = ud.object(forKey: "bandwidthQuietHoursEnd")   as? Int ?? 17
         enableLogRotation         = ud.bool(forKey: "enableLogRotation")
         bandwidthBarRedMbps       = ud.double(forKey: "bandwidthBarRedMbps").nonZero ?? 10
         bandwidthBarYellowMbps    = ud.double(forKey: "bandwidthBarYellowMbps").nonZero ?? 25
