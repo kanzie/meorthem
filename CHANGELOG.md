@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.49.0 — 2026-04-29
+
+### New Features
+- **Incident notes** — Each recorded incident can now have a free-text annotation. Expand any incident row in the Incidents tab to find a "Note" field where you can write context (e.g. "ISP maintenance window" or "router rebooted"). Notes are saved to the database and persist across sessions. A note icon appears on collapsed rows that have an annotation.
+
+---
+
 ## v2.48.0 — 2026-04-29
 
 ### New Features

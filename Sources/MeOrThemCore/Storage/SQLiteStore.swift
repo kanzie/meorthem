@@ -297,6 +297,25 @@ public final class SQLiteStore: @unchecked Sendable {
         }
     }
 
+    /// Saves or clears the user-written note on a specific incident.
+    /// Pass nil to remove an existing note.
+    public func updateIncidentNote(id: UUID, note: String?) {
+        let idStr = id.uuidString
+        queue.async { [weak self] in
+            guard let self else { return }
+            let sql = "UPDATE incidents SET note = ? WHERE id = ?;"
+            guard let stmt = self._prepare(sql) else { return }
+            defer { sqlite3_finalize(stmt) }
+            if let n = note, !n.isEmpty {
+                self._bindText(stmt, 1, n)
+            } else {
+                sqlite3_bind_null(stmt, 1)
+            }
+            self._bindText(stmt, 2, idStr)
+            sqlite3_step(stmt)
+        }
+    }
+
     // MARK: - Maintenance (fire-and-forget)
 
     /// Aggregates raw samples older than `rawRetentionDays` into per-minute rows,
@@ -440,8 +459,21 @@ public final class SQLiteStore: @unchecked Sendable {
         public let severityRaw: Int
         public let peakSeverityRaw: Int
         public let cause: String
+        /// Optional free-text annotation added by the user (e.g. "ISP maintenance window").
+        public let note: String?
 
         public var isActive: Bool { endedAt == nil }
+
+        public init(id: UUID, startedAt: Date, endedAt: Date?, severityRaw: Int,
+                    peakSeverityRaw: Int, cause: String, note: String? = nil) {
+            self.id             = id
+            self.startedAt      = startedAt
+            self.endedAt        = endedAt
+            self.severityRaw    = severityRaw
+            self.peakSeverityRaw = peakSeverityRaw
+            self.cause          = cause
+            self.note           = note
+        }
     }
 
     /// A system-level sleep or wake event recorded by the OS notification center.
@@ -932,6 +964,8 @@ public final class SQLiteStore: @unchecked Sendable {
         _exec("ALTER TABLE network_sessions ADD COLUMN isp_name TEXT;")
         // v2.45.0: user-assigned label for connection profiles.
         _exec("ALTER TABLE connection_profiles ADD COLUMN user_label TEXT;")
+        // v2.49.0: user note on incidents.
+        _exec("ALTER TABLE incidents ADD COLUMN note TEXT;")
     }
 
     // MARK: - Private: insert implementations
@@ -1578,7 +1612,7 @@ public final class SQLiteStore: @unchecked Sendable {
 
     private func _incidents(limit: Int) -> [IncidentRow] {
         let sql = """
-            SELECT id, started_at, ended_at, severity_raw, peak_severity_raw, cause
+            SELECT id, started_at, ended_at, severity_raw, peak_severity_raw, cause, note
             FROM incidents
             ORDER BY started_at DESC
             LIMIT ?;
@@ -1591,7 +1625,7 @@ public final class SQLiteStore: @unchecked Sendable {
 
     private func _incidentsInRange(from: Double, to: Double, limit: Int) -> [IncidentRow] {
         let sql = """
-            SELECT id, started_at, ended_at, severity_raw, peak_severity_raw, cause
+            SELECT id, started_at, ended_at, severity_raw, peak_severity_raw, cause, note
             FROM incidents
             WHERE started_at >= ? AND started_at <= ?
             ORDER BY started_at DESC
@@ -1613,13 +1647,16 @@ public final class SQLiteStore: @unchecked Sendable {
             let startedAt = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1))
             let endedAt: Date? = sqlite3_column_type(stmt, 2) != SQLITE_NULL
                 ? Date(timeIntervalSince1970: sqlite3_column_double(stmt, 2)) : nil
+            let note: String? = sqlite3_column_type(stmt, 6) != SQLITE_NULL
+                ? sqlite3_column_text(stmt, 6).map { String(cString: $0) } : nil
             rows.append(IncidentRow(
                 id:               id,
                 startedAt:        startedAt,
                 endedAt:          endedAt,
                 severityRaw:      Int(sqlite3_column_int(stmt, 3)),
                 peakSeverityRaw:  Int(sqlite3_column_int(stmt, 4)),
-                cause:            sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? ""
+                cause:            sqlite3_column_text(stmt, 5).map { String(cString: $0) } ?? "",
+                note:             note
             ))
         }
         return rows

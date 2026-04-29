@@ -11,6 +11,8 @@ struct IncidentHistoryView: View {
     @State private var isFiltering = false
     @State private var showClearConfirm = false
     @State private var expandedID: UUID? = nil
+    /// Tracks in-progress note text for each expanded incident (keyed by UUID).
+    @State private var editingNotes: [UUID: String] = [:]
 
     private static let startFmt: DateFormatter = {
         let f = DateFormatter()
@@ -134,6 +136,12 @@ struct IncidentHistoryView: View {
                                 .padding(.vertical, 1)
                                 .background(RoundedRectangle(cornerRadius: 3).fill(Color.orange.opacity(0.15)))
                         }
+                        if inc.note != nil {
+                            Image(systemName: "note.text")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .help("This incident has a note")
+                        }
                     }
                     Text(inc.cause.count > 60 ? String(inc.cause.prefix(60)) + "…" : inc.cause)
                         .font(.caption)
@@ -216,6 +224,32 @@ struct IncidentHistoryView: View {
                             .font(.callout)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+
+                    // User note
+                    detailBlock(title: "Note") {
+                        let binding = Binding<String>(
+                            get: { editingNotes[inc.id] ?? inc.note ?? "" },
+                            set: { editingNotes[inc.id] = $0 }
+                        )
+                        HStack(alignment: .bottom, spacing: 8) {
+                            TextField("Add a note…", text: binding, axis: .vertical)
+                                .font(.callout)
+                                .textFieldStyle(.plain)
+                                .lineLimit(1...4)
+                                .frame(maxWidth: .infinity)
+                                .padding(6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(Color(NSColor.controlBackgroundColor))
+                                )
+                            Button("Save") {
+                                let text = editingNotes[inc.id] ?? ""
+                                saveNote(for: inc, text: text)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled((editingNotes[inc.id] ?? inc.note ?? "") == (inc.note ?? ""))
+                        }
+                    }
                 }
                 .padding(.leading, 19)
                 .padding(.bottom, 8)
@@ -254,6 +288,25 @@ struct IncidentHistoryView: View {
         let mins = secs / 60
         let rem  = secs % 60
         return rem > 0 ? "\(mins)m \(rem)s" : "\(mins)m"
+    }
+
+    private func saveNote(for inc: SQLiteStore.IncidentRow, text: String) {
+        let db = sqliteStore
+        let id = inc.id
+        let note = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task.detached(priority: .utility) {
+            db.updateIncidentNote(id: id, note: note.isEmpty ? nil : note)
+        }
+        // Optimistically update local state so the button disables immediately.
+        editingNotes.removeValue(forKey: id)
+        if let idx = rows.firstIndex(where: { $0.id == id }) {
+            let old = rows[idx]
+            rows[idx] = SQLiteStore.IncidentRow(
+                id: old.id, startedAt: old.startedAt, endedAt: old.endedAt,
+                severityRaw: old.severityRaw, peakSeverityRaw: old.peakSeverityRaw,
+                cause: old.cause, note: note.isEmpty ? nil : note
+            )
+        }
     }
 
     private func loadAll() {
