@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.50.0 — 2026-04-29
+
+### New Features
+- **Latency p95 reference line** — The latency chart now shows a purple dashed "p95" line when at least 20 samples are available for the selected window. The line represents the 95th-percentile round-trip time across visible targets, making tail latency spikes visible even when the mean looks healthy.
+
+---
+
 ## v2.49.0 — 2026-04-29
 
 ### New Features

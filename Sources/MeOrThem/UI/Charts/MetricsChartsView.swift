@@ -114,6 +114,16 @@ struct MetricsChartsView: View {
         let labels = Set(visibleTargetLabels)
         return loader.latencyPoints.filter { labels.contains($0.targetLabel) }
     }
+
+    /// p95 value to show on the latency chart.
+    /// Single-target: that target's p95. All-targets: overall p95 across visible targets.
+    private var latencyP95: Double? {
+        let values = visibleTargetLabels.compactMap { loader.latencyP95ByTarget[$0] }
+        guard !values.isEmpty else { return nil }
+        if values.count == 1 { return values[0] }
+        let sorted = values.sorted()
+        return sorted[Int((Double(sorted.count - 1) * 0.95).rounded())]
+    }
     private var filteredLoss: [ChartPoint] {
         let labels = Set(visibleTargetLabels)
         return loader.lossPoints.filter { labels.contains($0.targetLabel) }
@@ -461,6 +471,19 @@ struct MetricsChartsView: View {
                         RuleMark(y: .value("Red", thresholds.latencyRedMs))
                             .foregroundStyle(Color.red.opacity(0.4))
                             .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+
+                        // p95 reference line — shown when ≥20 samples are available.
+                        // Helps surface tail latency that the mean line masks.
+                        if let p95 = latencyP95 {
+                            RuleMark(y: .value("p95", p95))
+                                .foregroundStyle(Color.purple.opacity(0.55))
+                                .lineStyle(StrokeStyle(lineWidth: 1, dash: [2, 3]))
+                                .annotation(position: .trailing, alignment: .center, spacing: 4) {
+                                    Text("p95")
+                                        .font(.system(size: 9, weight: .medium))
+                                        .foregroundStyle(Color.purple.opacity(0.7))
+                                }
+                        }
 
                         // Cap at 10 markers — more than that creates visual noise.
                         // The full incident list is always shown in the Incidents card below.

@@ -59,6 +59,9 @@ final class MetricsDataLoader: ObservableObject {
     @Published private(set) var lossPoints:      [ChartPoint] = []
     @Published private(set) var jitterPoints:    [ChartPoint] = []
     @Published private(set) var wifiRSSI:        [ChartPoint] = []
+    /// p95 latency (ms) per target label, computed from all raw rows before downsampling.
+    /// nil for targets with fewer than 20 samples (not enough data for a meaningful percentile).
+    @Published private(set) var latencyP95ByTarget: [String: Double] = [:]
     /// Per-resolver RTT points. `targetLabel` = resolver name for color-coding.
     @Published private(set) var dnsPoints:         [ChartPoint] = []
     @Published private(set) var speedtestPoints:     [SQLiteStore.SpeedtestRow] = []
@@ -136,6 +139,7 @@ final class MetricsDataLoader: ObservableObject {
             var latency  = [ChartPoint]()
             var loss     = [ChartPoint]()
             var jitter   = [ChartPoint]()
+            var p95Map   = [String: Double]()
 
             for target in targets {
                 // For wide windows we prefer aggregated minute-level rows, but also
@@ -151,6 +155,14 @@ final class MetricsDataLoader: ObservableObject {
                     rows = (aggRows + rawRows).sorted { $0.timestamp < $1.timestamp }
                 } else {
                     rows = db.pingRows(for: target.id, from: from, to: now)
+                }
+
+                // Compute p95 from the full unsampled dataset — requires ≥20 samples.
+                let rtts = rows.compactMap(\.rttMs)
+                if rtts.count >= 20 {
+                    let sorted = rtts.sorted()
+                    let idx    = Int((Double(sorted.count - 1) * 0.95).rounded())
+                    p95Map[target.label] = sorted[idx]
                 }
 
                 let sampled = Self.downsample(rows, maxPoints: maxPts / max(targets.count, 1))
@@ -211,6 +223,7 @@ final class MetricsDataLoader: ObservableObject {
             let finalIncidents    = recentIncidents
             let finalSysEvents    = sysEventRows
             let finalAvailability = availFraction
+            let finalP95          = p95Map
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -225,6 +238,7 @@ final class MetricsDataLoader: ObservableObject {
                 self.incidents           = finalIncidents
                 self.systemEvents        = finalSysEvents
                 self.availabilityFraction = finalAvailability
+                self.latencyP95ByTarget  = finalP95
                 self.isLoading           = false
             }
         }
@@ -266,6 +280,8 @@ final class MetricsDataLoader: ObservableObject {
             var loss    = [ChartPoint]()
             var jitter  = [ChartPoint]()
 
+            var p95Map = [String: Double]()
+
             for target in targets {
                 let rows: [SQLiteStore.PingRow]
                 if useAgg {
@@ -275,6 +291,14 @@ final class MetricsDataLoader: ObservableObject {
                 } else {
                     rows = db.pingRows(for: target.id, from: from, to: to)
                 }
+
+                let rtts = rows.compactMap(\.rttMs)
+                if rtts.count >= 20 {
+                    let sorted = rtts.sorted()
+                    let idx    = Int((Double(sorted.count - 1) * 0.95).rounded())
+                    p95Map[target.label] = sorted[idx]
+                }
+
                 let sampled = Self.downsample(rows, maxPoints: maxPts / max(targets.count, 1))
                 for r in sampled {
                     if let rtt = r.rttMs {
@@ -324,6 +348,7 @@ final class MetricsDataLoader: ObservableObject {
             let finalIncidents    = recentIncidents
             let finalSysEvents    = sysEventRows
             let finalAvailability = availFraction
+            let finalP95          = p95Map
 
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -338,6 +363,7 @@ final class MetricsDataLoader: ObservableObject {
                 self.incidents            = finalIncidents
                 self.systemEvents         = finalSysEvents
                 self.availabilityFraction = finalAvailability
+                self.latencyP95ByTarget   = finalP95
                 self.isLoading            = false
             }
         }
