@@ -15,10 +15,10 @@ final class ConnectionProfilesWindowController: NSWindowController {
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
         window.title = "Connection Profiles"
-        window.setContentSize(NSSize(width: 680, height: 460))
+        window.setContentSize(NSSize(width: 720, height: 480))
         window.styleMask = [.titled, .closable, .resizable, .miniaturizable]
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 500, height: 300)
+        window.minSize = NSSize(width: 520, height: 300)
         super.init(window: window)
     }
 
@@ -39,8 +39,11 @@ struct ConnectionProfilesView: View {
     /// by the Network Intelligence unified window to indicate the active profile).
     var highlightedFingerprint: String? = nil
 
-    @State private var profiles: [SQLiteStore.ConnectionProfile] = []
-    @State private var isLoading = true
+    @State private var profiles:      [SQLiteStore.ConnectionProfile] = []
+    @State private var isLoading      = true
+    @State private var editingFP:     String? = nil   // fingerprint of row being label-edited
+    @State private var labelDraft:    String  = ""
+    @State private var deleteConfirm: String? = nil   // fingerprint pending delete confirm
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,58 +55,158 @@ struct ConnectionProfilesView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                Table(profiles) {
-                    TableColumn("Network") { p in
-                        HStack(spacing: 6) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(p.displayName)
-                                    .font(.system(.body, design: .monospaced))
-                                    .lineLimit(1)
-                                Text(p.fingerprint)
-                                    .font(.system(.caption2, design: .monospaced))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                            if p.fingerprint == highlightedFingerprint {
-                                Text("Active")
-                                    .font(.caption2.weight(.semibold))
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(RoundedRectangle(cornerRadius: 3).fill(Color.green))
-                            }
-                        }
-                        .padding(.vertical, 2)
+                List {
+                    ForEach(profiles) { p in
+                        profileRow(p)
                     }
-                    .width(min: 140, ideal: 220)
-
-                    TableColumn("Type") { p in
-                        stealthBadge(p)
-                    }
-                    .width(90)
-
-                    TableColumn("ICMP Status") { p in
-                        icmpStatus(p)
-                    }
-                    .width(100)
-
-                    TableColumn("Sessions") { p in
-                        Text("\(p.totalSessions)")
-                            .monospacedDigit()
-                    }
-                    .width(60)
-
-                    TableColumn("Last Seen") { p in
-                        Text(p.lastSeen.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .width(min: 120, ideal: 160)
                 }
-                .alternatingRowBackgrounds()
+                .listStyle(.plain)
             }
         }
         .task { await load() }
+        .alert("Delete profile?", isPresented: Binding(
+            get: { deleteConfirm != nil },
+            set: { if !$0 { deleteConfirm = nil } }
+        )) {
+            Button("Delete", role: .destructive) {
+                if let fp = deleteConfirm {
+                    db.deleteConnectionProfile(fingerprint: fp)
+                    profiles.removeAll { $0.fingerprint == fp }
+                }
+                deleteConfirm = nil
+            }
+            Button("Cancel", role: .cancel) { deleteConfirm = nil }
+        } message: {
+            Text("This removes all stored settings for this network. Monitoring data is kept.")
+        }
+    }
+
+    // MARK: - Row
+
+    @ViewBuilder
+    private func profileRow(_ p: SQLiteStore.ConnectionProfile) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 10) {
+
+                // — Identity column
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        // User label takes precedence; falls back to auto displayName
+                        if let label = p.userLabel, !label.isEmpty {
+                            Text(label)
+                                .font(.system(.body, weight: .medium))
+                                .lineLimit(1)
+                            Text("(\(p.displayName))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        } else {
+                            Text(p.displayName)
+                                .font(.system(.body, design: .monospaced))
+                                .lineLimit(1)
+                        }
+                        if p.fingerprint == highlightedFingerprint {
+                            Text("Active")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(RoundedRectangle(cornerRadius: 3).fill(Color.green))
+                        }
+                    }
+
+                    // Inline label editor
+                    if editingFP == p.fingerprint {
+                        HStack(spacing: 6) {
+                            TextField("Label (e.g. Home, Office)", text: $labelDraft)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.caption)
+                                .frame(maxWidth: 200)
+                                .onSubmit { commitLabel(for: p) }
+                            Button("Save") { commitLabel(for: p) }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.mini)
+                            Button("Cancel") { editingFP = nil }
+                                .buttonStyle(.plain)
+                                .controlSize(.mini)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 3)
+                    } else {
+                        Button {
+                            labelDraft = p.userLabel ?? ""
+                            editingFP  = p.fingerprint
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "tag")
+                                    .imageScale(.small)
+                                Text(p.userLabel.map { $0.isEmpty ? "Add label…" : "Edit label" } ?? "Add label…")
+                            }
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 2)
+                    }
+                }
+
+                Spacer(minLength: 12)
+
+                // — Type badge
+                stealthBadge(p)
+                    .frame(width: 90, alignment: .center)
+
+                // — ICMP status
+                icmpStatus(p)
+                    .frame(width: 90, alignment: .leading)
+
+                // — Session count
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text("\(p.totalSessions)")
+                        .monospacedDigit()
+                        .font(.callout)
+                    Text("sessions")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                .frame(width: 55, alignment: .trailing)
+
+                // — Last seen
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(p.lastSeen.formatted(date: .abbreviated, time: .omitted))
+                        .font(.caption)
+                    Text(p.lastSeen.formatted(date: .omitted, time: .shortened))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 90, alignment: .trailing)
+
+                // — Delete
+                Button {
+                    deleteConfirm = p.fingerprint
+                } label: {
+                    Image(systemName: "trash")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Remove this profile")
+            }
+            .padding(.vertical, 6)
+        }
+        .listRowInsets(EdgeInsets(top: 2, leading: 14, bottom: 2, trailing: 14))
+    }
+
+    // MARK: - Helpers
+
+    private func commitLabel(for p: SQLiteStore.ConnectionProfile) {
+        let trimmed  = labelDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let newLabel: String? = trimmed.isEmpty ? nil : trimmed
+        db.setConnectionProfileLabel(fingerprint: p.fingerprint, label: newLabel)
+        editingFP = nil
+        // Reload from DB so the list reflects the saved label without
+        // needing a public memberwise initializer on ConnectionProfile.
+        Task { await load() }
     }
 
     @ViewBuilder

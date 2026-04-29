@@ -133,6 +133,17 @@ struct MetricsChartsView: View {
                 } else {
                     ScrollView {
                         VStack(spacing: 24) {
+                            // In session-scoped mode: target picker lives here rather
+                            // than in the shared window toolbar.
+                            if preloadedSession != nil && loader.targets.count > 1 {
+                                HStack {
+                                    Spacer()
+                                    targetPicker
+                                }
+                                .padding(.horizontal, 20)
+                                .padding(.top, 4)
+                                .padding(.bottom, -12)
+                            }
                             latencyCard
                             lossCard
                             jitterCard
@@ -164,31 +175,26 @@ struct MetricsChartsView: View {
         .background(Color(NSColor.windowBackgroundColor))
         .frame(minWidth: 780, minHeight: 500)
         .toolbar {
-            if loader.targets.count > 1 {
-                ToolbarItem(placement: .navigation) {
-                    targetPicker
-                }
-            }
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 8) {
-                    if preloadedSession != nil {
-                        // Session-scoped mode: show date range label instead of time-window picker.
-                        if let from = loader.rangeStart as Date?,
-                           let to   = loader.rangeEnd   as Date? {
-                            Text("\(from.formatted(date: .abbreviated, time: .omitted)) – \(to.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        windowPicker
+            // In session-scoped (embedded) mode the toolbar belongs to a shared window
+            // that also hosts other tabs — keep only the refresh button there.
+            // The target picker and time-window controls live inside the content area instead.
+            if preloadedSession == nil {
+                if loader.targets.count > 1 {
+                    ToolbarItem(placement: .navigation) {
+                        targetPicker
                     }
-                    if let avail = loader.availabilityFraction {
-                        let pctStr   = String(format: "%.1f%%", avail * 100)
-                        let color: Color = avail >= 0.99 ? .green
-                                        : avail >= 0.95 ? .orange : .red
-                        Text("\(pctStr) uptime")
-                            .font(.caption)
-                            .foregroundStyle(color)
+                }
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 8) {
+                        windowPicker
+                        if let avail = loader.availabilityFraction {
+                            let pctStr   = String(format: "%.1f%%", avail * 100)
+                            let color: Color = avail >= 0.99 ? .green
+                                            : avail >= 0.95 ? .orange : .red
+                            Text("\(pctStr) uptime")
+                                .font(.caption)
+                                .foregroundStyle(color)
+                        }
                     }
                 }
             }

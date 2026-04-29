@@ -454,6 +454,9 @@ public final class SQLiteStore: @unchecked Sendable {
     public struct ConnectionProfile: Identifiable, Sendable {
         public let fingerprint:           String
         public let displayName:           String
+        /// User-assigned label for this network (e.g. "Home", "Office").
+        /// When set, the UI uses this instead of the auto-generated displayName.
+        public let userLabel:             String?
         public let stealthMode:           Bool
         public let stealthProbePort:      Int?
         public let stealthDetectedAt:     Date?
@@ -927,6 +930,8 @@ public final class SQLiteStore: @unchecked Sendable {
         _exec("ALTER TABLE network_sessions ADD COLUMN vpn_interface TEXT;")
         // v2.40.0: ISP/ASN name resolved at session open time.
         _exec("ALTER TABLE network_sessions ADD COLUMN isp_name TEXT;")
+        // v2.45.0: user-assigned label for connection profiles.
+        _exec("ALTER TABLE connection_profiles ADD COLUMN user_label TEXT;")
     }
 
     // MARK: - Private: insert implementations
@@ -1666,6 +1671,17 @@ public final class SQLiteStore: @unchecked Sendable {
         }
     }
 
+    /// Set or clear the user-assigned label for a profile.
+    /// Pass nil to remove a previously set label.
+    public func setConnectionProfileLabel(fingerprint: String, label: String?) {
+        queue.async { [weak self] in self?._setConnectionProfileLabel(fingerprint: fingerprint, label: label) }
+    }
+
+    /// Permanently delete a connection profile and all associated state.
+    public func deleteConnectionProfile(fingerprint: String) {
+        queue.async { [weak self] in self?._deleteConnectionProfile(fingerprint: fingerprint) }
+    }
+
     /// Advance last_seen and increment total_sessions for an existing profile.
     public func touchConnectionProfile(fingerprint: String, now: Date = Date()) {
         let ts = now.timeIntervalSince1970
@@ -1749,7 +1765,8 @@ public final class SQLiteStore: @unchecked Sendable {
             SELECT fingerprint, display_name, stealth_mode, stealth_probe_port,
                    stealth_detected_at, stealth_source, icmp_last_ok_at,
                    icmp_throttled, icmp_throttled_at, preferred_poll_interval,
-                   poll_interval_source, first_seen, last_seen, total_sessions
+                   poll_interval_source, first_seen, last_seen, total_sessions,
+                   user_label
             FROM connection_profiles WHERE fingerprint = ? LIMIT 1;
             """
         guard let stmt = _prepare(sql) else { return nil }
@@ -1764,7 +1781,8 @@ public final class SQLiteStore: @unchecked Sendable {
             SELECT fingerprint, display_name, stealth_mode, stealth_probe_port,
                    stealth_detected_at, stealth_source, icmp_last_ok_at,
                    icmp_throttled, icmp_throttled_at, preferred_poll_interval,
-                   poll_interval_source, first_seen, last_seen, total_sessions
+                   poll_interval_source, first_seen, last_seen, total_sessions,
+                   user_label
             FROM connection_profiles ORDER BY last_seen DESC;
             """
         guard let stmt = _prepare(sql) else { return [] }
@@ -1796,9 +1814,11 @@ public final class SQLiteStore: @unchecked Sendable {
         let firstSeen = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 11))
         let lastSeen  = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 12))
         let totalSessions = Int(sqlite3_column_int(stmt, 13))
+        let userLabel = sqlite3_column_text(stmt, 14).map { String(cString: $0) }
         return ConnectionProfile(
             fingerprint:           fp,
             displayName:           displayName,
+            userLabel:             userLabel,
             stealthMode:           stealthMode,
             stealthProbePort:      probePort,
             stealthDetectedAt:     detectedAt,
@@ -1891,6 +1911,23 @@ public final class SQLiteStore: @unchecked Sendable {
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_double(stmt, 1, now)
         _bindText(stmt, 2, fingerprint)
+        sqlite3_step(stmt)
+    }
+
+    private func _setConnectionProfileLabel(fingerprint: String, label: String?) {
+        let sql = "UPDATE connection_profiles SET user_label = ? WHERE fingerprint = ?;"
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        if let l = label { _bindText(stmt, 1, l) } else { sqlite3_bind_null(stmt, 1) }
+        _bindText(stmt, 2, fingerprint)
+        sqlite3_step(stmt)
+    }
+
+    private func _deleteConnectionProfile(fingerprint: String) {
+        let sql = "DELETE FROM connection_profiles WHERE fingerprint = ?;"
+        guard let stmt = _prepare(sql) else { return }
+        defer { sqlite3_finalize(stmt) }
+        _bindText(stmt, 1, fingerprint)
         sqlite3_step(stmt)
     }
 

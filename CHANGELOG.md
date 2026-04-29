@@ -5,6 +5,21 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.45.0 — 2026-04-29
+
+### New Features
+- **Network profile labels** — You can now assign a custom name (e.g. "Home", "Office") to any connection profile in the Profiles tab. The label replaces the auto-generated technical name throughout the sidebar and profile list. Labels can be edited or cleared at any time, and profiles can now also be deleted from the list.
+
+### Changes
+- **Incident details expand inline** — Clicking the chevron on an incident row now expands it in place to show the full cause text, precise start/end timestamps, severity level, and duration. This replaces the previous "View" button that only switched to the Graphs tab without context.
+- **Target picker moved into Graphs tab** — The ping-target filter menu is no longer injected into the shared window toolbar (where it appeared for all tabs). It now lives inside the Graphs view itself, visible only when that tab is active.
+
+### Bug Fixes
+- **VPN false positive in Analysis** — The "VPN Active" finding was shown for WiFi sessions whenever a VPN tunnel happened to be running when the session opened. It is now only surfaced for sessions whose connection type is explicitly VPN.
+- **0% uptime on historical sessions** — The uptime percentage displayed next to the session date range in the graphs toolbar has been removed for session-scoped views. It was computed from an incomplete sample set for most historical sessions and was systematically misleading.
+
+---
+
 ## v2.44.1 — 2026-04-28
 
 ### Changes

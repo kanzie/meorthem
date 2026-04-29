@@ -40,6 +40,17 @@ final class NetworkIntelligenceWindowController: NSWindowController {
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // SwiftUI defers its first layout pass until after the window appears.
+        // Without a nudge, HSplitView positions its divider at 0 until the user
+        // triggers a resize. A 1-pt invisible resize on the next run-loop tick
+        // forces SwiftUI to complete its layout and honour idealWidth.
+        DispatchQueue.main.async { [weak self] in
+            guard let w = self?.window else { return }
+            let f = w.frame
+            w.setFrame(NSRect(x: f.minX, y: f.minY,
+                              width: f.width + 1, height: f.height), display: false)
+            w.setFrame(f, display: true)
+        }
     }
 }
 
@@ -65,6 +76,8 @@ private struct NetworkIntelligenceView: View {
     @State private var sessions:        [SQLiteStore.NetworkSessionRow] = []
     @State private var selectedSession: SQLiteStore.NetworkSessionRow?
     @State private var activeSessionID: UUID?
+    /// fingerprint → user-assigned label, loaded alongside sessions
+    @State private var profileLabels:   [String: String] = [:]
 
     var body: some View {
         HSplitView {
@@ -131,11 +144,19 @@ private struct NetworkIntelligenceView: View {
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(session.displayName)
+                // Show user-assigned label if one exists, otherwise the auto name
+                let label = profileLabels[session.fingerprint]
+                Text(label ?? session.displayName)
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
                 HStack(spacing: 4) {
-                    Text(Self.timeFmt.string(from: session.lastSeen))
+                    if label != nil {
+                        // Under the label: show the technical display name as context
+                        Text(session.displayName)
+                            .lineLimit(1)
+                    } else {
+                        Text(Self.timeFmt.string(from: session.lastSeen))
+                    }
                     if let isp = session.ispName {
                         Text("· \(isp)").lineLimit(1)
                     }
@@ -198,10 +219,7 @@ private struct NetworkIntelligenceView: View {
             )
 
         case .incidents:
-            IncidentHistoryView(
-                sqliteStore:  db,
-                onShowCharts: { _, _ in selectedTab = .graphs }
-            )
+            IncidentHistoryView(sqliteStore: db)
         }
     }
 
@@ -258,17 +276,34 @@ private struct NetworkIntelligenceView: View {
     private func loadSessions() async {
         let db            = self.db
         let currentSessID = metricStore.currentSessionID
-        let rows = await Task.detached(priority: .userInitiated) {
-            db.sessionsInRange(from: .distantPast, to: .distantFuture)
+        let (rows, profiles) = await Task.detached(priority: .userInitiated) {
+            let s = db.sessionsInRange(from: .distantPast, to: .distantFuture)
+            let p = db.allConnectionProfiles()
+            return (s, p)
         }.value
 
-        // Deduplicate: one row per fingerprint, keeping the most recently active session.
-        // This collapses "5 GHz • 192.168.1.x × 15 today" into a single sidebar entry.
-        var seen = Set<String>()
-        let deduped = rows
-            .sorted { $0.lastSeen > $1.lastSeen }
-            .filter  { seen.insert($0.fingerprint).inserted }
+        // Build fingerprint → userLabel map
+        var labels: [String: String] = [:]
+        for p in profiles {
+            if let l = p.userLabel, !l.isEmpty { labels[p.fingerprint] = l }
+        }
 
+        // Drop sessions where the subnet was unresolvable at open time (?.?.?.x).
+        // These are transient sessions created before the network stack provided a
+        // valid local IP address; they carry no useful identity or data.
+        let filtered = rows.filter { !$0.displayName.contains("?.?.?") }
+
+        // Deduplicate by displayName (not fingerprint). Fingerprints include the WiFi
+        // channel number, so an auto-channel switch on the same router produces two
+        // different fingerprints with identical display names. Keeping the most-recently-
+        // active session per display name gives the user one sidebar entry per logical
+        // network identity.
+        var seen = Set<String>()
+        let deduped = filtered
+            .sorted { $0.lastSeen > $1.lastSeen }
+            .filter  { seen.insert($0.displayName).inserted }
+
+        profileLabels   = labels
         sessions        = deduped
         activeSessionID = currentSessID
 

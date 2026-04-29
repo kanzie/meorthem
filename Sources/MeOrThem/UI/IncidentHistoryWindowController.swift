@@ -5,7 +5,6 @@ import SwiftUI
 final class IncidentHistoryWindowController: NSWindowController {
 
     private let sqliteStore: SQLiteStore
-    var onShowCharts: ((Date, Date) -> Void)?
 
     init(sqliteStore: SQLiteStore) {
         self.sqliteStore = sqliteStore
@@ -25,10 +24,8 @@ final class IncidentHistoryWindowController: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func showAndFocus(onShowCharts: ((Date, Date) -> Void)? = nil) {
-        self.onShowCharts = onShowCharts
-        let view = IncidentHistoryView(sqliteStore: sqliteStore,
-                                       onShowCharts: onShowCharts)
+    func showAndFocus() {
+        let view = IncidentHistoryView(sqliteStore: sqliteStore)
         window?.contentViewController = NSHostingController(rootView: view)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)

@@ -187,7 +187,12 @@ struct NetworkAnalysisView: View {
             input.tracerouteRows         = tracerouteRows
             input.crossSessionHourlyRTTs   = hourlyRTTs
             input.crossSessionWeekdayRTTs  = weekdayRTTs
-            input.vpnInterface             = session.vpnInterface
+            // Only surface the VPN finding when this is explicitly a VPN session type.
+            // For WiFi/Ethernet sessions, vpn_interface is metadata recorded at open time;
+            // the tunnel may have since disconnected and showing "VPN Active" would be wrong.
+            if session.connectionType == "vpn" {
+                input.vpnInterface = session.vpnInterface
+            }
             let suf = DataSufficiency(sampleCount: targetPings.count)
             let results = analyzer.analyze(input)
             return (results, suf.label)
