@@ -675,6 +675,46 @@ public final class SQLiteStore: @unchecked Sendable {
         return max(0.0, 1.0 - (degraded / total))
     }
 
+    /// Computes a `ConnectionStabilityScore` for the given session window.
+    /// All I/O runs synchronously on the private queue — call from a background context.
+    public func stabilityScore(from: Date, to: Date) -> ConnectionStabilityScore {
+        let avail = availabilityFraction(from: from, to: to)
+
+        // Aggregate mean RTT, loss and jitter from ping_samples in the window.
+        let fromTs = from.timeIntervalSince1970
+        let toTs   = to.timeIntervalSince1970
+
+        let (meanRTT, meanLoss, meanJitter): (Double?, Double?, Double?) = queue.sync {
+            let sql = """
+                SELECT AVG(rtt_ms),
+                       100.0 * SUM(CASE WHEN rtt_ms IS NULL THEN 1 ELSE 0 END) / COUNT(*),
+                       AVG(jitter_ms)
+                FROM ping_samples
+                WHERE target_id != 'gateway'
+                  AND timestamp >= ? AND timestamp <= ?;
+                """
+            guard let stmt = _prepare(sql) else { return (nil, nil, nil) }
+            defer { sqlite3_finalize(stmt) }
+            sqlite3_bind_double(stmt, 1, fromTs)
+            sqlite3_bind_double(stmt, 2, toTs)
+            guard sqlite3_step(stmt) == SQLITE_ROW else { return (nil, nil, nil) }
+            // COUNT(*) check — if 0 rows matched, AVG returns NULL
+            let rtt    = sqlite3_column_type(stmt, 0) != SQLITE_NULL ? sqlite3_column_double(stmt, 0) : nil as Double?
+            let loss   = sqlite3_column_type(stmt, 1) != SQLITE_NULL ? sqlite3_column_double(stmt, 1) : nil as Double?
+            let jitter = sqlite3_column_type(stmt, 2) != SQLITE_NULL ? sqlite3_column_double(stmt, 2) : nil as Double?
+            // Require at least 5 samples for latency/loss to be meaningful
+            let countSql = "SELECT COUNT(*) FROM ping_samples WHERE target_id != 'gateway' AND timestamp >= \(fromTs) AND timestamp <= \(toTs);"
+            let n = _scalar(countSql)
+            if n < 5 { return (nil, nil, nil) }
+            return (rtt, loss, jitter)
+        }
+
+        return .compute(availability:  avail,
+                        meanRTTMs:     meanRTT,
+                        meanLossPct:   meanLoss,
+                        meanJitterMs:  meanJitter)
+    }
+
     /// Returns true if any ping data (raw or aggregated) exists in the given time range.
     /// Uses a LIMIT 1 query so it short-circuits immediately on the first matching row.
     public func hasPingData(from: Date, to: Date) -> Bool {

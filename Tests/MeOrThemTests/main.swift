@@ -18,6 +18,7 @@ runNetworkSessionKeyTests()
 runPingTargetTests()
 runSQLiteStoreWeekdayTests()
 runASNLookupTests()
+runStabilityScoreTests()
 
 printSummary()
 exit(_failCount > 0 ? 1 : 0)

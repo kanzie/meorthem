@@ -4,13 +4,14 @@ import SwiftUI
 // MARK: - Session comparison data model
 
 struct SessionComparisonData {
-    let avgLatencyMs:  Double?
-    let lossPercent:   Double?
-    let avgJitterMs:   Double?
-    let wifiRSSI:      Double?
-    let dnsLatencyMs:  Double?
-    let availability:  Double?   // 0.0–1.0
-    let bestDownMbps:  Double?
+    let avgLatencyMs:   Double?
+    let lossPercent:    Double?
+    let avgJitterMs:    Double?
+    let wifiRSSI:       Double?
+    let dnsLatencyMs:   Double?
+    let availability:   Double?   // 0.0–1.0
+    let bestDownMbps:   Double?
+    let stabilityScore: ConnectionStabilityScore?
 }
 
 // MARK: - Async loader
@@ -78,14 +79,17 @@ final class SessionComparisonLoader: ObservableObject {
         let speedRows = db.speedtestRows(from: from, to: to)
         let bestDown  = speedRows.map(\.downloadMbps).max()
 
+        let stability = db.stabilityScore(from: from, to: to)
+
         return SessionComparisonData(
-            avgLatencyMs: avgRtt,
-            lossPercent:  avgLoss,
-            avgJitterMs:  avgJitter,
-            wifiRSSI:     avgRSSI,
-            dnsLatencyMs: avgDNS,
-            availability: avail,
-            bestDownMbps: bestDown
+            avgLatencyMs:   avgRtt,
+            lossPercent:    avgLoss,
+            avgJitterMs:    avgJitter,
+            wifiRSSI:       avgRSSI,
+            dnsLatencyMs:   avgDNS,
+            availability:   avail,
+            bestDownMbps:   bestDown,
+            stabilityScore: stability
         )
     }
 }
@@ -202,6 +206,12 @@ struct SessionComparisonView: View {
                               delta: speedDelta(a.bestDownMbps, b.bestDownMbps),
                               lowerIsBetter: false)
                 }
+
+                metricRow("Stability Score",
+                          a: a.stabilityScore.map { "\(Int($0.total.rounded()))/100 (\($0.grade))" },
+                          b: b.stabilityScore.map { "\(Int($0.total.rounded()))/100 (\($0.grade))" },
+                          delta: scoreDelta(a.stabilityScore?.total, b.stabilityScore?.total),
+                          lowerIsBetter: false)
             }
         }
     }
@@ -291,6 +301,14 @@ struct SessionComparisonView: View {
         let sign = diff > 0 ? "+" : ""
         let color: Color = diff > 0.1 ? .green : diff < -0.1 ? .red : .secondary
         return (String(format: "%@%.2f%%", sign, diff), color)
+    }
+
+    private func scoreDelta(_ a: Double?, _ b: Double?) -> (text: String, color: Color)? {
+        guard let a, let b else { return nil }
+        let diff = b - a
+        let sign = diff > 0 ? "+" : ""
+        let color: Color = diff > 3 ? .green : diff < -3 ? .red : .secondary
+        return (String(format: "%@%.0f pts", sign, diff), color)
     }
 
     private func speedDelta(_ a: Double?, _ b: Double?) -> (text: String, color: Color)? {

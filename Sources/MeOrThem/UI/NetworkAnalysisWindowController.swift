@@ -49,6 +49,7 @@ struct NetworkAnalysisView: View {
     @State private var sessions:        [SQLiteStore.NetworkSessionRow] = []
     @State private var selectedSession: SQLiteStore.NetworkSessionRow?
     @State private var findings:        [NetworkFinding] = []
+    @State private var stabilityScore:  ConnectionStabilityScore? = nil
     @State private var isLoading        = false
     @State private var sufficiencyLabel = ""
 
@@ -65,6 +66,7 @@ struct NetworkAnalysisView: View {
                 // Outer sidebar owns session selection — show findings directly.
                 FindingsPanel(session:          selectedSession,
                               findings:         findings,
+                              stabilityScore:   stabilityScore,
                               isLoading:        isLoading,
                               sufficiencyLabel: sufficiencyLabel)
             } else {
@@ -77,6 +79,7 @@ struct NetworkAnalysisView: View {
 
                     FindingsPanel(session:          selectedSession,
                                   findings:         findings,
+                                  stabilityScore:   stabilityScore,
                                   isLoading:        isLoading,
                                   sufficiencyLabel: sufficiencyLabel)
                 }
@@ -142,7 +145,7 @@ struct NetworkAnalysisView: View {
     @MainActor
     private func analyzeSelected() async {
         guard let session = selectedSession else {
-            findings = []; sufficiencyLabel = ""; return
+            findings = []; stabilityScore = nil; sufficiencyLabel = ""; return
         }
         isLoading = true
         let db      = sqliteStore
@@ -150,8 +153,8 @@ struct NetworkAnalysisView: View {
         let targets = settings.pingTargets
         let analyzer = NetworkAnalyzer(settings: settings)
 
-        let (newFindings, newSufLabel) = await Task.detached(priority: .userInitiated) {
-            () -> ([NetworkFinding], String) in
+        let (newFindings, newSufLabel, newScore) = await Task.detached(priority: .userInitiated) {
+            () -> ([NetworkFinding], String, ConnectionStabilityScore) in
             // External target pings — fetched per-target for divergence analysis,
             // then flattened for single-target patterns.
             var pingsByTarget: [UUID: [SQLiteStore.PingRow]] = [:]
@@ -193,14 +196,16 @@ struct NetworkAnalysisView: View {
             if session.connectionType == "vpn" {
                 input.vpnInterface = session.vpnInterface
             }
-            let suf = DataSufficiency(sampleCount: targetPings.count)
+            let suf   = DataSufficiency(sampleCount: targetPings.count)
             let results = analyzer.analyze(input)
-            return (results, suf.label)
+            let score = db.stabilityScore(from: session.startedAt, to: session.lastSeen)
+            return (results, suf.label, score)
         }.value
 
         sufficiencyLabel = newSufLabel
-        findings  = newFindings.sorted { $0.confidence > $1.confidence }
-        isLoading = false
+        findings       = newFindings.sorted { $0.confidence > $1.confidence }
+        stabilityScore = newScore
+        isLoading      = false
     }
 }
 
@@ -359,6 +364,7 @@ private struct SessionListPanel: View {
 private struct FindingsPanel: View {
     let session:          SQLiteStore.NetworkSessionRow?
     let findings:         [NetworkFinding]
+    let stabilityScore:   ConnectionStabilityScore?
     let isLoading:        Bool
     let sufficiencyLabel: String
 
@@ -371,6 +377,9 @@ private struct FindingsPanel: View {
                         Text(s.displayName)
                             .font(.title2).fontWeight(.semibold)
                         Spacer()
+                        if !isLoading, let score = stabilityScore {
+                            StabilityBadge(score: score)
+                        }
                         if !isLoading && !findings.isEmpty {
                             Text("\(findings.count) issue\(findings.count == 1 ? "" : "s")")
                                 .font(.caption).fontWeight(.medium)
@@ -556,6 +565,37 @@ private struct FindingCard: View {
         case 0.80...: return .red
         case 0.55...: return .orange
         default:      return .yellow
+        }
+    }
+}
+
+// MARK: - Stability score badge
+
+private struct StabilityBadge: View {
+    let score: ConnectionStabilityScore
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(score.grade)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(gradeColor.opacity(0.85))
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+            Text("\(Int(score.total.rounded()))")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.secondary)
+        }
+        .help("Stability score \(score.label) — weighted composite of availability, latency, loss, and jitter")
+    }
+
+    private var gradeColor: Color {
+        switch score.grade {
+        case "A": return .green
+        case "B": return Color(red: 0.5, green: 0.75, blue: 0.2)
+        case "C": return .orange
+        case "D": return Color(red: 0.9, green: 0.45, blue: 0.0)
+        default:  return .red
         }
     }
 }

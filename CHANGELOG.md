@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.53.0 — 2026-04-29
+
+### New Features
+- **Connection stability score** — Each network session now receives a composite 0–100 stability score (grade A–F) displayed as a badge in the Network Analysis header. The score weights four components: availability/uptime (40%), mean latency (25%), packet-loss rate (25%), and mean jitter (10%). Thresholds mirror ITU-T G.114 quality guidelines. Missing components are redistributed proportionally so partial-data sessions still receive a meaningful score. The score also appears in the Session Comparison sheet, with a coloured delta column showing which session performed better.
+
+---
+
 ## v2.52.0 — 2026-04-29
 
 ### New Features
