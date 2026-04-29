@@ -484,6 +484,16 @@ final class AppEnvironment {
         // Reset DNS resolver failure counts — a resolver unreachable on one network
         // may be fully functional on another.
         settings.resetDNSResolverFailureCounts()
+
+        // Pre-compute the per-network latency baseline after 30 minutes.
+        // Runs once per session open; the DB update is idempotent so re-triggers are safe.
+        let sessionStartedAt = Date()
+        let baselineDB = sqliteStore
+        Task.detached(priority: .background) { [weak self] in
+            try? await Task.sleep(nanoseconds: 30 * 60 * 1_000_000_000)
+            guard let _ = self else { return }
+            baselineDB.computeAndStoreBaseline(sessionID: newID, from: sessionStartedAt)
+        }
     }
 
     // MARK: - VPN monitoring

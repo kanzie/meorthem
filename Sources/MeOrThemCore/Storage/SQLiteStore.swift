@@ -450,6 +450,9 @@ public final class SQLiteStore: @unchecked Sendable {
         /// Autonomous System / ISP name resolved via DNS TXT lookup at session open time.
         /// nil when the lookup failed, timed out, or for pre-migration rows.
         public let ispName:         String?
+        /// Median RTT computed from the first 30 minutes of the session.
+        /// nil until 30 minutes of data have been collected and `computeAndStoreBaseline` called.
+        public let learnedBaselineRTT: Double?
     }
 
     public struct IncidentRow: Identifiable {
@@ -570,6 +573,45 @@ public final class SQLiteStore: @unchecked Sendable {
         let ts    = time.timeIntervalSince1970
         queue.async { [weak self] in
             self?._touchSession(id: idStr, ts: ts)
+        }
+    }
+
+    /// Computes the median RTT from the first 30 minutes of the session and stores it
+    /// in `network_sessions.baseline_rtt_ms`.  Requires at least 10 samples.
+    /// Returns the computed median, or nil if there was insufficient data.
+    /// Call from a background context — synchronous on the private queue.
+    @discardableResult
+    public func computeAndStoreBaseline(sessionID: UUID, from sessionStart: Date) -> Double? {
+        let idStr  = sessionID.uuidString
+        let fromTs = sessionStart.timeIntervalSince1970
+        let toTs   = fromTs + 1_800  // 30 minutes
+
+        return queue.sync {
+            // Fetch RTTs from external targets (exclude gateway) within the first 30 min.
+            let sql = """
+                SELECT rtt_ms FROM ping_samples
+                WHERE session_id = ? AND target_id != 'gateway'
+                  AND timestamp >= ? AND timestamp <= ?
+                  AND rtt_ms IS NOT NULL
+                ORDER BY rtt_ms ASC;
+                """
+            guard let stmt = _prepare(sql) else { return nil }
+            defer { sqlite3_finalize(stmt) }
+            _bindText(stmt, 1, idStr)
+            sqlite3_bind_double(stmt, 2, fromTs)
+            sqlite3_bind_double(stmt, 3, toTs)
+            var rtts: [Double] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                rtts.append(sqlite3_column_double(stmt, 0))
+            }
+            guard rtts.count >= 10 else { return nil }
+            // Already sorted ASC from the query.
+            let mid    = rtts.count / 2
+            let median = rtts.count % 2 == 0
+                ? (rtts[mid - 1] + rtts[mid]) / 2
+                : rtts[mid]
+            _exec("UPDATE network_sessions SET baseline_rtt_ms = \(median) WHERE id = '\(idStr)';")
+            return median
         }
     }
 
@@ -1006,6 +1048,8 @@ public final class SQLiteStore: @unchecked Sendable {
         _exec("ALTER TABLE connection_profiles ADD COLUMN user_label TEXT;")
         // v2.49.0: user note on incidents.
         _exec("ALTER TABLE incidents ADD COLUMN note TEXT;")
+        // v2.54.0: per-session learned latency baseline (median of first 30 min).
+        _exec("ALTER TABLE network_sessions ADD COLUMN baseline_rtt_ms REAL;")
     }
 
     // MARK: - Private: insert implementations
@@ -1302,7 +1346,7 @@ public final class SQLiteStore: @unchecked Sendable {
     private func _latestSession(fingerprint: String) -> NetworkSessionRow? {
         let sql = """
             SELECT id, fingerprint, display_name, started_at, last_seen,
-                   connection_type, weak_fingerprint, vpn_interface, isp_name
+                   connection_type, weak_fingerprint, vpn_interface, isp_name, baseline_rtt_ms
             FROM network_sessions
             WHERE fingerprint = ?
             ORDER BY started_at DESC
@@ -1319,7 +1363,7 @@ public final class SQLiteStore: @unchecked Sendable {
         // A session overlaps [from, to] if it started before `to` and last_seen >= from.
         let sql = """
             SELECT id, fingerprint, display_name, started_at, last_seen,
-                   connection_type, weak_fingerprint, vpn_interface, isp_name
+                   connection_type, weak_fingerprint, vpn_interface, isp_name, baseline_rtt_ms
             FROM network_sessions
             WHERE started_at <= ? AND last_seen >= ?
             ORDER BY started_at ASC;
@@ -1346,10 +1390,12 @@ public final class SQLiteStore: @unchecked Sendable {
         let weakFP         = sqlite3_column_int(stmt, 6) != 0
         let vpnIface       = sqlite3_column_text(stmt, 7).map { String(cString: $0) }
         let ispName        = sqlite3_column_text(stmt, 8).map { String(cString: $0) }
+        let baselineRTT    = sqlite3_column_type(stmt, 9) != SQLITE_NULL ? sqlite3_column_double(stmt, 9) : nil as Double?
         return NetworkSessionRow(id: id, fingerprint: fp, displayName: name,
                                  startedAt: startedAt, lastSeen: lastSeen,
                                  connectionType: connType, weakFingerprint: weakFP,
-                                 vpnInterface: vpnIface, ispName: ispName)
+                                 vpnInterface: vpnIface, ispName: ispName,
+                                 learnedBaselineRTT: baselineRTT)
     }
 
     private func _pingRows(targetID: String, sessionID: String) -> [PingRow] {

@@ -196,6 +196,16 @@ struct NetworkAnalysisView: View {
             if session.connectionType == "vpn" {
                 input.vpnInterface = session.vpnInterface
             }
+            // Per-network learned latency baseline — compute on demand if not yet stored.
+            let baseline: Double?
+            if let stored = session.learnedBaselineRTT {
+                baseline = stored
+            } else if session.lastSeen.timeIntervalSince(session.startedAt) >= 1_800 {
+                baseline = db.computeAndStoreBaseline(sessionID: session.id, from: session.startedAt)
+            } else {
+                baseline = nil
+            }
+            input.learnedBaselineRTT = baseline
             let suf   = DataSufficiency(sampleCount: targetPings.count)
             let results = analyzer.analyze(input)
             let score = db.stabilityScore(from: session.startedAt, to: session.lastSeen)

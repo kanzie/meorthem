@@ -112,6 +112,11 @@ struct SessionAnalysisInput {
     /// Cross-session weekday average RTTs keyed by weekday (0 = Sunday … 6 = Saturday).
     /// Sourced from `ping_aggregates` across all historical sessions; used by pattern #17.
     var crossSessionWeekdayRTTs: [Int: Double] = [:]
+    /// Median RTT learned from the first 30 minutes of this session.
+    /// nil when the session is younger than 30 min or has fewer than 10 baseline samples.
+    /// Used by checkLatency to reduce false positives on high-latency-but-stable connections
+    /// (e.g. satellite or distant VPN) and to surface regressions above the learned normal.
+    var learnedBaselineRTT: Double? = nil
 }
 
 // MARK: - Analyzer
@@ -230,8 +235,26 @@ final class NetworkAnalyzer: @unchecked Sendable {
             attribution = ""
         }
 
-        let base: Double = avg >= thresh * 2 ? 0.85 : 0.65
-        let confidence   = min(1.0, (base + confidenceBoost) * sufficiency.multiplier)
+        var base: Double = avg >= thresh * 2 ? 0.85 : 0.65
+        var baselineNote: String? = nil
+
+        // Per-network learned baseline: if this connection normally runs at high latency
+        // (e.g. satellite, distant VPN), reduce confidence when avg is near the baseline.
+        // If avg has significantly regressed above the baseline, note it and keep confidence.
+        if let bl = input.learnedBaselineRTT, bl > 0 {
+            if avg < bl * 1.30 {
+                // Within 30% of the learned normal — likely not an anomaly, just how this
+                // network behaves. Halve the confidence so it only surfaces when strong.
+                base *= 0.5
+                baselineNote = String(format: "This is typical for this network (baseline %.0f ms).", bl)
+            } else if avg > bl * 1.50 {
+                baselineNote = String(format: "RTT has regressed %.0f%% above this network's baseline (%.0f ms).",
+                                      (avg / bl - 1) * 100, bl)
+            }
+        }
+
+        let confidence = min(1.0, (base + confidenceBoost) * sufficiency.multiplier)
+        guard confidence >= 0.40 else { return [] }
 
         var detail: String
         if !peakHours.isEmpty {
@@ -242,6 +265,9 @@ final class NetworkAnalyzer: @unchecked Sendable {
         }
         if !attribution.isEmpty, let gwAvg = gwRtts.isEmpty ? nil : gwRtts.reduce(0, +) / Double(gwRtts.count) {
             detail += " " + String(format: attribution, gwAvg)
+        }
+        if let note = baselineNote {
+            detail += " " + note
         }
 
         return [NetworkFinding(category: .latency,

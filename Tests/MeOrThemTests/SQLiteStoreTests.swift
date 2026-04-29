@@ -924,4 +924,70 @@ func runSQLiteStoreWeekdayTests() {
         let avgs = store.weekdayRTTAverages(lookback: 400 * 86_400, minSampleCount: 5)
         expect(avgs.isEmpty, "sparse weekday filtered by minSampleCount=5")
     }
+
+    // MARK: - Per-network learned baseline
+
+    suite("SQLiteStore — computeAndStoreBaseline returns median") {
+        let store   = SQLiteStore(path: ":memory:")
+        let sessID  = UUID()
+        let tID     = UUID()
+        let start   = Date().addingTimeInterval(-3_600)  // 1 hour ago
+        store.openSession(id: sessID, fingerprint: "test|base", displayName: "Test",
+                         startTime: start)
+        store.waitForPendingOps()
+
+        // Insert 12 pings in the first 30 min at known RTTs (sorted: 10,15,20,25,30,35,40,45,50,55,60,65)
+        let rtts: [Double] = [30, 10, 55, 20, 40, 65, 25, 45, 50, 15, 35, 60]
+        for (i, rtt) in rtts.enumerated() {
+            store.insertPing(timestamp:   start.addingTimeInterval(Double(i) * 90),  // 90s apart → ~17 min span
+                             rtt:         rtt,
+                             lossPercent: 0,
+                             jitter:      nil,
+                             targetID:    tID,
+                             targetLabel: "T",
+                             host:        "1.1.1.1",
+                             sessionID:   sessID)
+        }
+        store.waitForPendingOps()
+
+        let median = store.computeAndStoreBaseline(sessionID: sessID, from: start)
+        expectNotNil(median, "median returned for 12-sample session")
+        // Sorted: 10,15,20,25,30,35,40,45,50,55,60,65 → median = (35+40)/2 = 37.5
+        if let m = median {
+            expectEqual(m, 37.5, "median of 12 samples is 37.5")
+        }
+
+        // learnedBaselineRTT should now be stored in the session row
+        let row = store.latestSession(for: "test|base")
+        expectNotNil(row?.learnedBaselineRTT, "baseline persisted in session row")
+        if let bl = row?.learnedBaselineRTT {
+            expectEqual(bl, 37.5, "persisted baseline matches computed median")
+        }
+    }
+
+    suite("SQLiteStore — computeAndStoreBaseline returns nil when < 10 samples") {
+        let store  = SQLiteStore(path: ":memory:")
+        let sessID = UUID()
+        let tID    = UUID()
+        let start  = Date().addingTimeInterval(-3_600)
+        store.openSession(id: sessID, fingerprint: "test|few", displayName: "Few",
+                         startTime: start)
+        store.waitForPendingOps()
+
+        // Only 5 pings — below the 10-sample minimum
+        for i in 0..<5 {
+            store.insertPing(timestamp:   start.addingTimeInterval(Double(i) * 60),
+                             rtt:         20.0,
+                             lossPercent: 0,
+                             jitter:      nil,
+                             targetID:    tID,
+                             targetLabel: "T",
+                             host:        "1.1.1.1",
+                             sessionID:   sessID)
+        }
+        store.waitForPendingOps()
+
+        let median = store.computeAndStoreBaseline(sessionID: sessID, from: start)
+        expect(median == nil, "nil returned when fewer than 10 samples")
+    }
 }

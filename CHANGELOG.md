@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.0 — 2026-04-29
+
+### New Features
+- **Per-network learned latency baseline** — After a network session has been active for 30 minutes, Me Or Them computes the median RTT from those first 30 minutes and stores it as a permanent baseline for that session. The Network Analysis engine uses this baseline when evaluating elevated latency: if the current average RTT is within 30% of the session's normal range, the finding's confidence is halved (reducing false positives on high-latency-but-stable connections such as satellite or distant VPN). If latency has significantly regressed beyond the baseline, the finding detail includes a plain-English note showing the percentage increase above normal.
+
+---
+
 ## v2.53.0 — 2026-04-29
 
 ### New Features
