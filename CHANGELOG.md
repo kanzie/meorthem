@@ -5,6 +5,16 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.46.0 — 2026-04-29
+
+### New Features
+- **Recovery notifications** — Me Or Them now sends a notification when the connection returns to normal after a degraded period. The notification includes the outage duration (e.g. "Connection restored after 3m 42s"), giving you a complete picture of the incident without opening the app.
+
+### Changes
+- **Fault attribution in degradation alerts** — Degradation notifications now include a plain-English cause derived from gateway vs. external-target analysis. For example, "Likely cause: ISP / internet outage" or "Likely cause: local network / router", replacing the previous generic message.
+
+---
+
 ## v2.45.0 — 2026-04-29
 
 ### New Features

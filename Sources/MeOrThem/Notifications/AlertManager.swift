@@ -9,6 +9,9 @@ final class AlertManager {
     private let cooldownSeconds: TimeInterval = 60
     private let settings: AppSettings
 
+    /// Timestamp when the connection first left the green state — used to compute outage duration.
+    private var degradedSince: Date? = nil
+
     static let categoryID       = "com.meorthem.degradation"
     static let actionViewCharts = "VIEW_CHARTS"
 
@@ -32,36 +35,75 @@ final class AlertManager {
         UNUserNotificationCenter.current().setNotificationCategories([category])
     }
 
-    func handleStatusChange(_ newStatus: MetricStatus) {
+    /// Call on every status change. Pass the current fault type so the notification body
+    /// can attribute the issue (local router vs ISP) rather than showing a generic message.
+    func handleStatusChange(_ newStatus: MetricStatus, faultType: NetworkFaultType = .none) {
         defer { previousStatus = newStatus }
 
-        // Only notify on degradation (green→yellow or yellow→red)
-        guard newStatus > previousStatus else { return }
-        guard settings.enableNotificationBanner else { return }
-
-        let now = Date()
-        guard now.timeIntervalSince(lastFiredAt) >= cooldownSeconds else { return }
-        lastFiredAt = now
-
-        fire(status: newStatus)
-    }
-
-    private func fire(status: MetricStatus) {
-        let content = UNMutableNotificationContent()
-        content.title = "Me Or Them — Connection \(status.label)"
-        content.body  = status == .red
-            ? "Your connection is poor. Video calls may be affected."
-            : "Your connection quality has degraded."
-        content.categoryIdentifier = Self.categoryID
-        if settings.enableNotificationSound {
-            content.sound = .default
+        guard settings.enableNotificationBanner else {
+            // Still track degraded-since so recovery duration is correct if setting is toggled.
+            if newStatus > .green && degradedSince == nil { degradedSince = Date() }
+            if newStatus == .green { degradedSince = nil }
+            return
         }
 
-        let request = UNNotificationRequest(
-            identifier: "com.meorthem.status.\(UUID().uuidString)",
-            content: content,
-            trigger: nil   // deliver immediately
-        )
+        let now = Date()
+
+        if newStatus == .green && previousStatus > .green {
+            // Recovery: connection returned to green.
+            let duration = degradedSince.map { now.timeIntervalSince($0) }
+            degradedSince = nil
+            fireRecovery(duration: duration)
+            return
+        }
+
+        if newStatus > previousStatus {
+            // Degradation: green→yellow or yellow→red.
+            if degradedSince == nil { degradedSince = now }
+            guard now.timeIntervalSince(lastFiredAt) >= cooldownSeconds else { return }
+            lastFiredAt = now
+            fireDegraded(status: newStatus, faultType: faultType)
+        }
+    }
+
+    private func fireDegraded(status: MetricStatus, faultType: NetworkFaultType) {
+        let content = UNMutableNotificationContent()
+        content.title = "Me Or Them — Connection \(status.label)"
+
+        var body = status == .red
+            ? "Your connection is poor. Video calls may be affected."
+            : "Your connection quality has degraded."
+
+        if faultType != .none {
+            body += " \(faultType.displayLabel)."
+        }
+        content.body = body
+        content.categoryIdentifier = Self.categoryID
+        if settings.enableNotificationSound { content.sound = .default }
+
+        deliver(content, id: "com.meorthem.status.\(UUID().uuidString)")
+    }
+
+    private func fireRecovery(duration: TimeInterval?) {
+        let content = UNMutableNotificationContent()
+        content.title = "Me Or Them — Connection Restored"
+        if let d = duration, d >= 60 {
+            let mins = Int(d / 60)
+            let secs = Int(d) % 60
+            content.body = "Your connection is back to normal after \(mins)m \(secs)s."
+        } else if let d = duration {
+            content.body = "Your connection is back to normal after \(Int(d))s."
+        } else {
+            content.body = "Your connection is back to normal."
+        }
+        content.categoryIdentifier = Self.categoryID
+        if settings.enableNotificationSound { content.sound = .default }
+
+        deliver(content, id: "com.meorthem.recovery.\(UUID().uuidString)")
+    }
+
+    private func deliver(_ content: UNMutableNotificationContent, id: String) {
+        let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
 
@@ -73,11 +115,6 @@ final class AlertManager {
         content.body  = "ICMP pings appear to be blocked on this network. Switched to TCP probing."
         content.categoryIdentifier = Self.categoryID
         if settings.enableNotificationSound { content.sound = .default }
-        let request = UNNotificationRequest(
-            identifier: "com.meorthem.stealth.\(UUID().uuidString)",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
+        deliver(content, id: "com.meorthem.stealth.\(UUID().uuidString)")
     }
 }

@@ -74,11 +74,13 @@ final class AppEnvironment {
         exportCoordinator = ExportCoordinator(metricStore: metricStore, settings: settings, sqliteStore: sqliteStore)
         logExporter       = LogExporter(settings: settings)
 
-        // Wire status changes → notification alerts
+        // Wire status changes → notification alerts (pass fault type for richer notification body)
         metricStore.$overallStatus
             .dropFirst()
             .sink { [weak self] status in
-                self?.alertManager.handleStatusChange(status)
+                guard let self else { return }
+                self.alertManager.handleStatusChange(status,
+                                                     faultType: self.metricStore.networkFaultType)
             }
             .store(in: &cancellables)
 
