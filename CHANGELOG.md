@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.52.0 — 2026-04-29
+
+### New Features
+- **Traceroute route change detection** — When two or more traceroute snapshots have been captured in a session, Me Or Them now compares the earliest (baseline) snapshot against the most recent one. If hops change IP address or per-hop RTT increases by 50% or more (≥ 20 ms), a "Route change detected" finding appears in Network Analysis with a plain-English diff (e.g. "Hop 5 changed from 1.2.3.4 → 1.2.3.5 (possible re-route). Hop 7 RTT increased 24 ms → 68 ms (+183%)"). Confidence is fixed at 70%.
+
+---
+
 ## v2.51.0 — 2026-04-29
 
 ### New Features

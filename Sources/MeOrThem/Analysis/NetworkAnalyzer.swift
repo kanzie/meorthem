@@ -1161,6 +1161,22 @@ final class NetworkAnalyzer: @unchecked Sendable {
                                            confidence: 0.60,
                                            expandedDetail: row.output.trimmingCharacters(in: .whitespacesAndNewlines)))
         }
+
+        // Baseline comparison — when ≥2 snapshots exist, diff the first (baseline) against
+        // the most recent to surface re-routes or per-hop latency regressions.
+        if input.tracerouteRows.count >= 2,
+           let baseline = input.tracerouteRows.first,
+           let latest = input.tracerouteRows.last,
+           let diff = compareTraceroutes(baseline: baseline.output, current: latest.output) {
+            findings.append(NetworkFinding(
+                category: .connectivity,
+                title: "Route change detected",
+                detail: diff,
+                confidence: 0.70,
+                expandedDetail: nil
+            ))
+        }
+
         return findings
     }
 
@@ -1196,6 +1212,68 @@ final class NetworkAnalyzer: @unchecked Sendable {
                           hopCount, maxHop, maxRTT)
         }
         return "Route completed in \(hopCount) hops (all hops timed out — router may block ICMP TTL-exceeded messages)."
+    }
+
+    /// Parse traceroute output into a list of hops: (hop number, IP or "*", RTT in ms or nil).
+    private func parseHops(_ output: String) -> [(hop: Int, ip: String, rttMs: Double?)] {
+        var result: [(hop: Int, ip: String, rttMs: Double?)] = []
+        for line in output.components(separatedBy: "\n").dropFirst() {
+            let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard parts.count >= 2, let hopNum = Int(String(parts[0])) else { continue }
+            let ipPart = String(parts[1])
+            if ipPart == "*" {
+                result.append((hopNum, "*", nil))
+                continue
+            }
+            // Find the first RTT value: a digit-containing token followed by "ms"
+            var rtt: Double? = nil
+            for i in 1..<parts.count {
+                if parts[i] == "ms", i > 0, let v = Double(String(parts[i - 1])) {
+                    rtt = v; break
+                }
+            }
+            result.append((hopNum, ipPart, rtt))
+        }
+        return result
+    }
+
+    /// Compares two traceroute outputs and returns a plain-English diff summary, or nil if no
+    /// meaningful differences are found.
+    private func compareTraceroutes(baseline: String, current: String) -> String? {
+        let baseHops = parseHops(baseline)
+        let currHops = parseHops(current)
+        guard !baseHops.isEmpty && !currHops.isEmpty else { return nil }
+
+        var changes: [String] = []
+
+        // Hop count change
+        if baseHops.count != currHops.count {
+            changes.append("Hop count changed from \(baseHops.count) to \(currHops.count).")
+        }
+
+        // Per-hop comparison (by hop number)
+        let baseByHop = Dictionary(uniqueKeysWithValues: baseHops.map { ($0.hop, $0) })
+        let currByHop = Dictionary(uniqueKeysWithValues: currHops.map { ($0.hop, $0) })
+
+        let sharedHops = Set(baseByHop.keys).intersection(Set(currByHop.keys)).sorted()
+        for hop in sharedHops {
+            guard let b = baseByHop[hop], let c = currByHop[hop] else { continue }
+
+            // IP changed (ignore * hops)
+            if b.ip != "*" && c.ip != "*" && b.ip != c.ip {
+                changes.append("Hop \(hop) changed from \(b.ip) → \(c.ip) (possible re-route).")
+            }
+
+            // RTT degraded significantly (≥50% increase and absolute increase ≥20ms)
+            if let bRTT = b.rttMs, let cRTT = c.rttMs,
+               cRTT > bRTT * 1.5, cRTT - bRTT >= 20 {
+                changes.append(String(format: "Hop %d RTT increased %.0f ms → %.0f ms (+%.0f%%)",
+                                      hop, bRTT, cRTT, (cRTT / bRTT - 1) * 100))
+            }
+        }
+
+        guard !changes.isEmpty else { return nil }
+        return "vs. earlier snapshot — " + changes.prefix(3).joined(separator: " ")
     }
 
     // MARK: - Pattern 16: Wi-Fi channel / band switching
