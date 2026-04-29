@@ -425,9 +425,10 @@ final class AppEnvironment {
                                 weakFingerprint: key.hasWeakFingerprint,
                                 vpnInterface:    vpnIface)
 
-        // Clear stale ISP name and portal state immediately; async lookups below will fill them in.
+        // Clear stale ISP name, portal state, and hijack suspicion immediately.
         metricStore.recordSessionISP(nil)
         metricStore.recordCaptivePortal(nil)
+        metricStore.recordDNSHijackSuspicion(false)
 
         // Async ISP identification via DNS TXT lookup — non-blocking, best-effort.
         let ispDB = sqliteStore

@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.51.0 — 2026-04-29
+
+### New Features
+- **DNS hijack / answer divergence detection** — During each DNS probe round (~every 30 seconds), Me Or Them now compares the A-record answers returned by all active resolvers for the same query. If any resolver returns a private/RFC1918 IP address, or if resolvers return different public IPs, a "⚠ DNS answer divergence detected" warning appears in the Network Details submenu. This catches transparent DNS proxy interception common on hotel and corporate networks. Detection resets when a new network session opens.
+
+---
+
 ## v2.50.0 — 2026-04-29
 
 ### New Features

@@ -568,6 +568,16 @@ enum MenuBuilder {
             sub.addItem(warnItem)
         }
 
+        // DNS hijack warning — shown when resolvers return conflicting or private-space answers.
+        if store.dnsHijackSuspected {
+            if store.captivePortalDetected != true { sub.addItem(.separator()) }
+            let hijackItem = infoItem("⚠ DNS answer divergence detected")
+            hijackItem.attributedTitle = NSAttributedString(
+                string: "⚠ DNS answer divergence detected",
+                attributes: [.foregroundColor: NSColor.systemOrange, .font: _menuFont])
+            sub.addItem(hijackItem)
+        }
+
         parent.submenu = sub
         return parent
     }

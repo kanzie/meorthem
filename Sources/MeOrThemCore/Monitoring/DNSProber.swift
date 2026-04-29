@@ -85,6 +85,128 @@ public enum DNSProber {
         return (nil, nil)
     }
 
+    /// Probe and return both RTT/RCODE and the first resolved IPv4 address from the answer section.
+    /// The `resolvedIP` is the first A-record answer if any, nil otherwise.
+    /// All other parameters and semantics match `probe(resolverIP:queryHost:timeoutSecs:)`.
+    public static func probeWithAnswer(resolverIP: String,
+                                       queryHost: String = "example.com",
+                                       timeoutSecs: Int = 3) -> (resolveMs: Double?, rcode: Int?, resolvedIP: String?) {
+
+        let isIPv6 = resolverIP.contains(":")
+        let family: Int32 = isIPv6 ? AF_INET6 : AF_INET
+        let sockFd = socket(family, SOCK_DGRAM, IPPROTO_UDP)
+        guard sockFd >= 0 else { return (nil, nil, nil) }
+        defer { Darwin.close(sockFd) }
+
+        var tv = timeval(tv_sec: timeoutSecs, tv_usec: 0)
+        setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+
+        let txID = UInt16.random(in: 1...UInt16.max)
+        let query = buildQuery(id: txID, hostname: queryHost)
+
+        let connectResult: Int32
+        if isIPv6 {
+            guard var addr6 = sockaddr_in6(ip: resolverIP, port: 53) else { return (nil, nil, nil) }
+            connectResult = withUnsafeMutableBytes(of: &addr6) { rawBuf in
+                rawBuf.withMemoryRebound(to: sockaddr.self) { saBuf in
+                    Darwin.connect(sockFd, saBuf.baseAddress!, socklen_t(MemoryLayout<sockaddr_in6>.size))
+                }
+            }
+        } else {
+            guard var addr4 = sockaddr_in(ip: resolverIP, port: 53) else { return (nil, nil, nil) }
+            connectResult = withUnsafeMutableBytes(of: &addr4) { rawBuf in
+                rawBuf.withMemoryRebound(to: sockaddr.self) { saBuf in
+                    Darwin.connect(sockFd, saBuf.baseAddress!, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
+            }
+        }
+        guard connectResult == 0 else { return (nil, nil, nil) }
+
+        let start = Date()
+        let sent: Int = query.withUnsafeBytes { buf in
+            Darwin.send(sockFd, buf.baseAddress!, buf.count, 0)
+        }
+        guard sent == query.count else { return (nil, nil, nil) }
+
+        var response = [UInt8](repeating: 0, count: 512)
+        let received = Darwin.recv(sockFd, &response, response.count, 0)
+        let elapsedMs = -start.timeIntervalSinceNow * 1_000.0
+
+        guard received >= 12 else { return (nil, nil, nil) }
+
+        let data = Data(response.prefix(received))
+        guard let rcode = validateResponse(data, expectedID: txID) else { return (nil, nil, nil) }
+
+        // Parse the first A-record answer from the response.
+        let resolvedIP = parseFirstARecord(from: data, queryName: queryHost)
+        return (elapsedMs, rcode, resolvedIP)
+    }
+
+    /// Parses the first A-record IPv4 address from a DNS response packet.
+    /// Returns nil if no A record is present or parsing fails.
+    public static func parseFirstARecord(from data: Data, queryName: String) -> String? {
+        let bytes = Array(data)
+        guard bytes.count >= 12 else { return nil }
+
+        let ancount = (Int(bytes[6]) << 8) | Int(bytes[7])
+        guard ancount > 0 else { return nil }
+
+        // Skip question section: advance past QNAME, QTYPE, QCLASS.
+        var pos = 12
+        // Skip QNAME: length-prefixed labels terminated by 0x00 byte.
+        while pos < bytes.count {
+            let len = Int(bytes[pos])
+            if len == 0 { pos += 1; break }             // null terminator
+            if len & 0xC0 == 0xC0 { pos += 2; break }   // compression pointer in question (unusual)
+            pos += 1 + len
+        }
+        pos += 4  // skip QTYPE + QCLASS
+
+        // Walk answer RRs looking for an A record (type 1, class IN = 1).
+        for _ in 0..<ancount {
+            guard pos < bytes.count else { break }
+
+            // Skip NAME (either inline labels or a 2-byte compression pointer).
+            if pos + 1 < bytes.count && bytes[pos] & 0xC0 == 0xC0 {
+                pos += 2
+            } else {
+                while pos < bytes.count {
+                    let len = Int(bytes[pos])
+                    if len == 0 { pos += 1; break }
+                    if len & 0xC0 == 0xC0 { pos += 2; break }
+                    pos += 1 + len
+                }
+            }
+
+            guard pos + 10 <= bytes.count else { break }
+            let rrType    = (Int(bytes[pos]) << 8) | Int(bytes[pos + 1])
+            let rrClass   = (Int(bytes[pos + 2]) << 8) | Int(bytes[pos + 3])
+            let rdLength  = (Int(bytes[pos + 8]) << 8) | Int(bytes[pos + 9])
+            pos += 10  // past TYPE, CLASS, TTL (4 bytes), RDLENGTH
+
+            if rrType == 1 && rrClass == 1 && rdLength == 4 && pos + 4 <= bytes.count {
+                // A record: 4-byte IPv4 address in network byte order.
+                let ip = "\(bytes[pos]).\(bytes[pos+1]).\(bytes[pos+2]).\(bytes[pos+3])"
+                return ip
+            }
+            pos += rdLength
+        }
+        return nil
+    }
+
+    /// Returns true when `ip` is an RFC1918 private, link-local, or loopback address —
+    /// any of which appearing as a DNS answer to a public hostname is a hijack signal.
+    public static func isPrivateIP(_ ip: String) -> Bool {
+        let parts = ip.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4 else { return false }
+        let a = parts[0], b = parts[1]
+        return a == 10
+            || (a == 172 && b >= 16 && b <= 31)
+            || (a == 192 && b == 168)
+            || (a == 169 && b == 254)
+            || a == 127
+    }
+
     /// Read the first `nameserver` entry from /etc/resolv.conf.
     /// This is what the OS uses as the system resolver. Re-read on each call
     /// because macOS rewrites /etc/resolv.conf on every network change.

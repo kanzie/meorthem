@@ -52,6 +52,12 @@ public final class MetricStore: ObservableObject {
 
     public func recordCaptivePortal(_ detected: Bool?) { captivePortalDetected = detected }
 
+    /// Whether DNS answer divergence (possible hijacking) was detected on the current session.
+    /// true = at least one resolver returned a private IP or answers disagreed across resolvers.
+    @Published public private(set) var dnsHijackSuspected: Bool = false
+
+    public func recordDNSHijackSuspicion(_ suspected: Bool) { dnsHijackSuspected = suspected }
+
     // MARK: - History (read by export + sparklines)
     public private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]
     public private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)

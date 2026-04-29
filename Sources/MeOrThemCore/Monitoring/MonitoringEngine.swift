@@ -195,7 +195,7 @@ public final class MonitoringEngine {
                 Task { [weak self] in
                     guard let self else { return }
                     let results = await Task.detached(priority: .utility) {
-                        await withTaskGroup(of: (DNSResolver, Double?, Int?).self) { group in
+                        await withTaskGroup(of: (DNSResolver, Double?, Int?, String?).self) { group in
                             for resolver in activeResolvers {
                                 let ip: String?
                                 if resolver.isGateway      { ip = gatewayIP }
@@ -203,18 +203,34 @@ public final class MonitoringEngine {
                                 else                       { ip = resolver.ip.isEmpty ? nil : resolver.ip }
                                 guard let resolvedIP = ip else { continue }
                                 group.addTask {
-                                    let (ms, rcode) = DNSProber.probe(resolverIP: resolvedIP)
-                                    return (resolver, ms, rcode)
+                                    let (ms, rcode, resolved) = DNSProber.probeWithAnswer(resolverIP: resolvedIP)
+                                    return (resolver, ms, rcode, resolved)
                                 }
                             }
-                            var out: [(DNSResolver, Double?, Int?)] = []
+                            var out: [(DNSResolver, Double?, Int?, String?)] = []
                             for await r in group { out.append(r) }
                             return out
                         }
                     }.value
 
                     let anySucceeded = results.contains { $0.1 != nil }
-                    for (resolver, ms, rcode) in results {
+
+                    // DNS hijack detection: compare A-record answers across resolvers.
+                    // A private-space answer from any resolver is an immediate signal.
+                    // Differing public answers across ≥2 resolvers is a softer signal.
+                    let answerIPs = results.compactMap { $0.3 }
+                    let hijackSuspected: Bool
+                    if answerIPs.isEmpty {
+                        hijackSuspected = false
+                    } else if answerIPs.contains(where: { DNSProber.isPrivateIP($0) }) {
+                        hijackSuspected = true
+                    } else if answerIPs.count >= 2 {
+                        hijackSuspected = Set(answerIPs).count > 1
+                    } else {
+                        hijackSuspected = false
+                    }
+
+                    for (resolver, ms, rcode, _) in results {
                         self.store.recordDNSResolverSample(resolver: resolver, resolveMs: ms, rcode: rcode)
                         await MainActor.run {
                             self.settings.updateDNSResolverFailureCount(
@@ -223,6 +239,7 @@ public final class MonitoringEngine {
                                 otherResolversOK: anySucceeded && ms == nil ? true : anySucceeded)
                         }
                     }
+                    await MainActor.run { self.store.recordDNSHijackSuspicion(hijackSuspected) }
                     // Refresh the summary once all results are recorded.
                     let enabledSummary = activeResolvers.map { (name: $0.name, ip: $0.isGateway ? (gatewayIP ?? "") : ($0.isSystem ? (DNSProber.systemResolverIP() ?? "") : $0.ip)) }
                     self.store.refreshDNSSummary(enabledResolvers: enabledSummary)
