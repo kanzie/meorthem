@@ -46,6 +46,12 @@ public final class MetricStore: ObservableObject {
 
     public func recordSessionISP(_ name: String?) { currentSessionISPName = name }
 
+    /// Whether a captive portal was detected on the current session's network.
+    /// nil = probe not yet complete or inconclusive; true = portal; false = clear.
+    @Published public private(set) var captivePortalDetected: Bool? = nil
+
+    public func recordCaptivePortal(_ detected: Bool?) { captivePortalDetected = detected }
+
     // MARK: - History (read by export + sparklines)
     public private(set) var pingHistory: [UUID: CircularBuffer<PingResult>] = [:]
     public private(set) var wifiHistory: CircularBuffer<WiFiSnapshot> = CircularBuffer(capacity: kWifiHistoryCapacity)

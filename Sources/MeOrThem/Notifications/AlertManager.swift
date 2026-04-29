@@ -107,6 +107,17 @@ final class AlertManager {
         UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
     }
 
+    /// Fires when a captive portal is detected on a newly-opened network session.
+    func fireCaptivePortalDetected() {
+        guard settings.enableNotificationBanner else { return }
+        let content = UNMutableNotificationContent()
+        content.title = "Me Or Them — Captive Portal Detected"
+        content.body  = "This network requires a login before internet access is available. Open a browser to complete sign-in."
+        content.categoryIdentifier = Self.categoryID
+        if settings.enableNotificationSound { content.sound = .default }
+        deliver(content, id: "com.meorthem.captiveportal.\(UUID().uuidString)")
+    }
+
     /// Fires when ICMP throttling is auto-detected and stealth (TCP) mode is activated.
     func fireStealthModeDetected() {
         guard settings.enableNotificationBanner else { return }

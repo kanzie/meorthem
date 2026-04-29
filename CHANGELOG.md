@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.47.0 — 2026-04-29
+
+### New Features
+- **Captive portal detection** — Me Or Them now probes for captive portals (hotel, airport, coffee-shop Wi-Fi login pages) each time a new network session opens. Detection uses a single HTTP check against a known endpoint — zero steady-state overhead. When a portal is found, a notification fires immediately and a "⚠ Captive portal — browser login required" warning appears in the Network Details submenu.
+
+---
+
 ## v2.46.0 — 2026-04-29
 
 ### New Features

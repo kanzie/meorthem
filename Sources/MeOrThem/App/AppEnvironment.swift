@@ -425,8 +425,9 @@ final class AppEnvironment {
                                 weakFingerprint: key.hasWeakFingerprint,
                                 vpnInterface:    vpnIface)
 
-        // Clear stale ISP name immediately; async lookup below will fill it in.
+        // Clear stale ISP name and portal state immediately; async lookups below will fill them in.
         metricStore.recordSessionISP(nil)
+        metricStore.recordCaptivePortal(nil)
 
         // Async ISP identification via DNS TXT lookup — non-blocking, best-effort.
         let ispDB = sqliteStore
@@ -438,6 +439,18 @@ final class AppEnvironment {
             await MainActor.run {
                 self.metricStore.recordSessionISP(ispName)
                 ispDB.updateSessionISP(id: newID, ispName: ispName)
+            }
+        }
+
+        // Captive portal probe — one HTTP check per session open, zero steady-state cost.
+        Task.detached(priority: .utility) { [weak self] in
+            let detected = await CaptivePortalProber.probe()
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.metricStore.recordCaptivePortal(detected)
+                if detected == true {
+                    self.alertManager.fireCaptivePortalDetected()
+                }
             }
         }
 

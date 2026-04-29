@@ -558,6 +558,16 @@ enum MenuBuilder {
             sub.addItem(infoItem("ISP:         \(isp)"))
         }
 
+        // Captive portal warning — shown when portal probe has confirmed interception.
+        if store.captivePortalDetected == true {
+            sub.addItem(.separator())
+            let warnItem = infoItem("⚠ Captive portal — browser login required")
+            warnItem.attributedTitle = NSAttributedString(
+                string: "⚠ Captive portal — browser login required",
+                attributes: [.foregroundColor: NSColor.systemOrange, .font: _menuFont])
+            sub.addItem(warnItem)
+        }
+
         parent.submenu = sub
         return parent
     }
