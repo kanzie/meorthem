@@ -421,11 +421,9 @@ enum MenuBuilder {
             text  = "Ongoing"
             color = event.severity == MetricStatus.red ? .systemRed : .systemOrange
         } else {
-            // Hide "Recovered" after 1 minute of stability.
-            let kRecoveredTimeoutSecs: TimeInterval = 60
-            if let end = event.endTime, Date().timeIntervalSince(end) > kRecoveredTimeoutSecs {
-                return hiddenItem()
-            }
+            // Only show "Recovered" for the single poll interval after recovery.
+            // The flag is never persisted, so it is always false on launch.
+            guard store.recoveredBannerActive else { return hiddenItem() }
             text  = "Recovered"
             color = .secondaryLabelColor
         }

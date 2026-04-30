@@ -19,8 +19,10 @@ final class AppEnvironment {
     let logExporter:       LogExporter
 
     private var cancellables = Set<AnyCancellable>()
-    private var bandwidthScheduleTimer: Timer?
-    private var maintenanceTimer: Timer?
+    // nonisolated(unsafe): accessed in deinit (nonisolated in Swift 6); safe because
+    // AppEnvironment is only ever released on the main thread via AppDelegate.
+    nonisolated(unsafe) private var bandwidthScheduleTimer: Timer?
+    nonisolated(unsafe) private var maintenanceTimer: Timer?
     private var lastBandwidthScheduleHours: Double = 0
 
     // Session tracking — persisted fingerprint and active session ID
@@ -34,7 +36,7 @@ final class AppEnvironment {
     // after a short delay. Cancelled immediately if WiFi is detected first, preventing
     // spurious Ethernet sessions from being created during the startup race where
     // latestGatewayIP arrives before the first WiFi snapshot.
-    private var pendingNonWifiSession: DispatchWorkItem?
+    nonisolated(unsafe) private var pendingNonWifiSession: DispatchWorkItem?
 
     // Traceroute rate-limiting: don't fire more than once per 5 minutes
     private var lastTracerouteDate: Date?
@@ -59,7 +61,7 @@ final class AppEnvironment {
 
     // Battery monitoring state
     private var isOnBattery: Bool = false
-    private var powerSourceObserver: CFRunLoopSource? = nil
+    nonisolated(unsafe) private var powerSourceObserver: CFRunLoopSource?
 
     // Local metrics HTTP server
     private var metricsServer: MetricsHTTPServer?

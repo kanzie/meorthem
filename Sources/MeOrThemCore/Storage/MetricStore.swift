@@ -88,6 +88,9 @@ public final class MetricStore: ObservableObject {
 
     // MARK: - Connection history (last 20 degradation events, backed by SQLite)
     @Published public private(set) var connectionHistory: [ConnectionEvent] = []
+    /// Transient flag set when a connection event closes (green recovery). Cleared on the next
+    /// green poll. Never persisted — always false on launch so "Recovered" never appears after restart.
+    @Published public private(set) var recoveredBannerActive: Bool = false
     private var previousOverallStatus: MetricStatus = .green
     // In-memory cap for menu display; SQLite retains full history per incidentRetentionDays.
     private static let kMaxConnectionEvents = 20
@@ -351,6 +354,11 @@ public final class MetricStore: ObservableObject {
     }
 
     private func recomputeOverallStatus() {
+        // Clear the transient Recovered banner on the first green poll after recovery.
+        if recoveredBannerActive && previousOverallStatus == .green {
+            recoveredBannerActive = false
+        }
+
         // Compute per-target windowed statuses for fault-type isolation logic.
         var effectiveStatuses = [UUID: MetricStatus](minimumCapacity: latestPing.count)
         for targetID in latestPing.keys {
@@ -419,6 +427,7 @@ public final class MetricStore: ObservableObject {
         let event = connectionHistory[idx]
         let closeTime = Date()
         connectionHistory[idx].endTime = closeTime
+        recoveredBannerActive = true
         saveConnectionHistory()
         sqliteStore?.closeIncident(id: event.id, endTime: closeTime,
                                    peakSeverityRaw: event.severityRaw)

@@ -16,7 +16,7 @@ final class NetworkIntelligenceWindowController: NSWindowController {
         self.metricStore = metricStore
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 700),
+            contentRect: NSRect(x: 0, y: 0, width: 1400, height: 700),
             styleMask:   [.titled, .closable, .resizable, .miniaturizable],
             backing:     .buffered,
             defer:       false
