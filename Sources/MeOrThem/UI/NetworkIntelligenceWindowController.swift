@@ -30,8 +30,23 @@ final class NetworkIntelligenceWindowController: NSWindowController {
 
         super.init(window: window)
 
-        let view = NetworkIntelligenceView(db: db, settings: settings, metricStore: metricStore)
-        window.contentViewController = NSHostingController(rootView: view)
+        let view = NetworkIntelligenceView(
+            db: db, settings: settings, metricStore: metricStore,
+            onContentLoaded: { [weak window] in
+                guard let w = window else { return }
+                let f = w.frame
+                w.setFrame(NSRect(x: f.minX, y: f.minY, width: f.width + 1, height: f.height), display: false)
+                w.setFrame(f, display: true)
+            }
+        )
+        let hc = NSHostingController(rootView: view)
+        // Prevent NSHostingController from resizing the window to the SwiftUI
+        // view's preferred content size (which defaults to the minimum 780 px).
+        if #available(macOS 13.0, *) { hc.sizingOptions = [] }
+        window.contentViewController = hc
+        // Restore our desired frame — setting contentViewController can override it.
+        window.setFrame(NSRect(x: 0, y: 0, width: 1400, height: 700), display: false)
+        window.center()
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -68,9 +83,10 @@ private enum IntelligenceTab: String, CaseIterable, Identifiable {
 
 private struct NetworkIntelligenceView: View {
 
-    let db:          SQLiteStore
-    let settings:    AppSettings
-    let metricStore: MetricStore
+    let db:              SQLiteStore
+    let settings:        AppSettings
+    let metricStore:     MetricStore
+    var onContentLoaded: () -> Void = {}
 
     @State private var selectedTab:     IntelligenceTab = .graphs
     @State private var sessions:        [SQLiteStore.NetworkSessionRow] = []
@@ -310,5 +326,6 @@ private struct NetworkIntelligenceView: View {
         if selectedSession == nil {
             selectedSession = sessions.first { $0.id == currentSessID } ?? sessions.first
         }
+        onContentLoaded()
     }
 }
