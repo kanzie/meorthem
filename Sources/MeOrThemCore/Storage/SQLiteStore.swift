@@ -563,7 +563,12 @@ public final class SQLiteStore: @unchecked Sendable {
     public func updateSessionISP(id: UUID, ispName: String) {
         let idStr = id.uuidString
         queue.async { [weak self] in
-            self?._exec("UPDATE network_sessions SET isp_name = '\(ispName.replacingOccurrences(of: "'", with: "''"))' WHERE id = '\(idStr)';")
+            guard let self else { return }
+            guard let stmt = _prepare("UPDATE network_sessions SET isp_name = ? WHERE id = ?;") else { return }
+            defer { sqlite3_finalize(stmt) }
+            _bindText(stmt, 1, ispName)
+            _bindText(stmt, 2, idStr)
+            sqlite3_step(stmt)
         }
     }
 
@@ -610,7 +615,11 @@ public final class SQLiteStore: @unchecked Sendable {
             let median = rtts.count % 2 == 0
                 ? (rtts[mid - 1] + rtts[mid]) / 2
                 : rtts[mid]
-            _exec("UPDATE network_sessions SET baseline_rtt_ms = \(median) WHERE id = '\(idStr)';")
+            guard let updStmt = _prepare("UPDATE network_sessions SET baseline_rtt_ms = ? WHERE id = ?;") else { return nil }
+            defer { sqlite3_finalize(updStmt) }
+            sqlite3_bind_double(updStmt, 1, median)
+            _bindText(updStmt, 2, idStr)
+            sqlite3_step(updStmt)
             return median
         }
     }

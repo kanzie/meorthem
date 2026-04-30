@@ -26,6 +26,7 @@ public enum InterfaceMonitor {
         do {
             try task.run()
             task.waitUntilExit()
+            guard task.terminationStatus == 0 else { return nil }
         } catch { return nil }
         let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(),
                             encoding: .utf8) ?? ""

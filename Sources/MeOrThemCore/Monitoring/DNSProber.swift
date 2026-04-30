@@ -37,7 +37,9 @@ public enum DNSProber {
 
         // Set receive timeout so a non-responding resolver doesn't block the thread.
         var tv = timeval(tv_sec: timeoutSecs, tv_usec: 0)
-        setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        guard setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+            return (nil, nil)
+        }
 
         // Build the DNS query with a random transaction ID.
         let txID = UInt16.random(in: 1...UInt16.max)
@@ -99,7 +101,9 @@ public enum DNSProber {
         defer { Darwin.close(sockFd) }
 
         var tv = timeval(tv_sec: timeoutSecs, tv_usec: 0)
-        setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        guard setsockopt(sockFd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size)) == 0 else {
+            return (nil, nil, nil)
+        }
 
         let txID = UInt16.random(in: 1...UInt16.max)
         let query = buildQuery(id: txID, hostname: queryHost)

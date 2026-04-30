@@ -158,9 +158,23 @@ public final class AppSettings: ObservableObject {
     private init() {
         let ud = UserDefaults.standard
 
-        pingTargets   = (try? ud.decoded([PingTarget].self,    forKey: "pingTargets"))   ?? PingTarget.defaults
+        do {
+            pingTargets = try ud.decoded([PingTarget].self, forKey: "pingTargets")
+        } catch {
+            if ud.data(forKey: "pingTargets") != nil {
+                print("[AppSettings] Failed to decode pingTargets (\(error)) — falling back to defaults")
+            }
+            pingTargets = PingTarget.defaults
+        }
         thresholds    = (try? ud.decoded(Thresholds.self,     forKey: "thresholds"))    ?? .default
-        dnsResolvers  = (try? ud.decoded([DNSResolver].self,  forKey: "dnsResolvers"))  ?? DNSResolver.defaults
+        do {
+            dnsResolvers = try ud.decoded([DNSResolver].self, forKey: "dnsResolvers")
+        } catch {
+            if ud.data(forKey: "dnsResolvers") != nil {
+                print("[AppSettings] Failed to decode dnsResolvers (\(error)) — falling back to defaults")
+            }
+            dnsResolvers = DNSResolver.defaults
+        }
 
         alwaysShowBarChart        = ud.bool(forKey: "alwaysShowBarChart")
         colorTheme                = ColorTheme(rawValue: ud.string(forKey: "colorTheme") ?? "") ?? .system

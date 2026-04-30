@@ -5,6 +5,17 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.1 — 2026-04-30
+
+### Bug Fixes
+- **SQL parameterized queries** — Two `UPDATE` statements in the session storage layer were built via string interpolation instead of bound parameters; replaced with `sqlite3_bind_*` calls to eliminate any injection surface.
+- **DNS probe socket timeout** — The `setsockopt(SO_RCVTIMEO)` call that sets the per-resolver receive timeout was not checked for failure; DNS probes on a misconfigured socket could have hung indefinitely instead of timing out after 3 seconds.
+- **Adaptive polling now only activates on red status** — Previously, two consecutive yellow polls (e.g. a transient latency spike) were enough to halve the poll interval. Adaptive mode now only counts red polls toward the threshold, avoiding unnecessary battery drain from brief degradations.
+- **Interface error sampling exits cleanly on netstat failure** — If `netstat` exits with a non-zero status (e.g. due to a permissions issue), the output is now discarded rather than being passed to the parser, preventing silent misreads.
+- **AppSettings logs decode failures** — If persisted `pingTargets` or `dnsResolvers` data fails to decode (e.g. from a corrupted preferences backup), a diagnostic message is now printed before falling back to defaults.
+
+---
+
 ## v2.54.0 — 2026-04-29
 
 ### New Features

@@ -361,7 +361,9 @@ public final class MonitoringEngine {
             }
         } else {
             adaptiveResetGreenCount = 0
-            consecutiveNonGreenPolls += 1
+            // Only accelerate polling on red status — yellow (e.g. transient latency spikes)
+            // should not drain battery by halving the poll interval unnecessarily.
+            if status == .red { consecutiveNonGreenPolls += 1 }
             if !isAdaptiveMode && consecutiveNonGreenPolls >= 2 {
                 isAdaptiveMode = true
                 let faster = max(2, baseInterval / 2)
