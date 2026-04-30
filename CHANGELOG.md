@@ -5,6 +5,18 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.2 — 2026-04-30
+
+### Bug Fixes
+- **Incident close time consistency** — `closeActiveConnectionEvent` previously called `Date()` twice, once to stamp the in-memory record and once for the SQLite write, producing a fractional-second discrepancy between the two. Both now use the same timestamp.
+
+### Changes
+- **Batch ping status recomputation** — The overall status was recomputed after each individual ping result was stored. With five concurrent targets plus the gateway that was up to six redundant windowed-average passes per tick. Status is now recomputed once after all target pings complete, reducing per-tick overhead proportionally to target count.
+- **DNS rolling buffer uses CircularBuffer** — The per-resolver RTT history was stored as a plain array with manual length management. It now uses the existing `CircularBuffer<Double?>` type, eliminating the manual pruning step.
+- **AppEnvironment resource cleanup on deinit** — The IOPowerSources `CFRunLoopSource`, bandwidth schedule timer, maintenance timer, and pending session `DispatchWorkItem` are now properly released in `deinit`.
+
+---
+
 ## v2.54.1 — 2026-04-30
 
 ### Bug Fixes

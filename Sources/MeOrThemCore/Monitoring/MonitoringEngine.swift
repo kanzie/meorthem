@@ -161,7 +161,9 @@ public final class MonitoringEngine {
                 }
             }
             for await (id, result) in group {
-                store.record(result: result, for: id)
+                // Defer status recomputation until all target results are in — avoids N
+                // redundant windowed-average passes when a tick records multiple targets.
+                store.record(result: result, for: id, recompute: false)
                 // Start next pending target as a slot becomes free
                 if let target = pending.popFirst() {
                     group.addTask {
@@ -171,6 +173,8 @@ public final class MonitoringEngine {
                 }
             }
         }
+        // Single recompute once all target pings are recorded.
+        store.recomputeStatus()
 
         // Gateway ping for fault isolation — detect local vs ISP issues
         await pingGateway()
@@ -336,8 +340,10 @@ public final class MonitoringEngine {
         lastGatewayIP = gatewayIP
         let result = await Self.pingHost(gatewayIP)
         // Store in regular history so gateway target shows sparklines + latency in the menu.
-        store.record(result: result, for: PingTarget.gatewayID)
-        // Also record for fault isolation logic.
+        // recompute: false — the gateway is excluded from recomputeOverallStatus() so a
+        // full windowed-average pass here would be wasted work.
+        store.record(result: result, for: PingTarget.gatewayID, recompute: false)
+        // Also record for fault isolation logic (calls recomputeFaultType internally).
         store.recordGatewayPing(result, gatewayIP: gatewayIP)
     }
 

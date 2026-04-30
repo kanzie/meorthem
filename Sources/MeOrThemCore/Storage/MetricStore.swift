@@ -84,7 +84,7 @@ public final class MetricStore: ObservableObject {
     @Published public private(set) var dnsSummary: DNSSummary?
 
     /// Rolling 10-sample RTT buffer per resolver IP (nil entries = timeout/failure).
-    private var dnsRollingBuffer: [String: [Double?]] = [:]
+    private var dnsRollingBuffer: [String: CircularBuffer<Double?>] = [:]
 
     // MARK: - Connection history (last 20 degradation events, backed by SQLite)
     @Published public private(set) var connectionHistory: [ConnectionEvent] = []
@@ -110,13 +110,16 @@ public final class MetricStore: ObservableObject {
 
     // MARK: - Write methods (called from MonitoringEngine)
 
-    public func record(result: PingResult, for targetID: UUID) {
+    /// Records a ping result for a target.
+    /// Pass `recompute: false` when recording a batch of results — call `recomputeStatus()`
+    /// once after the batch to avoid redundant windowed-status recomputations.
+    public func record(result: PingResult, for targetID: UUID, recompute: Bool = true) {
         latestPing[targetID] = result
         if pingHistory[targetID] == nil {
             pingHistory[targetID] = CircularBuffer(capacity: kPingHistoryCapacity)
         }
         pingHistory[targetID]!.append(result)
-        recomputeOverallStatus()
+        if recompute { recomputeOverallStatus() }
 
         // Notify observers (e.g. LogExporter for append-mode CSV).
         onPingRecorded?(result, targetID)
@@ -191,10 +194,10 @@ public final class MetricStore: ObservableObject {
     public func recordDNSResolverSample(resolver: DNSResolver, resolveMs: Double?, rcode: Int?) {
         // Update rolling 10-sample buffer.
         let ip = resolver.ip.isEmpty ? resolver.name : resolver.ip
-        var buf = dnsRollingBuffer[ip] ?? []
-        buf.append(resolveMs)
-        if buf.count > 10 { buf.removeFirst(buf.count - 10) }
-        dnsRollingBuffer[ip] = buf
+        if dnsRollingBuffer[ip] == nil {
+            dnsRollingBuffer[ip] = CircularBuffer<Double?>(capacity: 10)
+        }
+        dnsRollingBuffer[ip]!.append(resolveMs)
 
         // Persist to SQLite.
         sqliteStore?.insertDNSResolverSample(
@@ -220,11 +223,11 @@ public final class MetricStore: ObservableObject {
 
         for r in enabledResolvers {
             let key = r.ip.isEmpty ? r.name : r.ip
-            let buf = dnsRollingBuffer[key] ?? []
-            guard !buf.isEmpty else { continue }
+            guard let cb = dnsRollingBuffer[key], cb.count > 0 else { continue }
+            let buf = cb.toArray()
 
             let successes = buf.compactMap { $0 }
-            let failures  = buf.count - successes.count
+            let failures  = cb.count - successes.count
             totalFail    += failures
             totalSamples += buf.count
             if !successes.isEmpty { respondingCount += 1 }
@@ -388,6 +391,9 @@ public final class MetricStore: ObservableObject {
         recomputeFaultType(using: effectiveStatuses)
     }
 
+    /// Explicit overall-status recompute. Call once after a batch of `record(recompute: false)` calls.
+    public func recomputeStatus() { recomputeOverallStatus() }
+
     // MARK: - Connection history tracking
 
     private func openConnectionEvent(severity: MetricStatus) {
@@ -411,9 +417,10 @@ public final class MetricStore: ObservableObject {
     private func closeActiveConnectionEvent() {
         guard let idx = connectionHistory.firstIndex(where: { $0.isActive }) else { return }
         let event = connectionHistory[idx]
-        connectionHistory[idx].endTime = Date()
+        let closeTime = Date()
+        connectionHistory[idx].endTime = closeTime
         saveConnectionHistory()
-        sqliteStore?.closeIncident(id: event.id, endTime: Date(),
+        sqliteStore?.closeIncident(id: event.id, endTime: closeTime,
                                    peakSeverityRaw: event.severityRaw)
     }
 

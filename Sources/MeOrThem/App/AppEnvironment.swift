@@ -270,6 +270,17 @@ final class AppEnvironment {
             .store(in: &cancellables)
     }
 
+    deinit {
+        // Remove the power-source run-loop source before releasing it; omitting this
+        // would leave a dangling callback registered on the main run loop.
+        if let src = powerSourceObserver {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .defaultMode)
+        }
+        pendingNonWifiSession?.cancel()
+        bandwidthScheduleTimer?.invalidate()
+        maintenanceTimer?.invalidate()
+    }
+
     // MARK: - Sleep / Wake handling
 
     private func handleSleep() {

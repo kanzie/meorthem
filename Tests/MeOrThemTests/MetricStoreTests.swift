@@ -239,4 +239,41 @@ func runMetricStoreTests() {
             settings.pingTargets = savedTargets
         }
     }
+
+    suite("MetricStore batch recording") {
+        MainActor.assumeIsolated {
+            let settings = AppSettings.shared
+            let id1 = PingTarget.defaults[0].id
+            let id2 = PingTarget.defaults[1].id
+
+            // Record with recompute:false should leave overallStatus at its previous value
+            // until recomputeStatus() is called.
+            let storeBatch = MetricStore(settings: settings)
+            // Seed a green baseline first
+            storeBatch.record(result: PingResult(timestamp: .now, rtt: 40, lossPercent: 0, jitter: 5), for: id1)
+            storeBatch.record(result: PingResult(timestamp: .now, rtt: 40, lossPercent: 0, jitter: 5), for: id2)
+            expectEqual(storeBatch.overallStatus, .green, "baseline: all green")
+
+            // Add red-level results with recompute deferred
+            storeBatch.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1, recompute: false)
+            storeBatch.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id2, recompute: false)
+            // Status must not have changed yet — recompute was deferred
+            expectEqual(storeBatch.overallStatus, .green,
+                        "status unchanged before recomputeStatus() when recompute:false")
+
+            // Now flush — status should reflect the new bad samples
+            storeBatch.recomputeStatus()
+            expectEqual(storeBatch.overallStatus, .red,
+                        "status updates to red after recomputeStatus() on deferred batch")
+
+            // Verify deferred batch produces identical final status to incremental recording
+            let storeIncremental = MetricStore(settings: settings)
+            storeIncremental.record(result: PingResult(timestamp: .now, rtt: 40, lossPercent: 0, jitter: 5), for: id1)
+            storeIncremental.record(result: PingResult(timestamp: .now, rtt: 40, lossPercent: 0, jitter: 5), for: id2)
+            storeIncremental.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id1)
+            storeIncremental.record(result: PingResult(timestamp: .now, rtt: nil, lossPercent: 100, jitter: nil), for: id2)
+            expectEqual(storeBatch.overallStatus, storeIncremental.overallStatus,
+                        "batch and incremental recording produce identical overall status")
+        }
+    }
 }
