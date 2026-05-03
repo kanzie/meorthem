@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.3 — 2026-05-03
+
+### Bug Fixes
+- **Easter egg animation reset** — Fixed a bug where the easter egg animation hidden in the app wouldn't reset upon closing its window; the animation now stops and resets correctly whenever the window is closed.
+
+---
+
 ## v2.54.2 — 2026-04-30
 
 ### Bug Fixes

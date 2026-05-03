@@ -179,6 +179,10 @@ private struct AboutView: View {
         }
         .frame(width: 340)
         .onDisappear { fireworks.stop() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+            fireworks.stop()
+            showAuthor = false
+        }
     }
 
     private var iconImage: Image {
