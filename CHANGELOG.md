@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.4 — 2026-05-04
+
+### New Features
+- **Help search** — A search bar at the top of the Help window lets you type any keyword and jump directly to the relevant tab; matches are highlighted in yellow throughout the text.
+
+---
+
 ## v2.54.3 — 2026-05-03
 
 ### Bug Fixes

@@ -28,23 +28,128 @@ final class HelpWindowController: NSWindowController {
     }
 }
 
+// MARK: - Search state
+
+@MainActor private final class HelpSearch: ObservableObject {
+    @Published var query = ""
+}
+
+// MARK: - Text highlighting helper
+
+private func highlighted(_ string: String, query: String) -> Text {
+    guard query.count >= 2 else { return Text(string) }
+    var attr = AttributedString(string)
+    var start = attr.startIndex
+    while start < attr.endIndex,
+          let range = attr[start...].range(of: query, options: .caseInsensitive) {
+        attr[range].backgroundColor = Color.yellow
+        attr[range].foregroundColor = Color.black
+        start = range.upperBound
+    }
+    return Text(attr)
+}
+
+// MARK: - Tab keyword index
+
+private let helpTabKeywords: [(String, Int)] = [
+    // Tab 0: Metrics — longer/more specific first
+    ("packet loss", 0), ("signal strength", 0), ("round-trip", 0), ("dns response time", 0),
+    ("speed test", 0), ("speedtest", 0), ("bandwidth", 0), ("download", 0), ("upload", 0),
+    ("rssi", 0), ("snr", 0), ("jitter", 0), ("latency", 0), ("rtt", 0), ("dbm", 0),
+    // Tab 1: Tests & Probes
+    ("gateway ping", 1), ("fault isolation", 1), ("interface error", 1), ("hardware error", 1),
+    ("isp identification", 1), ("cpu sampling", 1), ("traceroute", 1), ("fragmentation", 1),
+    ("icmp", 1), ("probe", 1), ("udp", 1), ("mtu", 1), ("asn", 1), ("cymru", 1),
+    // Tab 2: Status Logic
+    ("adaptive polling", 2), ("evaluation window", 2), ("trimmed mean", 2),
+    ("stability score", 2), ("network session", 2), ("fingerprint", 2),
+    ("ping_samples", 2), ("incident", 2), ("hysteresis", 2),
+    ("threshold", 2), ("sqlite", 2), ("storage", 2), ("grade", 2),
+    // Tab 3: Analysis Engine
+    ("data sufficiency", 3), ("latency trend", 3), ("channel switching", 3),
+    ("time-of-day", 3), ("bufferbloat", 3), ("regression", 3),
+    ("pearson", 3), ("correlation", 3), ("confidence", 3),
+    ("outlier", 3), ("analysis", 3), ("finding", 3), ("pattern", 3), ("ols", 3),
+    // Tab 4: Problems & Fixes
+    ("captive portal", 4), ("dns hijacking", 4), ("isp outage", 4), ("local network", 4),
+    ("airport wifi", 4), ("port 53", 4), ("prometheus", 4), ("shortcuts", 4),
+    ("fq-codel", 4), ("pppoe", 4), ("vpn", 4), ("router", 4), ("ethernet", 4),
+    ("export", 4), ("hotel", 4), ("airport", 4), ("sqm", 4), ("cable", 4),
+]
+
+private func bestHelpTab(for query: String) -> Int? {
+    let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+    guard q.count >= 3 else { return nil }
+    for (keyword, tab) in helpTabKeywords {
+        if keyword.contains(q) || q.contains(keyword) { return tab }
+    }
+    return nil
+}
+
 // MARK: - Root view
 
 private struct HelpView: View {
+    @StateObject private var search = HelpSearch()
+    @State private var selectedTab = 0
+
     var body: some View {
-        TabView {
-            MetricsTab()
-                .tabItem { Label("Metrics", systemImage: "chart.bar") }
-            TestsTab()
-                .tabItem { Label("Tests & Probes", systemImage: "antenna.radiowaves.left.and.right") }
-            StatusTab()
-                .tabItem { Label("Status Logic", systemImage: "cpu") }
-            AnalysisTab()
-                .tabItem { Label("Analysis Engine", systemImage: "magnifyingglass") }
-            ProblemsTab()
-                .tabItem { Label("Problems & Fixes", systemImage: "wrench.and.screwdriver") }
+        VStack(spacing: 0) {
+            searchBar
+            TabView(selection: $selectedTab) {
+                MetricsTab()
+                    .tabItem { Label("Metrics", systemImage: "chart.bar") }
+                    .tag(0)
+                TestsTab()
+                    .tabItem { Label("Tests & Probes", systemImage: "antenna.radiowaves.left.and.right") }
+                    .tag(1)
+                StatusTab()
+                    .tabItem { Label("Status Logic", systemImage: "cpu") }
+                    .tag(2)
+                AnalysisTab()
+                    .tabItem { Label("Analysis Engine", systemImage: "magnifyingglass") }
+                    .tag(3)
+                ProblemsTab()
+                    .tabItem { Label("Problems & Fixes", systemImage: "wrench.and.screwdriver") }
+                    .tag(4)
+            }
+            .padding(4)
         }
-        .padding(4)
+        .environmentObject(search)
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+                .font(.system(size: 13))
+            TextField("Search help…", text: $search.query)
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .onChange(of: search.query) { _, newValue in
+                    if let tab = bestHelpTab(for: newValue) {
+                        selectedTab = tab
+                    }
+                }
+            if !search.query.isEmpty {
+                Button { search.query = "" } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+                        .font(.system(size: 13))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .cornerRadius(7)
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(Color(nsColor: .separatorColor), lineWidth: 0.5)
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
     }
 }
 
@@ -53,10 +158,11 @@ private struct HelpView: View {
 private struct SectionHeader: View {
     let title: String
     let subtitle: String
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.title2).bold()
-            Text(subtitle).font(.subheadline).foregroundColor(.secondary)
+            highlighted(title, query: search.query).font(.title2).bold()
+            highlighted(subtitle, query: search.query).font(.subheadline).foregroundColor(.secondary)
         }
         .padding(.bottom, 6)
     }
@@ -67,6 +173,7 @@ private struct Callout: View {
     let color: Color
     let title: String
     let message: String
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: icon)
@@ -74,8 +181,8 @@ private struct Callout: View {
                 .font(.system(size: 15, weight: .semibold))
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 3) {
-                Text(title).font(.callout).bold()
-                Text(message).font(.callout).foregroundColor(.secondary)
+                highlighted(title, query: search.query).font(.callout).bold()
+                highlighted(message, query: search.query).font(.callout).foregroundColor(.secondary)
             }
         }
         .padding(12)
@@ -87,6 +194,7 @@ private struct Callout: View {
 
 private struct DesignNote: View {
     let text: String
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Text("WHY")
@@ -96,7 +204,7 @@ private struct DesignNote: View {
                 .padding(.vertical, 2)
                 .background(Color.accentColor)
                 .cornerRadius(4)
-            Text(text)
+            highlighted(text, query: search.query)
                 .font(.callout)
                 .foregroundColor(.secondary)
         }
@@ -110,10 +218,13 @@ private struct DesignNote: View {
 private struct KVRow: View {
     let key: String
     let value: String
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         HStack(alignment: .top) {
-            Text(key).font(.caption).foregroundColor(.secondary).frame(minWidth: 130, alignment: .leading)
-            Text(value).font(.system(.caption, design: .monospaced)).foregroundColor(.primary)
+            highlighted(key, query: search.query)
+                .font(.caption).foregroundColor(.secondary).frame(minWidth: 130, alignment: .leading)
+            highlighted(value, query: search.query)
+                .font(.system(.caption, design: .monospaced)).foregroundColor(.primary)
             Spacer()
         }
     }
@@ -123,9 +234,15 @@ private struct ProseSection<Content: View>: View {
     let title: String
     let icon: String
     @ViewBuilder let content: () -> Content
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon).font(.headline)
+            Label {
+                highlighted(title, query: search.query)
+            } icon: {
+                Image(systemName: icon)
+            }
+            .font(.headline)
             content()
         }
     }
@@ -134,6 +251,7 @@ private struct ProseSection<Content: View>: View {
 // MARK: - Tab 1: Metrics
 
 private struct MetricsTab: View {
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -263,7 +381,7 @@ private struct MetricsTab: View {
                 Divider()
 
                 ProseSection(title: "Bandwidth (Download / Upload)", icon: "arrow.up.arrow.down") {
-                    Text("Measured on demand via the bundled Ookla Speedtest CLI. The result feeds into the bufferbloat diagnostic: the analysis engine compares your idle RTT baseline against RTT measured while the speed test is saturating your link. A ratio greater than 2× indicates excess queueing in your router.")
+                    highlighted("Measured on demand via the bundled Ookla Speedtest CLI. The result feeds into the bufferbloat diagnostic: the analysis engine compares your idle RTT baseline against RTT measured while the speed test is saturating your link. A ratio greater than 2× indicates excess queueing in your router.", query: search.query)
                         .font(.body)
                     Callout(icon: "lock.shield", color: .gray,
                             title: "Binary integrity",
@@ -282,18 +400,23 @@ private struct MetricsTab: View {
         insight: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon).font(.headline)
-            Text(eli5).font(.body)
+            Label {
+                highlighted(title, query: search.query)
+            } icon: {
+                Image(systemName: icon)
+            }
+            .font(.headline)
+            highlighted(eli5, query: search.query).font(.body)
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 5) {
                     Label("Typical ranges", systemImage: "ruler")
                         .font(.caption).bold().foregroundColor(.secondary)
                     ForEach(ranges, id: \.0) { val, label in
                         HStack(alignment: .top) {
-                            Text(val)
+                            highlighted(val, query: search.query)
                                 .font(.system(.caption, design: .monospaced))
                                 .frame(minWidth: 90, alignment: .leading)
-                            Text(label).font(.caption).foregroundColor(.secondary)
+                            highlighted(label, query: search.query).font(.caption).foregroundColor(.secondary)
                         }
                     }
                 }
@@ -307,9 +430,9 @@ private struct MetricsTab: View {
                         .font(.caption).bold().foregroundColor(.secondary)
                     ForEach(thresholds, id: \.0) { label, val in
                         HStack {
-                            Text(label).font(.caption).foregroundColor(.secondary)
+                            highlighted(label, query: search.query).font(.caption).foregroundColor(.secondary)
                             Spacer()
-                            Text(val).font(.system(.caption, design: .monospaced))
+                            highlighted(val, query: search.query).font(.system(.caption, design: .monospaced))
                         }
                     }
                 }
@@ -326,6 +449,7 @@ private struct MetricsTab: View {
 // MARK: - Tab 2: Tests & Probes
 
 private struct TestsTab: View {
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -335,9 +459,9 @@ private struct TestsTab: View {
                 )
 
                 ProseSection(title: "ICMP Ping Probes", icon: "dot.radiowaves.left.and.right") {
-                    Text("Every poll, Me Or Them spawns one `/sbin/ping` process per configured target running:")
+                    highlighted("Every poll, Me Or Them spawns one `/sbin/ping` process per configured target running:", query: search.query)
                         .font(.body)
-                    Text("ping -c 3 -i 0.2 -t 3 <target>")
+                    highlighted("ping -c 3 -i 0.2 -t 3 <target>", query: search.query)
                         .font(.system(.body, design: .monospaced))
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -351,7 +475,7 @@ private struct TestsTab: View {
                     .padding(10)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
-                    Text("From 3 packets, Me Or Them calculates: RTT (average of returned packets), and packet loss (how many of the 3 were not returned). All targets run concurrently — the total probe round takes as long as the slowest target, not the sum of all targets.")
+                    highlighted("From 3 packets, Me Or Them calculates: RTT (average of returned packets), and packet loss (how many of the 3 were not returned). All targets run concurrently — the total probe round takes as long as the slowest target, not the sum of all targets.", query: search.query)
                         .font(.body)
                     DesignNote(text: "3 packets is the minimum to meaningfully detect loss without inflating subprocess duty cycle. At a 5-second poll interval, 3 packets × 200 ms spacing = ~450 ms probe time — 9% of the poll window. 5 packets would be 15%, creating unacceptable subprocess overhead and blurring the line between the probe itself and what it's measuring.")
                     DesignNote(text: "/sbin/ping is used instead of raw ICMP sockets because macOS requires root privilege for raw sockets. /sbin/ping carries the necessary setuid entitlement. Arguments are always passed as an array — never as a shell string — which prevents any possibility of command injection.")
@@ -360,14 +484,14 @@ private struct TestsTab: View {
                 Divider()
 
                 ProseSection(title: "HTTP / HTTPS Probes", icon: "globe") {
-                    Text("Targets configured as HTTP or HTTPS URLs are probed by making a TCP connection and measuring time-to-first-byte. This is useful for monitoring internal endpoints, APIs, or services that block ICMP. Loss is recorded as a timeout if the connection fails or exceeds the probe timeout. HTTP probe times are comparable to ICMP RTT for the same host but will be slightly higher because they include TCP handshake overhead.")
+                    highlighted("Targets configured as HTTP or HTTPS URLs are probed by making a TCP connection and measuring time-to-first-byte. This is useful for monitoring internal endpoints, APIs, or services that block ICMP. Loss is recorded as a timeout if the connection fails or exceeds the probe timeout. HTTP probe times are comparable to ICMP RTT for the same host but will be slightly higher because they include TCP handshake overhead.", query: search.query)
                         .font(.body)
                 }
 
                 Divider()
 
                 ProseSection(title: "Gateway Ping (Fault Isolation)", icon: "arrow.triangle.branch") {
-                    Text("Every poll also pings your default gateway (router) using the same 3-packet probe. The gateway IP is discovered automatically via the routing table — it is never hardcoded.")
+                    highlighted("Every poll also pings your default gateway (router) using the same 3-packet probe. The gateway IP is discovered automatically via the routing table — it is never hardcoded.", query: search.query)
                         .font(.body)
                     Callout(icon: "mappin.and.ellipse", color: .blue,
                             title: "Fault attribution logic",
@@ -378,7 +502,7 @@ private struct TestsTab: View {
                 Divider()
 
                 ProseSection(title: "Raw UDP DNS Probing", icon: "network.badge.shield.half.filled") {
-                    Text("Every ~30 seconds, Me Or Them sends a wire-format DNS A-record query directly to each enabled resolver's IP address over UDP port 53 — bypassing macOS mDNSResponder and the OS DNS cache entirely.")
+                    highlighted("Every ~30 seconds, Me Or Them sends a wire-format DNS A-record query directly to each enabled resolver's IP address over UDP port 53 — bypassing macOS mDNSResponder and the OS DNS cache entirely.", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 4) {
                         KVRow(key: "Probe interval", value: "Every 6th poll tick (~30 s at default 5 s interval)")
@@ -390,7 +514,7 @@ private struct TestsTab: View {
                     .padding(10)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
-                    Text("Resolvers that fail repeatedly are automatically paused and re-probed in the background every ~5 minutes. This avoids wasting probe budget on persistently unreachable resolvers without permanently removing them.")
+                    highlighted("Resolvers that fail repeatedly are automatically paused and re-probed in the background every ~5 minutes. This avoids wasting probe budget on persistently unreachable resolvers without permanently removing them.", query: search.query)
                         .font(.callout).foregroundColor(.secondary)
                     DesignNote(text: "Using getaddrinfo() or URLSession would hit the OS cache and mDNSResponder. The time returned would be cache hit time (often < 1 ms) or the OS resolver's internal latency — not the actual upstream resolver's response time. Raw UDP packets measure what the resolver itself does, which is what matters for diagnosing slow DNS.")
                 }
@@ -398,15 +522,15 @@ private struct TestsTab: View {
                 Divider()
 
                 ProseSection(title: "MTU / Path Fragmentation Probes", icon: "ruler") {
-                    Text("Every ~2.5 minutes, MTUChecker sends a single 1472-byte ICMP probe with the Don't-Fragment (DF) bit set:")
+                    highlighted("Every ~2.5 minutes, MTUChecker sends a single 1472-byte ICMP probe with the Don't-Fragment (DF) bit set:", query: search.query)
                         .font(.body)
-                    Text("ping -D -s 1472 -c 1 <gateway>")
+                    highlighted("ping -D -s 1472 -c 1 <gateway>", query: search.query)
                         .font(.system(.body, design: .monospaced))
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(nsColor: .controlBackgroundColor))
                         .cornerRadius(6)
-                    Text("1472 bytes payload + 28 bytes IP/ICMP header = 1500 bytes — the standard Ethernet MTU. If any router on the path has a smaller MTU and cannot fragment the packet (because DF is set), it must silently drop it.")
+                    highlighted("1472 bytes payload + 28 bytes IP/ICMP header = 1500 bytes — the standard Ethernet MTU. If any router on the path has a smaller MTU and cannot fragment the packet (because DF is set), it must silently drop it.", query: search.query)
                         .font(.body)
                     Callout(icon: "exclamationmark.triangle", color: .orange,
                             title: "Why this is insidious",
@@ -424,9 +548,9 @@ private struct TestsTab: View {
                 Divider()
 
                 ProseSection(title: "Hardware Interface Error Monitoring", icon: "cpu") {
-                    Text("Every ~30 seconds, InterfaceMonitor reads the kernel's hardware error and drop counters for the active network interface via ioctl/sysctl — the same counters shown by `netstat -i`.")
+                    highlighted("Every ~30 seconds, InterfaceMonitor reads the kernel's hardware error and drop counters for the active network interface via ioctl/sysctl — the same counters shown by `netstat -i`.", query: search.query)
                         .font(.body)
-                    Text("It records the delta since the last sample (not the cumulative total), storing one row in `interface_error_samples` per interval. The counters tracked are: input errors, output errors, input drops, output drops, and CRC errors.")
+                    highlighted("It records the delta since the last sample (not the cumulative total), storing one row in `interface_error_samples` per interval. The counters tracked are: input errors, output errors, input drops, output drops, and CRC errors.", query: search.query)
                         .font(.body)
                     DesignNote(text: "Cumulative counters grow monotonically from boot and reset on interface reinitialisation. Deltas tell you whether errors are happening right now — a delta of 0 means clean; a non-zero delta means the hardware made an error in the last 30 seconds. Repeated non-zero deltas across several samples are what the analysis engine flags.")
                 }
@@ -434,9 +558,9 @@ private struct TestsTab: View {
                 Divider()
 
                 ProseSection(title: "Automatic Traceroute", icon: "point.3.connected.trianglepath.dotted") {
-                    Text("When connection status transitions from green to red, a traceroute is captured automatically:")
+                    highlighted("When connection status transitions from green to red, a traceroute is captured automatically:", query: search.query)
                         .font(.body)
-                    Text("traceroute -n -q 1 -w 2 -m 20 <first-external-target>")
+                    highlighted("traceroute -n -q 1 -w 2 -m 20 <first-external-target>", query: search.query)
                         .font(.system(.body, design: .monospaced))
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -452,7 +576,7 @@ private struct TestsTab: View {
                     .padding(10)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
-                    Text("Results are stored in the `traceroute_events` table and surfaced in Network Analysis with the highest-latency hop highlighted and the full hop-by-hop output expandable for copying into a support ticket.")
+                    highlighted("Results are stored in the `traceroute_events` table and surfaced in Network Analysis with the highest-latency hop highlighted and the full hop-by-hop output expandable for copying into a support ticket.", query: search.query)
                         .font(.callout).foregroundColor(.secondary)
                     DesignNote(text: "Traceroute is rate-limited to once per 5 minutes because it generates dozens of ICMP packets per run. Firing on every red poll would flood your network during an already-degraded incident.")
                 }
@@ -460,14 +584,14 @@ private struct TestsTab: View {
                 Divider()
 
                 ProseSection(title: "ISP Identification", icon: "building.2") {
-                    Text("When a new network session opens, Me Or Them queries the Cymru IP-to-ASN service to identify your ISP or network operator from your WAN IP. The result is stored with the session record and shown in Connection Profiles. No account or registration is required — Cymru provides this as a free DNS-based public service.")
+                    highlighted("When a new network session opens, Me Or Them queries the Cymru IP-to-ASN service to identify your ISP or network operator from your WAN IP. The result is stored with the session record and shown in Connection Profiles. No account or registration is required — Cymru provides this as a free DNS-based public service.", query: search.query)
                         .font(.body)
                 }
 
                 Divider()
 
                 ProseSection(title: "CPU Sampling", icon: "gauge") {
-                    Text("CPUSampler calls `host_statistics()` once at the start of each poll tick to record overall system CPU load. This reading is used to display a \"High system load\" advisory in the dropdown when load exceeds 75% during a degraded period — elevated CPU can delay ping process scheduling and inflate RTT and loss readings, giving a false picture of network health.")
+                    highlighted("CPUSampler calls `host_statistics()` once at the start of each poll tick to record overall system CPU load. This reading is used to display a \"High system load\" advisory in the dropdown when load exceeds 75% during a degraded period — elevated CPU can delay ping process scheduling and inflate RTT and loss readings, giving a false picture of network health.", query: search.query)
                         .font(.body)
                 }
             }
@@ -479,6 +603,7 @@ private struct TestsTab: View {
 // MARK: - Tab 3: Status Logic
 
 private struct StatusTab: View {
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -488,7 +613,7 @@ private struct StatusTab: View {
                 )
 
                 ProseSection(title: "Step 1 — Evaluation Windows", icon: "slider.horizontal.3") {
-                    Text("Raw poll readings are not compared to thresholds directly. Instead, each metric is averaged over its own configurable window before any status decision is made.")
+                    highlighted("Raw poll readings are not compared to thresholds directly. Instead, each metric is averaged over its own configurable window before any status decision is made.", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 4) {
                         KVRow(key: "Latency window", value: "Default 15 s — RTT average over the last N polls")
@@ -509,7 +634,7 @@ private struct StatusTab: View {
                 Divider()
 
                 ProseSection(title: "Step 2 — Per-Target Status", icon: "circle.fill") {
-                    Text("After windowing, each target's averaged metrics are compared against its configured thresholds. Targets with custom threshold overrides (Settings → Targets) are evaluated against those overrides. All others use the global thresholds.")
+                    highlighted("After windowing, each target's averaged metrics are compared against its configured thresholds. Targets with custom threshold overrides (Settings → Targets) are evaluated against those overrides. All others use the global thresholds.", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 4) {
                         KVRow(key: "Latency yellow", value: "≥ 60 ms")
@@ -522,19 +647,19 @@ private struct StatusTab: View {
                     .padding(10)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
-                    Text("A target's status is the worst of its three metric statuses. A target with green latency and loss but yellow jitter is yellow overall.")
+                    highlighted("A target's status is the worst of its three metric statuses. A target with green latency and loss but yellow jitter is yellow overall.", query: search.query)
                         .font(.callout).foregroundColor(.secondary)
                 }
 
                 Divider()
 
                 ProseSection(title: "Step 3 — Trimmed Mean Across Targets", icon: "chart.bar.xaxis") {
-                    Text("With 3 or more non-gateway, non-override targets, the best and worst single-target metric readings are discarded before computing the overall status. The remaining readings are averaged.")
+                    highlighted("With 3 or more non-gateway, non-override targets, the best and worst single-target metric readings are discarded before computing the overall status. The remaining readings are averaged.", query: search.query)
                         .font(.body)
                     Callout(icon: "checkmark.circle", color: .green,
                             title: "What this prevents",
                             message: "A CDN that is consistently slow for your region cannot push overall status to yellow on its own. An unreachable target cannot inflate loss to 100%. Status reflects your actual network experience across the majority of targets.")
-                    Text("Targets with custom threshold overrides are excluded from the trimmed mean and evaluated independently. Their status is OR'd with the trimmed mean result — either can drive the overall status.")
+                    highlighted("Targets with custom threshold overrides are excluded from the trimmed mean and evaluated independently. Their status is OR'd with the trimmed mean result — either can drive the overall status.", query: search.query)
                         .font(.callout).foregroundColor(.secondary)
                     DesignNote(text: "Trimmed mean is a standard statistical technique for reducing the influence of outliers. In a monitoring context: the worst-performing target is almost always a CDN/routing issue, not your ISP. The best-performing target is often a co-located server on your ISP's network that doesn't reflect real-world external connectivity.")
                 }
@@ -553,14 +678,14 @@ private struct StatusTab: View {
                     .padding(10)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
-                    Text("There is no hysteresis beyond the evaluation window. When the windowed average crosses a threshold, status changes immediately. The window itself is the debounce mechanism — no additional delay or hysteresis is layered on top.")
+                    highlighted("There is no hysteresis beyond the evaluation window. When the windowed average crosses a threshold, status changes immediately. The window itself is the debounce mechanism — no additional delay or hysteresis is layered on top.", query: search.query)
                         .font(.callout).foregroundColor(.secondary)
                 }
 
                 Divider()
 
                 ProseSection(title: "Step 5 — Transition Detection & Incidents", icon: "calendar.badge.clock") {
-                    Text("Every poll, the new overall status is compared to the previous poll's status:")
+                    highlighted("Every poll, the new overall status is compared to the previous poll's status:", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 6) {
                         transitionRow("Green → Yellow/Red", "Opens a new connection event. Records timestamp, severity, and the specific metrics that triggered it (e.g. \"high latency (185 ms), packet loss (4.2%)\").")
@@ -568,7 +693,7 @@ private struct StatusTab: View {
                         transitionRow("Yellow ↔ Red", "Updates the open event's peak severity without creating a new event.")
                         transitionRow("No change", "No action — the existing event (if any) remains open.")
                     }
-                    Text("Up to 20 events are kept in memory for menu display. All events are persisted to SQLite for the full configured incident retention period (default: 365 days).")
+                    highlighted("Up to 20 events are kept in memory for menu display. All events are persisted to SQLite for the full configured incident retention period (default: 365 days).", query: search.query)
                         .font(.callout).foregroundColor(.secondary)
                     DesignNote(text: "Recording severity transitions in-place (rather than creating a new event) means Incident History shows one contiguous event for a fault that worsens and then recovers, rather than three fragmented events. This matches how a human would describe the incident.")
                 }
@@ -576,7 +701,7 @@ private struct StatusTab: View {
                 Divider()
 
                 ProseSection(title: "Adaptive Polling", icon: "speedometer") {
-                    Text("Polling frequency increases automatically during active problems to provide higher-resolution data exactly when it matters.")
+                    highlighted("Polling frequency increases automatically during active problems to provide higher-resolution data exactly when it matters.", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 4) {
                         KVRow(key: "Normal rate", value: "Configured interval (default 5 s, range 2–30 s)")
@@ -594,7 +719,7 @@ private struct StatusTab: View {
                 Divider()
 
                 ProseSection(title: "Network Session Fingerprinting", icon: "person.crop.rectangle") {
-                    Text("Me Or Them automatically tracks which network you're connected to without requiring Location permissions. A fingerprint is derived from:")
+                    highlighted("Me Or Them automatically tracks which network you're connected to without requiring Location permissions. A fingerprint is derived from:", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 4) {
                         KVRow(key: "Gateway IP", value: "Your router's LAN address")
@@ -605,7 +730,7 @@ private struct StatusTab: View {
                     .padding(10)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
-                    Text("A fingerprint change opens a new `network_sessions` row. The same fingerprint extends the existing session via `last_seen`. Each ping sample carries a `session_id` foreign key, so the analysis engine always draws per-network conclusions from that network's own data.")
+                    highlighted("A fingerprint change opens a new `network_sessions` row. The same fingerprint extends the existing session via `last_seen`. Each ping sample carries a `session_id` foreign key, so the analysis engine always draws per-network conclusions from that network's own data.", query: search.query)
                         .font(.callout).foregroundColor(.secondary)
                     DesignNote(text: "The /24 subnet rather than exact IP is deliberate: DHCP can assign a different IP within the same subnet on reconnection. Using the exact IP would create spurious new sessions after every DHCP renewal on the same network.")
                 }
@@ -613,7 +738,7 @@ private struct StatusTab: View {
                 Divider()
 
                 ProseSection(title: "Stability Score", icon: "star.fill") {
-                    Text("Each session earns a 0–100 score and an A–F letter grade computed from four weighted components:")
+                    highlighted("Each session earns a 0–100 score and an A–F letter grade computed from four weighted components:", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 4) {
                         KVRow(key: "Availability (40 pts)", value: "Fraction of time without an active incident")
@@ -640,7 +765,7 @@ private struct StatusTab: View {
                 Divider()
 
                 ProseSection(title: "Data Storage", icon: "internaldrive") {
-                    Text("All data is stored locally in a SQLite database using WAL (Write-Ahead Logging) mode, which allows concurrent reads without blocking writes. All I/O is serialised on a private background queue.")
+                    highlighted("All data is stored locally in a SQLite database using WAL (Write-Ahead Logging) mode, which allows concurrent reads without blocking writes. All I/O is serialised on a private background queue.", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 4) {
                         KVRow(key: "ping_samples", value: "Raw samples — default 7-day retention")
@@ -656,7 +781,7 @@ private struct StatusTab: View {
                     .padding(10)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(8)
-                    Text("Maintenance runs at launch and hourly: raw samples that exceed their retention window are aggregated into per-minute rows in `ping_aggregates`, then pruned. Charts automatically switch from raw to aggregate data for time windows beyond 24 hours.")
+                    highlighted("Maintenance runs at launch and hourly: raw samples that exceed their retention window are aggregated into per-minute rows in `ping_aggregates`, then pruned. Charts automatically switch from raw to aggregate data for time windows beyond 24 hours.", query: search.query)
                         .font(.callout).foregroundColor(.secondary)
                 }
             }
@@ -672,15 +797,15 @@ private struct StatusTab: View {
                 .frame(width: 18, height: 18)
                 .background(Color.accentColor)
                 .cornerRadius(9)
-            Text(desc).font(.callout)
+            highlighted(desc, query: search.query).font(.callout)
             Spacer()
         }
     }
 
     private func transitionRow(_ transition: String, _ description: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(transition).font(.caption).bold().foregroundColor(.accentColor)
-            Text(description).font(.caption).foregroundColor(.secondary)
+            highlighted(transition, query: search.query).font(.caption).bold().foregroundColor(.accentColor)
+            highlighted(description, query: search.query).font(.caption).foregroundColor(.secondary)
         }
         .padding(.vertical, 4)
     }
@@ -689,6 +814,7 @@ private struct StatusTab: View {
 // MARK: - Tab 4: Analysis Engine
 
 private struct AnalysisTab: View {
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -698,16 +824,16 @@ private struct AnalysisTab: View {
                 )
 
                 ProseSection(title: "Overview", icon: "magnifyingglass") {
-                    Text("The Network Analysis engine reviews a network session against 17 diagnostic patterns. It runs as a detached background task — not on the main thread — and is triggered when you open a session in the Network Intelligence window. It does not run continuously during monitoring.")
+                    highlighted("The Network Analysis engine reviews a network session against 17 diagnostic patterns. It runs as a detached background task — not on the main thread — and is triggered when you open a session in the Network Intelligence window. It does not run continuously during monitoring.", query: search.query)
                         .font(.body)
-                    Text("Every finding is scored using a confidence multiplier. Findings below 40% confidence are silently suppressed. The remainder are sorted by confidence descending and presented with a High / Medium / Low badge.")
+                    highlighted("Every finding is scored using a confidence multiplier. Findings below 40% confidence are silently suppressed. The remainder are sorted by confidence descending and presented with a High / Medium / Low badge.", query: search.query)
                         .font(.body)
                 }
 
                 Divider()
 
                 ProseSection(title: "Data Sufficiency", icon: "chart.bar.doc.horizontal") {
-                    Text("Before any pattern is scored, the engine calculates how much data is available for the selected session. The sample count scales the confidence of every finding:")
+                    highlighted("Before any pattern is scored, the engine calculates how much data is available for the selected session. The sample count scales the confidence of every finding:", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 4) {
                         KVRow(key: "Insufficient (< 30 samples)", value: "Multiplier 0.0 — no findings surfaced")
@@ -726,121 +852,57 @@ private struct AnalysisTab: View {
 
                 Divider()
 
-                Text("The 17 Diagnostic Patterns")
+                highlighted("The 17 Diagnostic Patterns", query: search.query)
                     .font(.headline)
                     .padding(.top, 4)
 
-                patternBlock(
-                    number: "1",
-                    title: "Elevated Latency",
-                    color: .blue,
-                    description: "Average RTT compared to the yellow and red thresholds. Gateway attribution applied: if gateway RTT is also elevated, the finding is labelled local network cause; if gateway is fine, ISP or routing cause. Peak-hour breakdown adds to confidence if most high-latency samples cluster in a narrow time window."
-                )
+                patternBlock(number: "1", title: "Elevated Latency", color: .blue,
+                    description: "Average RTT compared to the yellow and red thresholds. Gateway attribution applied: if gateway RTT is also elevated, the finding is labelled local network cause; if gateway is fine, ISP or routing cause. Peak-hour breakdown adds to confidence if most high-latency samples cluster in a narrow time window.")
 
-                patternBlock(
-                    number: "2",
-                    title: "Packet Loss — Burst vs. Steady",
-                    color: .red,
-                    description: "Determines whether loss is concentrated in a short burst (transient congestion event, or local radio interference) versus distributed evenly across the session (persistent fault). Burst loss with a fine gateway suggests transient external congestion. Steady loss with gateway attribution narrows the fault side."
-                )
+                patternBlock(number: "2", title: "Packet Loss — Burst vs. Steady", color: .red,
+                    description: "Determines whether loss is concentrated in a short burst (transient congestion event, or local radio interference) versus distributed evenly across the session (persistent fault). Burst loss with a fine gateway suggests transient external congestion. Steady loss with gateway attribution narrows the fault side.")
 
-                patternBlock(
-                    number: "3",
-                    title: "Jitter — Congestion vs. Instability",
-                    color: .orange,
-                    description: "Inter-poll variance (how much RTT changes between consecutive polls) is compared to absolute jitter. Variance that spikes only during high-throughput periods suggests congestion. Uniform high variance throughout the session at all times suggests a physically unstable link."
-                )
+                patternBlock(number: "3", title: "Jitter — Congestion vs. Instability", color: .orange,
+                    description: "Inter-poll variance (how much RTT changes between consecutive polls) is compared to absolute jitter. Variance that spikes only during high-throughput periods suggests congestion. Uniform high variance throughout the session at all times suggests a physically unstable link.")
 
-                patternBlock(
-                    number: "4",
-                    title: "Weak WiFi Signal",
-                    color: .yellow,
-                    description: "Fires when average RSSI falls below −75 dBm. Confidence scales with the depth below threshold and the consistency of readings across the session. Low RSSI causes the radio to fall back to lower modulation rates and retransmit frames, increasing effective latency and loss even when ping is fine."
-                )
+                patternBlock(number: "4", title: "Weak WiFi Signal", color: .yellow,
+                    description: "Fires when average RSSI falls below −75 dBm. Confidence scales with the depth below threshold and the consistency of readings across the session. Low RSSI causes the radio to fall back to lower modulation rates and retransmit frames, increasing effective latency and loss even when ping is fine.")
 
-                patternBlock(
-                    number: "5",
-                    title: "WiFi Signal Instability",
-                    color: .yellow,
-                    description: "Fires when RSSI variance is high across the session, even if the average signal is acceptable. High variance indicates the device is at the edge of AP range, there is significant RF interference, or the AP is being overwhelmed by concurrent clients."
-                )
+                patternBlock(number: "5", title: "WiFi Signal Instability", color: .yellow,
+                    description: "Fires when RSSI variance is high across the session, even if the average signal is acceptable. High variance indicates the device is at the edge of AP range, there is significant RF interference, or the AP is being overwhelmed by concurrent clients.")
 
-                patternBlock(
-                    number: "6",
-                    title: "Session Fault Profile — Local vs. ISP",
-                    color: .blue,
-                    description: "Bins every minute of the session as local, ISP, or clean based on the fault attribution at that time. The ratio of local-attributed to ISP-attributed degraded minutes produces a session-level verdict: \"This session was mostly a local network problem\" or \"mostly ISP.\" Confidence scales with the ratio's strength."
-                )
+                patternBlock(number: "6", title: "Session Fault Profile — Local vs. ISP", color: .blue,
+                    description: "Bins every minute of the session as local, ISP, or clean based on the fault attribution at that time. The ratio of local-attributed to ISP-attributed degraded minutes produces a session-level verdict: \"This session was mostly a local network problem\" or \"mostly ISP.\" Confidence scales with the ratio's strength.")
 
-                patternBlock(
-                    number: "7",
-                    title: "WiFi–Latency Pearson Correlation",
-                    color: .blue,
-                    description: "Computes the Pearson correlation coefficient between RSSI samples and concurrent RTT readings. A strong negative correlation (r < −0.5, meaning lower signal consistently maps to higher latency) confirms WiFi signal quality as the root cause of latency problems, rather than ISP or server-side factors."
-                )
+                patternBlock(number: "7", title: "WiFi–Latency Pearson Correlation", color: .blue,
+                    description: "Computes the Pearson correlation coefficient between RSSI samples and concurrent RTT readings. A strong negative correlation (r < −0.5, meaning lower signal consistently maps to higher latency) confirms WiFi signal quality as the root cause of latency problems, rather than ISP or server-side factors.")
 
-                patternBlock(
-                    number: "8",
-                    title: "Per-Target Outlier Detection",
-                    color: .orange,
-                    description: "Computes average RTT per target and compares each against the session mean. A target showing 2.5× or more the mean RTT is flagged as an outlier. This pattern distinguishes a routing or CDN issue specific to one destination from a broad connection problem."
-                )
+                patternBlock(number: "8", title: "Per-Target Outlier Detection", color: .orange,
+                    description: "Computes average RTT per target and compares each against the session mean. A target showing 2.5× or more the mean RTT is flagged as an outlier. This pattern distinguishes a routing or CDN issue specific to one destination from a broad connection problem.")
 
-                patternBlock(
-                    number: "9",
-                    title: "Bufferbloat",
-                    color: .red,
-                    description: "Compares idle RTT baseline (sampled during quiet periods) against RTT captured during a bandwidth speed test. A ratio > 2.0 (load RTT is more than double idle RTT) indicates bufferbloat — your router's buffer is so large that packets queue for hundreds of milliseconds under load. Recommends SQM/FQ-CoDel when confirmed. Requires at least one completed bandwidth test."
-                )
+                patternBlock(number: "9", title: "Bufferbloat", color: .red,
+                    description: "Compares idle RTT baseline (sampled during quiet periods) against RTT captured during a bandwidth speed test. A ratio > 2.0 (load RTT is more than double idle RTT) indicates bufferbloat — your router's buffer is so large that packets queue for hundreds of milliseconds under load. Recommends SQM/FQ-CoDel when confirmed. Requires at least one completed bandwidth test.")
 
-                patternBlock(
-                    number: "10a–10e",
-                    title: "DNS Multi-Resolver Analysis (5 patterns)",
-                    color: .teal,
-                    description: "Five independent DNS patterns:\n\n10a. Failure rate — fraction of probes that timed out across resolvers.\n\n10b. Elevated latency — average response time above 200 ms.\n\n10c. Resolver divergence — one resolver consistently slower or less reliable than the others; recommends switching.\n\n10d. All resolvers failing — every configured resolver times out; no DNS resolution possible.\n\n10e. Port 53 blocking — all resolvers fail including Cloudflare and Google, but gateway ping succeeds; UDP port 53 is likely filtered by the network (common on hotel, airport, and corporate WiFi)."
-                )
+                patternBlock(number: "10a–10e", title: "DNS Multi-Resolver Analysis (5 patterns)", color: .teal,
+                    description: "Five independent DNS patterns:\n\n10a. Failure rate — fraction of probes that timed out across resolvers.\n\n10b. Elevated latency — average response time above 200 ms.\n\n10c. Resolver divergence — one resolver consistently slower or less reliable than the others; recommends switching.\n\n10d. All resolvers failing — every configured resolver times out; no DNS resolution possible.\n\n10e. Port 53 blocking — all resolvers fail including Cloudflare and Google, but gateway ping succeeds; UDP port 53 is likely filtered by the network (common on hotel, airport, and corporate WiFi).")
 
-                patternBlock(
-                    number: "11",
-                    title: "Hardware Interface Error Deltas",
-                    color: .orange,
-                    description: "Repeated non-zero hardware counter deltas across multiple 30-second samples. Distinguishes RF interference on WiFi (where errors correlate with signal variance) from cable or switch faults on Ethernet (where errors are independent of signal)."
-                )
+                patternBlock(number: "11", title: "Hardware Interface Error Deltas", color: .orange,
+                    description: "Repeated non-zero hardware counter deltas across multiple 30-second samples. Distinguishes RF interference on WiFi (where errors correlate with signal variance) from cable or switch faults on Ethernet (where errors are independent of signal).")
 
-                patternBlock(
-                    number: "12",
-                    title: "MTU / Path Fragmentation",
-                    color: .red,
-                    description: "When the majority of 1472-byte Don't-Fragment probes fail while normal small-packet pings succeed, something on the path is silently dropping oversized packets. The confidence scales with the fraction of MTU probe failures over the session."
-                )
+                patternBlock(number: "12", title: "MTU / Path Fragmentation", color: .red,
+                    description: "When the majority of 1472-byte Don't-Fragment probes fail while normal small-packet pings succeed, something on the path is silently dropping oversized packets. The confidence scales with the fraction of MTU probe failures over the session.")
 
-                patternBlock(
-                    number: "13",
-                    title: "Latency Trend (OLS Regression)",
-                    color: .green,
-                    description: "Runs ordinary least-squares linear regression on the RTT time series for the session. If the slope exceeds 0.3 ms/minute and the coefficient of determination R² exceeds 0.5 (i.e. RTT is genuinely drifting upward, not just noisy), the finding fires. Indicates thermal throttling in the network path, gradual buffer saturation, or slowly building background congestion."
-                )
+                patternBlock(number: "13", title: "Latency Trend (OLS Regression)", color: .green,
+                    description: "Runs ordinary least-squares linear regression on the RTT time series for the session. If the slope exceeds 0.3 ms/minute and the coefficient of determination R² exceeds 0.5 (i.e. RTT is genuinely drifting upward, not just noisy), the finding fires. Indicates thermal throttling in the network path, gradual buffer saturation, or slowly building background congestion.")
 
-                patternBlock(
-                    number: "14",
-                    title: "WiFi Channel Switching",
-                    color: .purple,
-                    description: "Detects changes in the 802.11 channel across WiFi samples. Repeated channel changes indicate the access point is detecting RF interference and self-healing by moving. Band switches (2.4 ↔ 5 GHz or ↔ 6 GHz) are called out separately because they cause larger disruption than same-band channel hops."
-                )
+                patternBlock(number: "14", title: "WiFi Channel Switching", color: .purple,
+                    description: "Detects changes in the 802.11 channel across WiFi samples. Repeated channel changes indicate the access point is detecting RF interference and self-healing by moving. Band switches (2.4 ↔ 5 GHz or ↔ 6 GHz) are called out separately because they cause larger disruption than same-band channel hops.")
 
-                patternBlock(
-                    number: "15",
-                    title: "Time-of-Day Congestion (Cross-Session)",
-                    color: .blue,
-                    description: "Queries 30 days of per-hour aggregate history. If the current session's elevated latency correlates with a pattern of consistently high average RTT at the same hours of day across many past sessions, the finding fires with a confidence that scales with the number of corroborating historical sessions. Consistent with ISP contention during peak hours."
-                )
+                patternBlock(number: "15", title: "Time-of-Day Congestion (Cross-Session)", color: .blue,
+                    description: "Queries 30 days of per-hour aggregate history. If the current session's elevated latency correlates with a pattern of consistently high average RTT at the same hours of day across many past sessions, the finding fires with a confidence that scales with the number of corroborating historical sessions. Consistent with ISP contention during peak hours.")
 
-                patternBlock(
-                    number: "16",
-                    title: "Automatic Traceroute Snapshot",
-                    color: .orange,
-                    description: "When a traceroute was auto-captured during a green→red transition in the session window, the analysis surfaces it as a finding. The highest-latency hop and total hop count are shown in the finding card. The full hop-by-hop output is expandable and selectable for copying into a support ticket."
-                )
+                patternBlock(number: "16", title: "Automatic Traceroute Snapshot", color: .orange,
+                    description: "When a traceroute was auto-captured during a green→red transition in the session window, the analysis surfaces it as a finding. The highest-latency hop and total hop count are shown in the finding card. The full hop-by-hop output is expandable and selectable for copying into a support ticket.")
             }
             .padding(20)
         }
@@ -853,9 +915,9 @@ private struct AnalysisTab: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundColor(color)
                     .frame(width: 36, alignment: .leading)
-                Text(title).font(.subheadline).bold()
+                highlighted(title, query: search.query).font(.subheadline).bold()
             }
-            Text(description)
+            highlighted(description, query: search.query)
                 .font(.callout)
                 .foregroundColor(.secondary)
                 .padding(.leading, 46)
@@ -870,6 +932,7 @@ private struct AnalysisTab: View {
 // MARK: - Tab 5: Problems & Fixes
 
 private struct ProblemsTab: View {
+    @EnvironmentObject private var search: HelpSearch
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
@@ -1027,7 +1090,7 @@ private struct ProblemsTab: View {
                 Divider()
 
                 ProseSection(title: "Apple Shortcuts & Automation", icon: "arrow.triangle.2.circlepath") {
-                    Text("Me Or Them exposes four actions to macOS Shortcuts and compatible automation tools:")
+                    highlighted("Me Or Them exposes four actions to macOS Shortcuts and compatible automation tools:", query: search.query)
                         .font(.body)
                     VStack(alignment: .leading, spacing: 5) {
                         shortcutRow("Get Network Status", "Returns current overall status, RTT, loss, jitter, and DNS response time.")
@@ -1049,20 +1112,25 @@ private struct ProblemsTab: View {
         trigger: String, causes: String, actions: [String]
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label(title, systemImage: icon).font(.headline)
+            Label {
+                highlighted(title, query: search.query)
+            } icon: {
+                Image(systemName: icon)
+            }
+            .font(.headline)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("WHEN YOU SEE THIS")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(.secondary)
-                Text(trigger).font(.callout)
+                highlighted(trigger, query: search.query).font(.callout)
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("COMMON CAUSES")
                     .font(.system(size: 9, weight: .bold))
                     .foregroundColor(.secondary)
-                Text(causes).font(.callout).foregroundColor(.secondary)
+                highlighted(causes, query: search.query).font(.callout).foregroundColor(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -1075,7 +1143,7 @@ private struct ProblemsTab: View {
                             .font(.system(.callout, design: .monospaced))
                             .foregroundColor(color)
                             .frame(width: 18, alignment: .trailing)
-                        Text(action).font(.callout)
+                        highlighted(action, query: search.query).font(.callout)
                     }
                 }
             }
@@ -1092,17 +1160,17 @@ private struct ProblemsTab: View {
 
     private func exportRow(_ format: String, _ description: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
-            Text(format)
+            highlighted(format, query: search.query)
                 .font(.system(.caption, design: .monospaced))
                 .frame(minWidth: 140, alignment: .leading)
-            Text(description).font(.caption).foregroundColor(.secondary)
+            highlighted(description, query: search.query).font(.caption).foregroundColor(.secondary)
         }
     }
 
     private func shortcutRow(_ action: String, _ description: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(action).font(.caption).bold()
-            Text(description).font(.caption).foregroundColor(.secondary)
+            highlighted(action, query: search.query).font(.caption).bold()
+            highlighted(description, query: search.query).font(.caption).foregroundColor(.secondary)
         }
     }
 }
