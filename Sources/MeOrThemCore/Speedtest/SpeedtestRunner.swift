@@ -67,11 +67,15 @@ public final class SpeedtestRunner: ObservableObject {
         }
     }
 
-    /// Returns true for transient failures that are worth retrying (SIGTERM / timeout).
+    /// Returns true for transient failures that are worth retrying (SIGTERM / timeout / launch failure).
     private func isRetryable(message: String) -> Bool {
         // Exit code 15 = SIGTERM (OS killed the process or our watchdog fired).
         // "timed out" covers ProcessError.timeout from runAsync.
-        message.contains("Exit code 15") || message.lowercased().contains("timed out")
+        // "ProcessError" = NSTask launch failure, common after wake-from-sleep or at startup
+        //   before the network stack is ready (NSTask.ProcessError error 0).
+        message.contains("Exit code 15")
+            || message.lowercased().contains("timed out")
+            || message.contains("ProcessError")
     }
 
     public func cancel() {

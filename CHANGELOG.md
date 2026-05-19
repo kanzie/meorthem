@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.5 — 2026-05-19
+
+### Bug Fixes
+- **Bandwidth test retry on launch failure** — The speedtest subprocess now retries (up to 3×, 4 s apart) when it fails to launch, fixing a recurring "ProcessError error 0" failure that appeared after wake-from-sleep or at startup before the network stack was ready.
+
+---
+
 ## v2.54.4 — 2026-05-04
 
 ### New Features
