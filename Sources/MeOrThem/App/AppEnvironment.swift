@@ -62,6 +62,9 @@ final class AppEnvironment {
     // Battery monitoring state
     private var isOnBattery: Bool = false
     nonisolated(unsafe) private var powerSourceObserver: CFRunLoopSource?
+    // Retained opaque pointer used in the IOPowerSources callback. passRetained keeps
+    // self alive for the callback's lifetime; released in deinit after source removal.
+    nonisolated(unsafe) private var powerSourceContext: UnsafeMutableRawPointer?
 
     // Sleep/wake notification observer tokens — must be stored or ARC removes them immediately,
     // silently deregistering the observers on the first run loop pass.
@@ -241,8 +244,12 @@ final class AppEnvironment {
         }
 
         // Battery power monitoring — adjust poll rate when on battery.
+        // passRetained keeps self alive for the callback's entire lifetime, preventing a
+        // use-after-free if a power-source notification fires concurrently with deinit.
+        // The matching release happens in deinit after the source is removed from the run loop.
         isOnBattery = Self.readIsOnBattery()
-        let ctx = Unmanaged.passUnretained(self).toOpaque()
+        let ctx = Unmanaged.passRetained(self).toOpaque()
+        powerSourceContext = ctx
         if let src = IOPSNotificationCreateRunLoopSource({ context in
             guard let ctx = context else { return }
             let env = Unmanaged<AppEnvironment>.fromOpaque(ctx).takeUnretainedValue()
@@ -279,10 +286,16 @@ final class AppEnvironment {
     }
 
     deinit {
+        dispatchPrecondition(condition: .onQueue(.main))
         // Remove the power-source run-loop source before releasing it; omitting this
         // would leave a dangling callback registered on the main run loop.
         if let src = powerSourceObserver {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .defaultMode)
+        }
+        // Release the retained self-pointer used by the IOPowerSources callback.
+        // This balances the passRetained call in init.
+        if let ctx = powerSourceContext {
+            Unmanaged<AppEnvironment>.fromOpaque(ctx).release()
         }
         if let obs = sleepObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = wakeObserver  { NotificationCenter.default.removeObserver(obs) }

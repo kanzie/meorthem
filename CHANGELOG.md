@@ -5,6 +5,15 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.8 — 2026-05-29
+
+### Bug Fixes
+- **IOPowerSources callback memory safety** — The IOPowerSources run-loop callback held an unretained pointer to `AppEnvironment`. If a power-source notification arrived while the environment was being released, the callback would dereference freed memory. The pointer is now created with `passRetained` and released in `deinit` after the source is removed from the run loop, closing the use-after-free window.
+- **Network Intelligence window observer accumulation** — Re-opening the Network Intelligence window after it had been closed would overwrite the stored `willCloseNotification` observer token without first removing the previous one. Block-based NotificationCenter observers are not automatically removed on ARC deallocation, so the stale observer would still fire on subsequent window closes. The old observer is now explicitly removed before registering a fresh one.
+- **AppEnvironment deinit thread assertion** — Added a `dispatchPrecondition(condition: .onQueue(.main))` to `AppEnvironment.deinit` to catch any future case where `nonisolated(unsafe)` timer and work-item teardown runs off the main queue.
+
+---
+
 ## v2.54.7 — 2026-05-29
 
 ### Bug Fixes

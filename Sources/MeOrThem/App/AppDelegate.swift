@@ -403,6 +403,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
 
     private func showNetworkIntelligence() {
         if networkIntelligenceController == nil {
+            // Remove any previous close-observer token before overwriting it.
+            // Block-based observers are not removed when the token is released by ARC —
+            // they accumulate until NotificationCenter fires them all, which would call
+            // the handler on a nil controller and assign nil to an already-nil slot.
+            if let old = networkIntelligenceObserver {
+                NotificationCenter.default.removeObserver(old)
+                networkIntelligenceObserver = nil
+            }
             networkIntelligenceController = NetworkIntelligenceWindowController(
                 db:          environment.sqliteStore,
                 settings:    environment.settings,
