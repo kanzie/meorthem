@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import SwiftUI
 
 @MainActor
@@ -246,7 +247,12 @@ private struct UpdateView: View {
     // MARK: - Download & install
 
     private func downloadAndInstall() {
-        guard let urlStr = release.dmgURL, let url = URL(string: urlStr) else { return }
+        guard let urlStr = release.dmgURL,
+              let url = URL(string: urlStr),
+              Self.isAllowedReleaseURL(url) else {
+            downloadError = "Update URL is invalid or not from a trusted host."
+            return
+        }
         isDownloading = true
         downloadError = nil
 
@@ -257,6 +263,11 @@ private struct UpdateView: View {
                     .appendingPathComponent(url.lastPathComponent)
                 try? FileManager.default.removeItem(at: dest)
                 try FileManager.default.moveItem(at: localURL, to: dest)
+                // Stamp the quarantine extended attribute so macOS Gatekeeper checks
+                // notarisation and code signature before the DMG can mount/run.
+                // Without this, files fetched via URLSession have no quarantine flag
+                // and bypass Gatekeeper entirely (unlike Safari downloads).
+                Self.stampQuarantine(at: dest)
                 NSWorkspace.shared.open(dest)
                 // Brief pause so Finder has time to initiate the DMG mount
                 // before this process exits.
@@ -267,6 +278,26 @@ private struct UpdateView: View {
                 downloadError = "Download failed: \(error.localizedDescription)"
                 isDownloading = false
             }
+        }
+    }
+
+    /// Returns true only for https:// URLs hosted on github.com or the GitHub
+    /// release asset CDN (objects.githubusercontent.com). Rejects any URL that
+    /// an MITM or compromised update channel might inject.
+    static func isAllowedReleaseURL(_ url: URL) -> Bool {
+        guard url.scheme == "https",
+              let host = url.host else { return false }
+        let allowed = ["github.com", "objects.githubusercontent.com",
+                       "codeload.github.com", "releases.githubusercontent.com"]
+        return allowed.contains(where: { host == $0 || host.hasSuffix("." + $0) })
+    }
+
+    /// Sets the com.apple.quarantine xattr on the file, marking it as
+    /// internet-downloaded so Gatekeeper performs its notarisation check.
+    private static func stampQuarantine(at url: URL) {
+        let value = "0081;MeOrThem-update"
+        value.withCString { ptr in
+            _ = setxattr(url.path, "com.apple.quarantine", ptr, strlen(ptr), 0, 0)
         }
     }
 }

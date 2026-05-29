@@ -146,7 +146,12 @@ final class UpdateChecker: ObservableObject {
 
         if !manual && skipped == release.tagName { return true }
 
-        guard release.dmgURL != nil else {
+        // Validate the DMG URL before surfacing the update. A compromised or MITM'd
+        // update channel could inject an arbitrary URL; only accept assets hosted on
+        // GitHub's own domains.
+        guard let dmgURLStr = release.dmgURL,
+              let dmgURL = URL(string: dmgURLStr),
+              UpdateWindowController.isAllowedReleaseURL(dmgURL) else {
             if manual { showAlreadyUpToDate(current: current) }
             return true
         }

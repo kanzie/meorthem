@@ -5,6 +5,14 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.10 — 2026-05-29
+
+### Bug Fixes
+- **Update channel URL validation** — The DMG download URL parsed from GitHub's release JSON was used without validating its scheme or host. A compromised or MITM'd update channel could have injected an arbitrary download URL. The URL is now validated against an allow-list (`github.com`, `objects.githubusercontent.com`, and related GitHub asset CDN hosts) before the update is surfaced in the menu or a download starts. Releases whose DMG URL fails validation are silently ignored.
+- **Downloaded DMG quarantine flagging** — Files downloaded via `URLSession` do not automatically receive macOS's `com.apple.quarantine` extended attribute, meaning Gatekeeper would not check notarisation or code signatures before the DMG mounted. The quarantine xattr is now stamped on the downloaded file before it is opened, ensuring Gatekeeper performs its standard security checks.
+
+---
+
 ## v2.54.9 — 2026-05-29
 
 ### Bug Fixes
