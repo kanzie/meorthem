@@ -90,6 +90,10 @@ final class UpdateChecker: ObservableObject {
     // MARK: - Periodic timer
 
     private func schedulePeriodicTimer() {
+        // Invalidate any existing timer before creating a new one; startPeriodicChecks()
+        // could be called a second time on wake-from-sleep or re-entry, which would
+        // otherwise let parallel 24 h timers accumulate.
+        timer?.invalidate()
         let t = Timer.scheduledTimer(withTimeInterval: checkInterval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 await self?.fetchAndEvaluate(manual: false)

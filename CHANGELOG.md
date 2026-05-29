@@ -5,6 +5,15 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.6 — 2026-05-29
+
+### Bug Fixes
+- **Sleep/wake handler registration** — The sleep and wake notification observer tokens were not being stored, so ARC removed the observers immediately after registration. Sleep detection and wake-triggered reconnection logic was silently dead after the first run loop pass. Tokens are now retained for the lifetime of the environment.
+- **UpdateChecker timer accumulation** — `schedulePeriodicTimer()` was not invalidating any prior timer before creating a new one, allowing parallel 24-hour timers to accumulate if the method was called more than once. The old timer is now invalidated first.
+- **PingParser regex init safety** — The App-target `PingParser` used `try!` to compile its regex patterns at static initialisation time. A pattern typo would have caused an immediate `EXC_BAD_INSTRUCTION` crash with no diagnostic. Replaced with a lazy-init closure that calls `preconditionFailure` and emits a meaningful message.
+
+---
+
 ## v2.54.5 — 2026-05-19
 
 ### Bug Fixes

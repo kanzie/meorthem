@@ -63,6 +63,11 @@ final class AppEnvironment {
     private var isOnBattery: Bool = false
     nonisolated(unsafe) private var powerSourceObserver: CFRunLoopSource?
 
+    // Sleep/wake notification observer tokens — must be stored or ARC removes them immediately,
+    // silently deregistering the observers on the first run loop pass.
+    nonisolated(unsafe) private var sleepObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var wakeObserver:  NSObjectProtocol?
+
     // Local metrics HTTP server
     private var metricsServer: MetricsHTTPServer?
 
@@ -218,15 +223,16 @@ final class AppEnvironment {
         maintenanceTimer = mt
 
         // Sleep/wake event recording — pauses monitoring on sleep, resumes on wake.
-        // NSWorkspace notifications are delivered on the main thread.
-        NotificationCenter.default.addObserver(
+        // The returned tokens are stored; discarding them causes ARC to remove the
+        // observers immediately, silently breaking sleep/wake handling.
+        sleepObserver = NotificationCenter.default.addObserver(
             forName: NSWorkspace.willSleepNotification,
             object: NSWorkspace.shared,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.handleSleep() }
         }
-        NotificationCenter.default.addObserver(
+        wakeObserver = NotificationCenter.default.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: NSWorkspace.shared,
             queue: .main
@@ -278,6 +284,8 @@ final class AppEnvironment {
         if let src = powerSourceObserver {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), src, .defaultMode)
         }
+        if let obs = sleepObserver { NotificationCenter.default.removeObserver(obs) }
+        if let obs = wakeObserver  { NotificationCenter.default.removeObserver(obs) }
         pendingNonWifiSession?.cancel()
         bandwidthScheduleTimer?.invalidate()
         maintenanceTimer?.invalidate()
