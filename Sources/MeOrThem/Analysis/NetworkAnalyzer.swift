@@ -1245,16 +1245,19 @@ final class NetworkAnalyzer: @unchecked Sendable {
         var result: [(hop: Int, ip: String, rttMs: Double?)] = []
         for line in output.components(separatedBy: "\n").dropFirst() {
             let parts = line.split(separator: " ", omittingEmptySubsequences: true)
+            // Require at least a hop-number column and an IP/wildcard column.
             guard parts.count >= 2, let hopNum = Int(String(parts[0])) else { continue }
             let ipPart = String(parts[1])
             if ipPart == "*" {
                 result.append((hopNum, "*", nil))
                 continue
             }
-            // Find the first RTT value: a digit-containing token followed by "ms"
+            // Find the first RTT: a numeric token immediately followed by "ms".
+            // Both parts[i] and parts[i-1] are within bounds because i starts at 1 and
+            // the loop upper bound is parts.count, so i-1 >= 0 and i < parts.count.
             var rtt: Double? = nil
             for i in 1..<parts.count {
-                if parts[i] == "ms", i > 0, let v = Double(String(parts[i - 1])) {
+                if parts[i] == "ms", let v = Double(String(parts[i - 1])) {
                     rtt = v; break
                 }
             }

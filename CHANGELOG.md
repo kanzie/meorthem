@@ -5,6 +5,15 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.9 — 2026-05-29
+
+### Bug Fixes
+- **DNSProber response parser bounds checks** — The label-skip loop in `parseFirstARecord` advanced the buffer position pointer without verifying the new position was still within the packet boundary. A malformed or adversarially crafted DNS response could drive the pointer past the end of the buffer. Each pointer advance now checks remaining capacity and returns `nil` on malformed input.
+- **InterfaceMonitor column access consistency** — The netstat column guard required `parts.count > ierrsCol` but the access for `ipktsCol` relied on a ternary fallback. Both required columns are now guarded together in a single `max(ipktsCol, ierrsCol)` check before accessing either, making the guard and the access consistent.
+- **NetworkAnalyzer traceroute hop parser** — Added an explanatory comment clarifying why the inner `parts[i-1]` access is bounds-safe, and removed the redundant `i > 0` check since the loop already starts at index 1.
+
+---
+
 ## v2.54.8 — 2026-05-29
 
 ### Bug Fixes

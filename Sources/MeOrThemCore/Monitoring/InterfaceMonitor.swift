@@ -51,13 +51,14 @@ public enum InterfaceMonitor {
 
         for line in lines.dropFirst() {
             let parts = line.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-            // Match the AF_LINK row: first column = interface name, third column contains "Link"
-            guard parts.count > ierrsCol,
+            // Match the AF_LINK row: first column = interface name, third column contains "Link".
+            // Require all mandatory columns to be present before accessing them.
+            guard parts.count > max(ipktsCol, ierrsCol),
                   parts[0] == iface,
                   parts.count > 2, parts[2].contains("Link") else { continue }
 
-            let pktsIn   = ipktsCol < parts.count ? UInt64(parts[ipktsCol]) ?? 0 : 0
-            let errsIn   = ierrsCol < parts.count ? UInt64(parts[ierrsCol]) ?? 0 : 0
+            let pktsIn   = UInt64(parts[ipktsCol]) ?? 0
+            let errsIn   = UInt64(parts[ierrsCol]) ?? 0
             let errsOut  = oerrsCol.flatMap { $0 < parts.count ? UInt64(parts[$0]) : nil } ?? 0
             let dropsIn  = idropCol.flatMap { $0 < parts.count ? UInt64(parts[$0]) : nil } ?? 0
 

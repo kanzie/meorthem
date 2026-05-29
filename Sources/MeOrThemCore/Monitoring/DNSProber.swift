@@ -158,12 +158,20 @@ public enum DNSProber {
         // Skip question section: advance past QNAME, QTYPE, QCLASS.
         var pos = 12
         // Skip QNAME: length-prefixed labels terminated by 0x00 byte.
+        // Re-check pos+1 < bytes.count before each advance to prevent a malformed
+        // response from walking pos past the buffer end.
         while pos < bytes.count {
             let len = Int(bytes[pos])
-            if len == 0 { pos += 1; break }             // null terminator
-            if len & 0xC0 == 0xC0 { pos += 2; break }   // compression pointer in question (unusual)
-            pos += 1 + len
+            if len == 0 { pos += 1; break }
+            if len & 0xC0 == 0xC0 {
+                guard pos + 1 < bytes.count else { return nil }
+                pos += 2; break
+            }
+            let next = pos + 1 + len
+            guard next <= bytes.count else { return nil }
+            pos = next
         }
+        guard pos + 4 <= bytes.count else { return nil }
         pos += 4  // skip QTYPE + QCLASS
 
         // Walk answer RRs looking for an A record (type 1, class IN = 1).
@@ -177,8 +185,13 @@ public enum DNSProber {
                 while pos < bytes.count {
                     let len = Int(bytes[pos])
                     if len == 0 { pos += 1; break }
-                    if len & 0xC0 == 0xC0 { pos += 2; break }
-                    pos += 1 + len
+                    if len & 0xC0 == 0xC0 {
+                        guard pos + 1 < bytes.count else { return nil }
+                        pos += 2; break
+                    }
+                    let next = pos + 1 + len
+                    guard next <= bytes.count else { return nil }
+                    pos = next
                 }
             }
 
