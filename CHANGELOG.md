@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.7 — 2026-05-29
+
+### Bug Fixes
+- **Speedtest binary integrity check** — The bundled Ookla speedtest binary was verified to be non-empty but its SHA-256 hash was not checked. Anyone with write access to the app bundle could replace the binary and the verifier would allow execution. The expected SHA-256 hash is now pinned; a mismatch causes the runner to report the binary as unavailable rather than execute it.
+
+---
+
 ## v2.54.6 — 2026-05-29
 
 ### Bug Fixes
