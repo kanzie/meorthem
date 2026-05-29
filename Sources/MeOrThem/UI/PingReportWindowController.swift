@@ -53,7 +53,7 @@ private struct PingReportView: View {
     let exporter:     ExportCoordinator
     var onShowCharts: (() -> Void)?
 
-    @State private var startDate = Calendar.current.date(byAdding: .day, value: -7, to: Date())!
+    @State private var startDate = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date(timeIntervalSinceNow: -7 * 86_400)
     @State private var endDate   = Date()
     @State private var reportText: String = "Generating report…"
     @State private var copied = false

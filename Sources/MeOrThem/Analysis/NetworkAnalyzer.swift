@@ -879,7 +879,7 @@ final class NetworkAnalyzer: @unchecked Sendable {
                        || name.lowercased().contains("gateway")
                        || name.lowercased().contains("router")
             if isLocal {
-                if systemGatewayRTT == nil || mean < systemGatewayRTT! {
+                if mean < (systemGatewayRTT ?? .infinity) {
                     systemGatewayRTT  = mean
                     systemGatewayName = name
                 }

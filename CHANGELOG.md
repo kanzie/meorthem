@@ -5,6 +5,18 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.11 — 2026-05-29
+
+### Bug Fixes
+- **DNS analysis nil-check and force-unwrap** — In the DNS resolver comparison pattern, `systemGatewayRTT` was checked for nil and then immediately force-unwrapped (`systemGatewayRTT!`) in the same condition. Replaced with an optional comparison using `.infinity` as the sentinel (`mean < (systemGatewayRTT ?? .infinity)`), eliminating the force-unwrap.
+- **Previous Disturbances submenu force-unwrap** — `MenuBuilder.refreshPreviousDisturbances` assigned `item.submenu` then immediately force-unwrapped it with `!`. Replaced with a `guard let` so any hypothetical nil produces a clean return instead of a crash.
+- **Report window start-date force-unwrap** — `PingReportView` used `!` to unwrap the result of `Calendar.current.date(byAdding:)`. Although this call always succeeds in practice, replaced with a nil-coalescing fallback (`Date(timeIntervalSinceNow: -7 * 86400)`) to remove the force-unwrap from SwiftUI state initialisation.
+
+### Changes
+- **Internal struct visibility comments** — Added comments next to the `MetricsChartsView` and `NetworkAnalysisView` struct declarations explaining that they are `internal` (not `private`) so `NetworkIntelligenceWindowController` can embed them directly. Previously this intent was documented only in CLAUDE.md.
+
+---
+
 ## v2.54.10 — 2026-05-29
 
 ### Bug Fixes

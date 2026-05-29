@@ -53,6 +53,7 @@ private struct HoverTooltip: View {
 }
 
 // MARK: - MetricsChartsView
+// internal (not private) so NetworkIntelligenceWindowController can embed it directly.
 
 struct MetricsChartsView: View {
     @StateObject private var loader: MetricsDataLoader

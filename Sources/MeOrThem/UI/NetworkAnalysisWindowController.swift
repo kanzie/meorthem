@@ -36,6 +36,7 @@ final class NetworkAnalysisWindowController: NSWindowController {
 }
 
 // MARK: - Root view
+// internal (not private) so NetworkIntelligenceWindowController can embed it directly.
 
 struct NetworkAnalysisView: View {
     let sqliteStore: SQLiteStore

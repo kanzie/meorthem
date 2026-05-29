@@ -473,7 +473,7 @@ enum MenuBuilder {
         // Update the existing submenu's items in place so it stays open if currently displayed.
         // Replacing item.submenu closes the popup; modifying its contents preserves the object.
         if item.submenu == nil { item.submenu = NSMenu(title: "Previous Disturbances") }
-        let sub = item.submenu!
+        guard let sub = item.submenu else { return }
         sub.removeAllItems()
         let fresh = connectionHistorySubmenu(history: store.connectionHistory,
                                              clearHistory: clearHistory)
