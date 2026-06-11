@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.12 — 2026-06-11
+
+### Bug Fixes
+- **Update checker compile error** — `isAllowedReleaseURL` and `stampQuarantine` were defined on a private SwiftUI view struct but referenced from `UpdateChecker` as members of `UpdateWindowController`, causing a build failure. Moved both static methods to `UpdateWindowController` where they are accessible across the module.
+
+---
+
 ## v2.54.11 — 2026-05-29
 
 ### Bug Fixes
