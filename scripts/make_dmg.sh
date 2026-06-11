@@ -67,6 +67,14 @@ if [ ! -d "$APP_PATH" ]; then
     exit 1
 fi
 
+BUILT_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" \
+    "$APP_PATH/Contents/Info.plist" 2>/dev/null || echo "")
+if [ "$BUILT_VERSION" != "$VERSION" ]; then
+    echo "❌  Version mismatch: build/MeOrThem.app is v${BUILT_VERSION} but source Info.plist is v${VERSION}."
+    echo "    Run scripts/build.sh first to rebuild the app."
+    exit 1
+fi
+
 echo "==> Creating DMG for $APP_NAME v$VERSION..."
 
 # Remove old DMGs
