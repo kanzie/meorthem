@@ -18,6 +18,7 @@ build/
 
 #security
 .env
+.envrc 
 
 # macOS
 .DS_Store
