@@ -16,9 +16,8 @@ xcuserdata/
 # Build artifacts (local)
 build/
 
-#security
-.env
-.envrc 
+# Security — catch all .env variants (.env, .envrc, .env.local, .env.production, ...)
+.env*
 
 # macOS
 .DS_Store

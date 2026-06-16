@@ -7,37 +7,66 @@ ENV_FILE="$ROOT_DIR/.env"
 
 echo "🔍 Running Privacy Guard..."
 
-# 1. Check if .env is ignored
-if git check-ignore -q "$ENV_FILE"; then
-    echo "  ✅ .env is correctly ignored by git."
-else
-    echo "  ❌ ERROR: .env is NOT ignored by git! Add '.env' to your .gitignore immediately."
+# 1. Check that .env and .envrc are gitignored
+for SENSITIVE_FILE in "$ENV_FILE" "$ROOT_DIR/.envrc"; do
+    BASENAME=$(basename "$SENSITIVE_FILE")
+    if git -C "$ROOT_DIR" check-ignore -q "$SENSITIVE_FILE" 2>/dev/null; then
+        echo "  ✅ $BASENAME is correctly ignored by git."
+    else
+        echo "  ❌ ERROR: $BASENAME is NOT ignored by git! Add '$BASENAME' to your .gitignore immediately."
+        exit 1
+    fi
+done
+
+# 2. Scan tracked files for common API key patterns (static, no .env required)
+echo "  Scanning for common API key patterns..."
+
+# Patterns: Anthropic/OpenAI sk-, AWS AKIA, GitHub tokens, Stripe sk_live/sk_test
+API_KEY_PATTERNS=(
+    'sk-[a-zA-Z0-9]{20,}'           # Anthropic / OpenAI secret keys (sk-ant-..., sk-proj-...)
+    'AKIA[0-9A-Z]{16}'              # AWS access key ID
+    '(ghp|gho|ghu|ghs|ghr)_[a-zA-Z0-9]{36,}' # GitHub personal / OAuth / app tokens
+    'sk_(live|test)_[a-zA-Z0-9]{24,}' # Stripe secret keys
+    'xoxb-[0-9]+-[a-zA-Z0-9]+'     # Slack bot tokens
+)
+
+COMBINED_PATTERN=$(IFS='|'; echo "${API_KEY_PATTERNS[*]}")
+
+# git grep across all tracked files, excluding env.example and the script itself
+FOUND=$(git -C "$ROOT_DIR" grep -E "$COMBINED_PATTERN" -- ':/' \
+    | grep -Ev '(env\.example|verify_secrets\.sh)' || true)
+
+if [ -n "$FOUND" ]; then
+    echo "  ❌ API KEY PATTERN DETECTED in tracked files:"
+    echo "$FOUND" | sed 's/^/     /'
     exit 1
 fi
+echo "  ✅ No common API key patterns found in tracked files."
 
-# 2. Check for hardcoded secrets from .env
+# 3. Check for hardcoded secrets from .env (dynamic, matches actual values)
 if [ -f "$ENV_FILE" ]; then
-    echo "  Checking for leaked secrets..."
-    
-    # Extract values from .env (ignoring comments and keys)
-    # We look for values longer than 4 chars to avoid false positives with short strings
-    SECRETS=$(grep -v '^#' "$ENV_FILE" | cut -d'=' -f2- | sed 's/^"//;s/"$//;s/^'\''//;s/'\''$//' | grep '....')
+    echo "  Checking for leaked .env values..."
+
+    # Extract values longer than 8 chars (avoids false positives on short strings)
+    SECRETS=$(grep -v '^#' "$ENV_FILE" | cut -d'=' -f2- \
+        | sed 's/^"//;s/"$//;s/^'\''//;s/'\''$//' \
+        | grep '........')
 
     while read -r SECRET; do
         if [ -z "$SECRET" ]; then continue; fi
-        
-        # Search all tracked files for this secret, excluding the .env file itself
-        FOUND=$(git grep -lF "$SECRET" -- :/ | grep -Ev "\.env|env\.example" || true)
-        
+
+        FOUND=$(git -C "$ROOT_DIR" grep -lF "$SECRET" -- ':/' \
+            | grep -Ev '(\.env$|env\.example)' || true)
+
         if [ -n "$FOUND" ]; then
             echo "  ❌ LEAK DETECTED: A secret from your .env was found hardcoded in:"
             echo "$FOUND" | sed 's/^/     - /'
             exit 1
         fi
     done <<< "$SECRETS"
-    echo "  ✅ No hardcoded secrets found in tracked files."
+    echo "  ✅ No hardcoded .env values found in tracked files."
 else
-    echo "  ⚠️  No .env file found to check against. Skipping leak scan."
+    echo "  ⚠️  No .env file found. Skipping .env value scan."
 fi
 
 echo "==> ✨ Privacy check passed. Safe to commit."
