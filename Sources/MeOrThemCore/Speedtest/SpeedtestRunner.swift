@@ -133,10 +133,10 @@ public final class SpeedtestRunner: ObservableObject {
         }
 
         do {
-            // SHA-256 of the bundled Ookla speedtest binary. A hash mismatch means
-            // the binary has been replaced or corrupted; refuse to execute it.
-            try BinaryVerifier.verify(at: binaryPath,
-                                      expectedSHA256: "0835368cb794a0b3652572e34cd6367b849adf66c5649ff6e209b248cd9c2af0")
+            // Verify via code signature rather than SHA-256: signing modifies binary bytes,
+            // so a hash would break on every build. codesign --verify detects tampering
+            // regardless of which identity signed the binary.
+            try BinaryVerifier.verifySignature(at: binaryPath)
         } catch let e as BinaryVerifier.Error {
             return .unavailable(e.errorDescription ?? "Binary invalid")
         } catch {

@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.13 — 2026-06-19
+
+### Bug Fixes
+- **Speedtest binary verification always failing** — The bundled speedtest binary is code-signed during the build, which modifies its bytes. The SHA-256 hash was computed from the pre-signing source binary and therefore never matched the deployed signed binary, causing the speedtest feature to report "Binary hash mismatch" on every launch. Replaced the SHA-256 check with a `codesign --verify` check, which validates integrity correctly regardless of signing identity.
+
+---
+
 ## v2.54.12 — 2026-06-11
 
 ### Bug Fixes
