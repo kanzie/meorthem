@@ -58,8 +58,13 @@ final class UpdateWindowController: NSWindowController {
 
     /// Sets the com.apple.quarantine xattr on the file, marking it as
     /// internet-downloaded so Gatekeeper performs its notarisation check.
+    /// Format mirrors what Safari writes: flags;hex_mac_epoch;bundle_id;UUID
+    /// macOS epoch starts 2001-01-01 (978307200 seconds after Unix epoch).
     static func stampQuarantine(at url: URL) {
-        let value = "0081;MeOrThem-update"
+        let macEpoch: TimeInterval = 978307200
+        let ts = UInt32(max(0, Date().timeIntervalSince1970 - macEpoch))
+        let uuid = UUID().uuidString
+        let value = String(format: "0083;%08x;com.meorthem.app;%@", ts, uuid)
         value.withCString { ptr in
             _ = setxattr(url.path, "com.apple.quarantine", ptr, strlen(ptr), 0, 0)
         }

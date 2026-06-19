@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.14 — 2026-06-19
+
+### Bug Fixes
+- **Auto-update DMG fails to open with error 150** — The quarantine extended attribute stamped on downloaded DMG files was malformed: the timestamp field contained a plain text string instead of a hex seconds-since-Mac-epoch value, and the bundle ID and UUID fields were missing entirely. macOS Gatekeeper failed to assess the file and refused to mount it. The attribute now matches the format written by Safari (`0083;{hex_timestamp};com.meorthem.app;{UUID}`).
+
+---
+
 ## v2.54.13 — 2026-06-19
 
 ### Bug Fixes
