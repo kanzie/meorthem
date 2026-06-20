@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// Lightweight TCP reachability prober.
 ///
@@ -30,20 +31,27 @@ public enum TCPProber {
         config.timeoutIntervalForRequest  = connectTimeout
         config.timeoutIntervalForResource = connectTimeout
         let session = URLSession(configuration: config)
-        defer { session.invalidateAndCancel() }
 
         return await withCheckedContinuation { continuation in
+            // Guard against double-resume: finishTasksAndInvalidate() called after the
+            // callback fires can re-trigger the readData completion with error -999.
+            let done = OSAllocatedUnfairLock(initialState: false)
             let task = session.streamTask(withHostName: host, port: port)
             task.resume()
-            // Read 0 bytes — fires as soon as the TCP connection is established
-            // (or fails with an error). We never actually send or receive data.
             task.readData(ofMinLength: 0, maxLength: 0, timeout: connectTimeout) { _, _, error in
+                let isFirst = done.withLock { flag -> Bool in
+                    guard !flag else { return false }
+                    flag = true
+                    return true
+                }
+                guard isFirst else { return }
                 if let _ = error {
                     continuation.resume(returning: nil)
                 } else {
                     let elapsed = Date().timeIntervalSince(start) * 1000
                     continuation.resume(returning: elapsed)
                 }
+                session.finishTasksAndInvalidate()
             }
         }
     }

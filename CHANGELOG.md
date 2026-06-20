@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.16 — 2026-06-20
+
+### Bug Fixes
+- **DNS port-53 probing crash** — `TCPProber.probe(host:port:)` could crash with a fatal "continuation resumed more than once" error. When `invalidateAndCancel()` ran after the TCP connect callback fired, it re-triggered the `readData` completion handler a second time, resuming the Swift checked continuation twice. The session is now invalidated inside the callback via `finishTasksAndInvalidate()`, and an `OSAllocatedUnfairLock` once-flag prevents any re-invocation from reaching the continuation.
+
+---
+
 ## v2.54.15 — 2026-06-20
 
 ### Bug Fixes
