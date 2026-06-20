@@ -279,14 +279,23 @@ private struct UpdateView: View {
                     .appendingPathComponent(url.lastPathComponent)
                 try? FileManager.default.removeItem(at: dest)
                 try FileManager.default.moveItem(at: localURL, to: dest)
-                // Stamp the quarantine extended attribute so macOS Gatekeeper checks
-                // notarisation and code signature before the DMG can mount/run.
-                // Without this, files fetched via URLSession have no quarantine flag
-                // and bypass Gatekeeper entirely (unlike Safari downloads).
                 UpdateWindowController.stampQuarantine(at: dest)
-                NSWorkspace.shared.open(dest)
-                // Brief pause so Finder has time to initiate the DMG mount
-                // before this process exits.
+
+                // Spawn /usr/bin/open as a subprocess rather than calling
+                // NSWorkspace.shared.open() directly. On macOS 15, calling open()
+                // from within the app fails with error 150 when the DMG contains
+                // an app with the same bundle ID — the OS treats it as a self-
+                // replacement attempt. Spawning /usr/bin/open uses a neutral
+                // process identity and avoids this restriction.
+                let openProcess = Process()
+                openProcess.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                openProcess.arguments = [dest.path]
+                let (_, exitCode) = try await openProcess.runAsync(timeout: 10)
+                guard exitCode == 0 else {
+                    downloadError = "Could not open installer (exit \(exitCode)).\nFile saved to: \(dest.path)"
+                    isDownloading = false
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 onDismiss()
                 NSApp.terminate(nil)

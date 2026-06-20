@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.15 — 2026-06-20
+
+### Bug Fixes
+- **Auto-update DMG still fails to open with error 150** — On macOS 15, calling `NSWorkspace.shared.open()` on a DMG from within the running app fails when the DMG contains an app with the same bundle identifier. macOS treats this as a self-replacement attempt and blocks it. The download flow now spawns `/usr/bin/open` as a subprocess, which presents a neutral process identity to LaunchServices and mounts the DMG correctly. A non-zero exit code from the open process is now surfaced as an error message instead of being silently ignored.
+
+---
+
 ## v2.54.14 — 2026-06-19
 
 ### Bug Fixes
