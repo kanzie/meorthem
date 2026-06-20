@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.16 — 2026-06-20
+
+### Changes
+- **Test release** — No functional changes. Published to verify the auto-update flow introduced in v2.54.15.
+
+---
+
 ## v2.54.15 — 2026-06-20
 
 ### Bug Fixes
