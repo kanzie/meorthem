@@ -65,7 +65,6 @@ struct GeneralTab: View {
                     Text("Every 24 hours").tag(24.0)
                 }
                 .pickerStyle(.menu)
-                .disabled(settings.bandwidthScheduleHours == 0)
 
                 if settings.bandwidthScheduleHours > 0 {
                     Toggle("Quiet hours", isOn: $settings.bandwidthQuietHoursEnabled)

@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.17 — 2026-06-23
+
+### Bug Fixes
+- **Bandwidth test interval picker stuck after disabling** — Once "Auto-test interval" was set to Disabled, the picker became non-interactive and could not be changed back to a scheduled interval. The picker had a `.disabled()` modifier conditioned on its own value being zero, locking it permanently. The modifier has been removed.
+
+---
+
 ## v2.54.16 — 2026-06-20
 
 ### Bug Fixes
