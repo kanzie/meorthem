@@ -30,26 +30,32 @@ public enum TCPProber {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest  = connectTimeout
         config.timeoutIntervalForResource = connectTimeout
-        let session = URLSession(configuration: config)
 
         return await withCheckedContinuation { continuation in
-            // Guard against double-resume: finishTasksAndInvalidate() called after the
-            // callback fires can re-trigger the readData completion with error -999.
             let done = OSAllocatedUnfairLock(initialState: false)
-            let task = session.streamTask(withHostName: host, port: port)
-            task.resume()
-            task.readData(ofMinLength: 0, maxLength: 0, timeout: connectTimeout) { _, _, error in
+            let resume: @Sendable (Double?) -> Void = { value in
                 let isFirst = done.withLock { flag -> Bool in
                     guard !flag else { return false }
                     flag = true
                     return true
                 }
                 guard isFirst else { return }
-                if let _ = error {
-                    continuation.resume(returning: nil)
+                continuation.resume(returning: value)
+            }
+
+            // didCompleteWithError is guaranteed to fire even when readData's callback
+            // is never called — happens when the NW path is unavailable and the
+            // connection fails synchronously before the read handler is set up.
+            let delegate = TCPProbeDelegate(onComplete: { resume(nil) })
+            let session = URLSession(configuration: config, delegate: delegate, delegateQueue: nil)
+
+            let task = session.streamTask(withHostName: host, port: port)
+            task.resume()
+            task.readData(ofMinLength: 0, maxLength: 0, timeout: connectTimeout) { _, _, error in
+                if error != nil {
+                    resume(nil)
                 } else {
-                    let elapsed = Date().timeIntervalSince(start) * 1000
-                    continuation.resume(returning: elapsed)
+                    resume(Date().timeIntervalSince(start) * 1000)
                 }
                 session.finishTasksAndInvalidate()
             }
@@ -75,5 +81,20 @@ public enum TCPProber {
             }
             return nil
         }
+    }
+}
+
+// MARK: - Private
+
+private final class TCPProbeDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let onComplete: () -> Void
+
+    init(onComplete: @escaping () -> Void) {
+        self.onComplete = onComplete
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        onComplete()
+        session.finishTasksAndInvalidate()
     }
 }

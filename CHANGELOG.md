@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.18 — 2026-06-24
+
+### Bug Fixes
+- **App hangs when network is completely down** — `TCPProber.probe(host:port:)` leaked its Swift continuation when the network path was unavailable, causing all tasks waiting on it to suspend forever. When `NWConnection` fails synchronously (no route), the `readData` callback is never invoked. A `URLSessionTaskDelegate` now ensures `didCompleteWithError` always fires as a fallback, guaranteeing the continuation is resumed in every failure mode.
+
+---
+
 ## v2.54.17 — 2026-06-23
 
 ### Bug Fixes
