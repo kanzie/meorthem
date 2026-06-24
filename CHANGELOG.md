@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.19 — 2026-06-24
+
+### Bug Fixes
+- **Network Intelligence chart tooltips showing wrong graph data** — Hovering over any chart triggered tooltips on all charts simultaneously because all overlays shared a single hover-date state. Hovering over the WiFi signal graph showed data from the graph below because the WiFi overlay found no matching points and stayed silent while adjacent charts rendered their tooltips at the same timestamp. Each overlay now tracks which chart is active by ID; only the chart under the cursor renders its tooltip.
+
+---
+
 ## v2.54.18 — 2026-06-24
 
 ### Bug Fixes

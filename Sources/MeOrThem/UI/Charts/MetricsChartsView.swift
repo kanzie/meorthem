@@ -10,6 +10,13 @@ private func targetColor(index: Int) -> Color {
     targetColorPalette[index % targetColorPalette.count]
 }
 
+// MARK: - HoverState
+
+private struct HoverState: Equatable {
+    var chartID: String
+    var date: Date
+}
+
 // MARK: - HoverTooltip
 
 private struct HoverTooltip: View {
@@ -60,9 +67,9 @@ struct MetricsChartsView: View {
     @State private var selectedWindow: TimeWindow = .hour1
     @State private var selectedTargetIndex: Int = 0
     /// Stores the exact timestamp of the nearest snapped data point.
-    /// Only changes when the cursor crosses into a new point's territory,
-    /// so the chart bodies (which have no dependency on this) never re-render on hover.
-    @State private var hoveredDate: Date? = nil
+    /// Tracks which chart is active and at what timestamp.
+    /// Only the overlay whose chartID matches will render a tooltip.
+    @State private var hoverState: HoverState? = nil
     /// Throttles hover computation to ≤60 FPS across all charts.
     @State private var lastHoverCompute: Date = .distantPast
     /// Hovered hour label for the daily-pattern bar chart (String categorical axis).
@@ -343,11 +350,10 @@ struct MetricsChartsView: View {
         .sorted { $0.targetLabel < $1.targetLabel }
     }
 
-    /// Returns the nearest point per target to hoveredDate.
+    /// Returns the nearest point per target to `date`.
     /// Uses nearest-match (not exact timestamp) because concurrent pings for different
     /// targets complete at slightly different times within the same poll tick.
-    private func snappedPoints(in points: [ChartPoint]) -> [ChartPoint] {
-        guard let date = hoveredDate else { return [] }
+    private func snappedPoints(to date: Date, in points: [ChartPoint]) -> [ChartPoint] {
         let byTarget = Dictionary(grouping: points, by: \.targetLabel)
         return byTarget.compactMap { _, pts -> ChartPoint? in
             pts.min(by: { abs($0.timestamp.timeIntervalSince(date)) < abs($1.timestamp.timeIntervalSince(date)) })
@@ -379,10 +385,11 @@ struct MetricsChartsView: View {
     // MARK: - Hover overlay
     //
     // Performance design:
-    //   • Chart bodies have NO dependency on hoveredDate — they never re-render on hover.
-    //   • hoveredDate snaps to exact data-point timestamps, so state only changes when
+    //   • Chart bodies have NO dependency on hoverState — they never re-render on hover.
+    //   • hoverState.date snaps to exact data-point timestamps, so state only changes when
     //     the cursor crosses into a new point's territory (not on every pixel move).
     //   • Markers and tooltip are drawn here, in the lightweight overlay layer only.
+    //   • chartID gates rendering: only the chart being hovered shows its tooltip.
 
     @ViewBuilder
     private func hoverOverlay(
@@ -390,6 +397,7 @@ struct MetricsChartsView: View {
         geometry: GeometryProxy,
         points: [ChartPoint],
         unit: String,
+        chartID: String,
         overrideColorMap: [String: Color]? = nil
     ) -> some View {
         let cm     = overrideColorMap ?? colorMap
@@ -408,14 +416,16 @@ struct MetricsChartsView: View {
                     // Snap to the nearest actual data timestamp; only trigger a state
                     // update when the snapped point changes (not every cursor pixel).
                     let snapped = nearestPoints(to: rawDate, in: points).first?.timestamp
-                    if snapped != hoveredDate { hoveredDate = snapped }
+                    let next = snapped.map { HoverState(chartID: chartID, date: $0) }
+                    if next != hoverState { hoverState = next }
                 case .ended:
-                    hoveredDate = nil
+                    if hoverState?.chartID == chartID { hoverState = nil }
                 }
             }
 
-        if let date = hoveredDate {
-            let snapped = snappedPoints(in: points)
+        // Only render markers and tooltip for the chart currently being hovered.
+        if let state = hoverState, state.chartID == chartID {
+            let snapped = snappedPoints(to: state.date, in: points)
 
             if let first = snapped.first, let xPos = proxy.position(forX: first.timestamp) {
                 let xInView = xPos + origin.x
@@ -443,7 +453,7 @@ struct MetricsChartsView: View {
                 // Tooltip card — reuse already-computed snapped to avoid a second O(n) scan
                 let entries = tooltipEntries(snapped: snapped, using: cm)
                 if !entries.isEmpty {
-                    HoverTooltip(date: date, entries: entries, unit: unit)
+                    HoverTooltip(date: state.date, entries: entries, unit: unit)
                         .fixedSize()
                         .position(
                             x: xInView < geometry.size.width / 2
@@ -552,7 +562,7 @@ struct MetricsChartsView: View {
                     .chartOverlay { proxy in
                         GeometryReader { geo in
                             hoverOverlay(proxy: proxy, geometry: geo,
-                                         points: filteredLatency, unit: "ms")
+                                         points: filteredLatency, unit: "ms", chartID: "latency")
                         }
                     }
 
@@ -650,7 +660,7 @@ struct MetricsChartsView: View {
                     .chartOverlay { proxy in
                         GeometryReader { geo in
                             hoverOverlay(proxy: proxy, geometry: geo,
-                                         points: filteredLoss, unit: "%")
+                                         points: filteredLoss, unit: "%", chartID: "loss")
                         }
                     }
 
@@ -724,7 +734,7 @@ struct MetricsChartsView: View {
                     .chartOverlay { proxy in
                         GeometryReader { geo in
                             hoverOverlay(proxy: proxy, geometry: geo,
-                                         points: filteredJitter, unit: "ms")
+                                         points: filteredJitter, unit: "ms", chartID: "jitter")
                         }
                     }
 
@@ -785,7 +795,7 @@ struct MetricsChartsView: View {
                 .chartOverlay { proxy in
                     GeometryReader { geo in
                         hoverOverlay(proxy: proxy, geometry: geo,
-                                     points: loader.wifiRSSI, unit: "dBm")
+                                     points: loader.wifiRSSI, unit: "dBm", chartID: "wifi")
                     }
                 }
             }
@@ -852,7 +862,7 @@ struct MetricsChartsView: View {
                     GeometryReader { geo in
                         hoverOverlay(proxy: proxy, geometry: geo,
                                      points: loader.dnsPoints, unit: "ms",
-                                     overrideColorMap: dnsColorMap)
+                                     chartID: "dns", overrideColorMap: dnsColorMap)
                     }
                 }
 
@@ -935,7 +945,7 @@ struct MetricsChartsView: View {
                         GeometryReader { geo in
                             hoverOverlay(proxy: proxy, geometry: geo,
                                          points: allPoints, unit: "Mbps",
-                                         overrideColorMap: stColorMap)
+                                         chartID: "speedtest", overrideColorMap: stColorMap)
                         }
                     }
 
