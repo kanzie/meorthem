@@ -370,12 +370,27 @@ final class AppEnvironment {
     /// Handles WiFi, Ethernet, and VPN connection types.
     private func updateNetworkSession(wifi: WiFiSnapshot?, gatewayIP: String?) {
         if let wifi {
-            // WiFi: fingerprint encodes gateway IP + channel + band + subnet.
-            // Cancel any pending Ethernet/VPN session — WiFi always wins.
+            // WiFi: fingerprint encodes gateway IP + channel + band + subnet + gateway MAC.
+            // The router hardware address disambiguates networks that share the same IP range,
+            // channel, and band. gatewayMACAddress has a 30 s cache so the arp subprocess only
+            // fires once per cache window. Cancel any pending Ethernet/VPN session — WiFi always wins.
             pendingNonWifiSession?.cancel()
             pendingNonWifiSession = nil
-            if let key = NetworkSessionKey.from(wifi: wifi) {
-                applySessionKey(key)
+            Task { [weak self] in
+                guard let self else { return }
+                let mac: String?
+                if let gw = wifi.routerIP, !gw.isEmpty {
+                    mac = await Task.detached(priority: .utility) {
+                        NetworkInfo.gatewayMACAddress(for: gw)
+                    }.value
+                } else {
+                    mac = nil
+                }
+                await MainActor.run {
+                    if let key = NetworkSessionKey.from(wifi: wifi, gatewayMAC: mac) {
+                        self.applySessionKey(key)
+                    }
+                }
             }
             return
         }

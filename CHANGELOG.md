@@ -5,6 +5,13 @@ Website, scripts, and internal tooling changes are not listed here.
 
 ---
 
+## v2.54.20 — 2026-06-24
+
+### Bug Fixes
+- **WiFi network sessions not distinguished when two networks share the same IP range** — The WiFi fingerprint used gateway IP, channel, band, and subnet. Two routers at different locations with identical IP configurations were treated as the same network. The gateway router's hardware MAC address (from the ARP cache, no location permission required) is now included in the fingerprint, matching the disambiguation already in place for Ethernet sessions.
+
+---
+
 ## v2.54.19 — 2026-06-24
 
 ### Bug Fixes

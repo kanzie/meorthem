@@ -4,8 +4,10 @@ import MeOrThemCore
 /// A stable fingerprint for a network environment, independent of connection type.
 ///
 /// ## WiFi
-/// Combines gateway IP + channel + band + subnet /24. Channel and band disambiguate
-/// routers that share the same IP, and distinguish band switches on the same router.
+/// Combines gateway IP + channel + band + subnet /24 + gateway MAC (from ARP cache).
+/// The router hardware address is the primary discriminator between two networks that
+/// share the same IP range, channel, and band. When the MAC is unavailable,
+/// `hasWeakFingerprint` is true and the fingerprint falls back to the four-component form.
 ///
 /// ## Ethernet
 /// Combines gateway IP + subnet /24 + gateway MAC address (from ARP cache).
@@ -50,14 +52,22 @@ struct NetworkSessionKey: Equatable {
 
     /// Creates a key from a WiFi snapshot. Returns nil when the snapshot lacks
     /// the minimum required fields (routerIP + channelNumber).
-    static func from(wifi: WiFiSnapshot) -> NetworkSessionKey? {
+    ///
+    /// - Parameter gatewayMAC: The ARP-cache MAC of the gateway router. When nil or
+    ///   unresolvable the fingerprint uses only the four-component fallback and
+    ///   `hasWeakFingerprint` is set to true.
+    static func from(wifi: WiFiSnapshot, gatewayMAC: String? = nil) -> NetworkSessionKey? {
         guard let gw = wifi.routerIP, !gw.isEmpty else { return nil }
         let subnet = subnetPrefix(ip: wifi.ipAddress)
         let ghzStr = bandLabel(wifi.channelBandGHz)
-        let fp     = "\(gw)|\(wifi.channelNumber)|\(ghzStr)|\(subnet)"
+        let mac    = gatewayMAC?.lowercased() ?? ""
+        let hasMAC = !mac.isEmpty && !mac.hasPrefix("(")
+        let fp     = hasMAC
+            ? "\(gw)|\(wifi.channelNumber)|\(ghzStr)|\(subnet)|\(mac)"
+            : "\(gw)|\(wifi.channelNumber)|\(ghzStr)|\(subnet)"
         let name   = "\(ghzStr) • \(subnet).x"
         return NetworkSessionKey(fingerprint: fp, displayName: name,
-                                 connectionType: .wifi, hasWeakFingerprint: false)
+                                 connectionType: .wifi, hasWeakFingerprint: !hasMAC)
     }
 
     // MARK: - Factory (Ethernet)
